@@ -1,26 +1,26 @@
 <?php
 
-class GeneticAlgorithm {
-    private $classes;           // Array of classes from the 'class' table
-    private $courses;           // Array of courses from the 'course' table
-    private $rooms;             // Array of available rooms from the 'room' table
+class GeneticAlgorithmV2 {
+    private $classes;           // Array of classes from the 'classes' table
+    private $courses;           // Array of courses from the 'courses' table
+    private $rooms;             // Array of available rooms from the 'rooms' table
     private $lecturers;         // Array of lecturers with their constraints
-    private $timeSlots;         // Available time slots (excluding break)
-    private $days;              // Days of the week
+    private $timeSlots;         // Available time slots from the 'time_slots' table
+    private $workingDays;       // Working days from the 'working_days' table
     private $population;        // Current population of timetables
     private $populationSize;    // Size of the population
     private $constraints;       // Constraint definitions
     private $fitnessCache;      // Cache for fitness calculations
+    private $sessionId;         // Current session ID for time slots
 
-    public function __construct($classes, $courses, $rooms, $lecturers = []) {
+    public function __construct($classes, $courses, $rooms, $lecturers, $timeSlots, $workingDays, $sessionId) {
         $this->classes = $classes;
         $this->courses = $courses;
         $this->rooms = $rooms;
         $this->lecturers = $lecturers;
-        
-        // Define available time slots for teaching
-        $this->timeSlots = ['07:00-10:00', '10:00-13:00', '14:00-17:00', '17:00-20:00'];
-        $this->days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+        $this->timeSlots = $timeSlots;
+        $this->workingDays = $workingDays;
+        $this->sessionId = $sessionId;
         
         $this->population = [];
         $this->fitnessCache = [];
@@ -38,16 +38,17 @@ class GeneticAlgorithm {
                 'class_conflict' => ['weight' => 1000, 'description' => 'Class cannot have multiple courses at same time'],
                 'lecturer_conflict' => ['weight' => 1000, 'description' => 'Lecturer cannot teach multiple courses at same time'],
                 'room_conflict' => ['weight' => 1000, 'description' => 'Room cannot be used for multiple courses at same time'],
-                'lecturer_unavailable' => ['weight' => 1000, 'description' => 'Lecturer not available at assigned time'],
                 'room_capacity' => ['weight' => 800, 'description' => 'Room capacity insufficient for class size'],
-                'room_type_mismatch' => ['weight' => 600, 'description' => 'Room type unsuitable for course requirements']
+                'room_type_mismatch' => ['weight' => 600, 'description' => 'Room type unsuitable for course requirements'],
+                'time_slot_invalid' => ['weight' => 1000, 'description' => 'Time slot not available for the session'],
+                'working_day_violation' => ['weight' => 1000, 'description' => 'Course scheduled on non-working day']
             ],
             'soft' => [
                 'daily_overload' => ['weight' => 50, 'description' => 'More than 3 courses per day for a class'],
-                'consecutive_breaks' => ['weight' => 30, 'description' => 'Long gaps between classes for same class'],
+                'lecturer_workload' => ['weight' => 25, 'description' => 'Lecturer has too many courses in one day'],
                 'room_preference' => ['weight' => 20, 'description' => 'Room not preferred for course type'],
                 'time_preference' => ['weight' => 15, 'description' => 'Time slot not preferred for course type'],
-                'lecturer_workload' => ['weight' => 25, 'description' => 'Lecturer has too many courses in one day']
+                'consecutive_breaks' => ['weight' => 30, 'description' => 'Long gaps between classes for same class']
             ]
         ];
     }
@@ -71,7 +72,8 @@ class GeneticAlgorithm {
         
         foreach ($this->classes as $class) {
             foreach ($this->courses as $course) {
-                if ($course['class_id'] == $class['class_id']) {
+                // Check if this course is assigned to this class
+                if ($this->isCourseAssignedToClass($course['id'], $class['id'])) {
                     $assignment = $this->findValidAssignment($course, $class, $usedSlots);
                     if ($assignment) {
                         $timetable[] = $assignment;
@@ -84,6 +86,16 @@ class GeneticAlgorithm {
     }
 
     /**
+     * Check if a course is assigned to a specific class
+     */
+    private function isCourseAssignedToClass($courseId, $classId) {
+        // This would need to check the class_course_assignments table
+        // For now, we'll assume all courses are available to all classes
+        // You can implement proper checking based on your data
+        return true;
+    }
+
+    /**
      * Find a valid assignment for a course that minimizes conflicts
      */
     private function findValidAssignment($course, $class, $usedSlots) {
@@ -92,24 +104,25 @@ class GeneticAlgorithm {
         
         while ($attempts < $maxAttempts) {
             $timeSlot = $this->timeSlots[array_rand($this->timeSlots)];
-            $day = $this->days[array_rand($this->days)];
+            $day = $this->workingDays[array_rand($this->workingDays)];
             $room = $this->rooms[array_rand($this->rooms)];
             
             // Check if this assignment would create immediate conflicts
             if (!$this->hasImmediateConflicts($course, $class, $day, $timeSlot, $room, $usedSlots)) {
                 return [
-                    'class_id' => $class['class_id'],
-                    'class_name' => $class['class_name'],
-                    'course_id' => $course['course_id'],
-                    'course_name' => $course['course_name'],
-                    'lecturer_id' => $course['lecturer_id'],
-                    'lecturer_name' => $course['lecturer_name'],
-                    'time_slot' => $timeSlot,
-                    'day' => $day,
-                    'room_id' => $room['room_id'],
-                    'room_name' => $room['room_name'],
-                    'room_capacity' => $room['capacity'] ?? 30,
-                    'class_size' => $class['class_size'] ?? 25
+                    'class_id' => $class['id'],
+                    'class_name' => $class['name'],
+                    'course_id' => $course['id'],
+                    'course_name' => $course['name'],
+                    'room_id' => $room['id'],
+                    'room_name' => $room['name'],
+                    'time_slot_id' => $timeSlot['id'],
+                    'time_slot' => $timeSlot['start_time'] . '-' . $timeSlot['end_time'],
+                    'day' => $day['day'],
+                    'room_capacity' => $room['capacity'],
+                    'room_type' => $room['room_type'],
+                    'class_size' => $class['student_count'],
+                    'lecturer_ids' => $this->getCourseLecturers($course['id'])
                 ];
             }
             $attempts++;
@@ -117,44 +130,57 @@ class GeneticAlgorithm {
         
         // If no valid assignment found, return a random one (will be penalized by fitness function)
         $timeSlot = $this->timeSlots[array_rand($this->timeSlots)];
-        $day = $this->days[array_rand($this->days)];
+        $day = $this->workingDays[array_rand($this->workingDays)];
         $room = $this->rooms[array_rand($this->rooms)];
         
         return [
-            'class_id' => $class['class_id'],
-            'class_name' => $class['class_name'],
-            'course_id' => $course['course_id'],
-            'course_name' => $course['course_name'],
-            'lecturer_id' => $course['lecturer_id'],
-            'lecturer_name' => $course['lecturer_name'],
-            'time_slot' => $timeSlot,
-            'day' => $day,
-            'room_id' => $room['room_id'],
-            'room_name' => $room['room_name'],
-            'room_capacity' => $room['capacity'] ?? 30,
-            'class_size' => $class['class_size'] ?? 25
+            'class_id' => $class['id'],
+            'class_name' => $class['name'],
+            'course_id' => $course['id'],
+            'course_name' => $course['name'],
+            'room_id' => $room['id'],
+            'room_name' => $room['name'],
+            'time_slot_id' => $timeSlot['id'],
+            'time_slot' => $timeSlot['start_time'] . '-' . $timeSlot['end_time'],
+            'day' => $day['day'],
+            'room_capacity' => $room['capacity'],
+            'room_type' => $room['room_type'],
+            'class_size' => $class['student_count'],
+            'lecturer_ids' => $this->getCourseLecturers($course['id'])
         ];
+    }
+
+    /**
+     * Get lecturer IDs for a course
+     */
+    private function getCourseLecturers($courseId) {
+        // This would query the course_lecturers table
+        // For now, return empty array - implement based on your data
+        return [];
     }
 
     /**
      * Check for immediate conflicts during assignment
      */
     private function hasImmediateConflicts($course, $class, $day, $timeSlot, $room, $usedSlots) {
-        $key = $day . '-' . $timeSlot;
+        $key = $day['day'] . '-' . $timeSlot['id'];
         
         // Check class conflicts
-        if (isset($usedSlots['class'][$class['class_id']][$key])) {
-            return true;
-        }
-        
-        // Check lecturer conflicts
-        if (isset($usedSlots['lecturer'][$course['lecturer_id']][$key])) {
+        if (isset($usedSlots['class'][$class['id']][$key])) {
             return true;
         }
         
         // Check room conflicts
-        if (isset($usedSlots['room'][$room['room_id']][$key])) {
+        if (isset($usedSlots['room'][$room['id']][$key])) {
             return true;
+        }
+        
+        // Check lecturer conflicts (if lecturers are assigned)
+        $lecturerIds = $this->getCourseLecturers($course['id']);
+        foreach ($lecturerIds as $lecturerId) {
+            if (isset($usedSlots['lecturer'][$lecturerId][$key])) {
+                return true;
+            }
         }
         
         return false;
@@ -164,15 +190,19 @@ class GeneticAlgorithm {
      * Mark a slot as used to prevent immediate conflicts
      */
     private function markSlotAsUsed($assignment, &$usedSlots) {
-        $key = $assignment['day'] . '-' . $assignment['time_slot'];
+        $key = $assignment['day'] . '-' . $assignment['time_slot_id'];
         
         if (!isset($usedSlots['class'])) $usedSlots['class'] = [];
-        if (!isset($usedSlots['lecturer'])) $usedSlots['lecturer'] = [];
         if (!isset($usedSlots['room'])) $usedSlots['room'] = [];
+        if (!isset($usedSlots['lecturer'])) $usedSlots['lecturer'] = [];
         
         $usedSlots['class'][$assignment['class_id']][$key] = true;
-        $usedSlots['lecturer'][$assignment['lecturer_id']][$key] = true;
         $usedSlots['room'][$assignment['room_id']][$key] = true;
+        
+        // Mark lecturer slots as used
+        foreach ($assignment['lecturer_ids'] as $lecturerId) {
+            $usedSlots['lecturer'][$lecturerId][$key] = true;
+        }
     }
 
     /**
@@ -198,10 +228,10 @@ class GeneticAlgorithm {
         // Check each assignment for constraint violations
         foreach ($timetable as $entry) {
             $day = $entry['day'];
-            $timeSlot = $entry['time_slot'];
+            $timeSlotId = $entry['time_slot_id'];
             $classId = $entry['class_id'];
-            $lecturerId = $entry['lecturer_id'];
             $roomId = $entry['room_id'];
+            $lecturerIds = $entry['lecturer_ids'];
             
             // Hard constraints
             $this->checkHardConstraints($entry, $schedule, $roomSchedule, $lecturerSchedule, $constraintViolations, $totalPenalty);
@@ -227,37 +257,39 @@ class GeneticAlgorithm {
      */
     private function checkHardConstraints($entry, &$schedule, &$roomSchedule, &$lecturerSchedule, &$constraintViolations, &$totalPenalty) {
         $day = $entry['day'];
-        $timeSlot = $entry['time_slot'];
+        $timeSlotId = $entry['time_slot_id'];
         $classId = $entry['class_id'];
-        $lecturerId = $entry['lecturer_id'];
         $roomId = $entry['room_id'];
+        $lecturerIds = $entry['lecturer_ids'];
         
         // Class conflict check
-        $classKey = $classId . '-' . $day . '-' . $timeSlot;
-            if (isset($schedule[$classKey])) {
+        $classKey = $classId . '-' . $day . '-' . $timeSlotId;
+        if (isset($schedule[$classKey])) {
             $totalPenalty += $this->constraints['hard']['class_conflict']['weight'];
             $constraintViolations[] = $this->constraints['hard']['class_conflict']['description'];
-            } else {
-                $schedule[$classKey] = $entry;
-            }
+        } else {
+            $schedule[$classKey] = $entry;
+        }
+        
+        // Room conflict check
+        $roomKey = $roomId . '-' . $day . '-' . $timeSlotId;
+        if (isset($roomSchedule[$roomKey])) {
+            $totalPenalty += $this->constraints['hard']['room_conflict']['weight'];
+            $constraintViolations[] = $this->constraints['hard']['room_conflict']['description'];
+        } else {
+            $roomSchedule[$roomKey] = $entry;
+        }
         
         // Lecturer conflict check
-        $lecturerKey = $lecturerId . '-' . $day . '-' . $timeSlot;
+        foreach ($lecturerIds as $lecturerId) {
+            $lecturerKey = $lecturerId . '-' . $day . '-' . $timeSlotId;
             if (isset($lecturerSchedule[$lecturerKey])) {
-            $totalPenalty += $this->constraints['hard']['lecturer_conflict']['weight'];
-            $constraintViolations[] = $this->constraints['hard']['lecturer_conflict']['description'];
+                $totalPenalty += $this->constraints['hard']['lecturer_conflict']['weight'];
+                $constraintViolations[] = $this->constraints['hard']['lecturer_conflict']['description'];
             } else {
                 $lecturerSchedule[$lecturerKey] = $entry;
             }
-        
-        // Room conflict check
-        $roomKey = $roomId . '-' . $day . '-' . $timeSlot;
-            if (isset($roomSchedule[$roomKey])) {
-            $totalPenalty += $this->constraints['hard']['room_conflict']['weight'];
-            $constraintViolations[] = $this->constraints['hard']['room_conflict']['description'];
-            } else {
-                $roomSchedule[$roomKey] = $entry;
-            }
+        }
         
         // Room capacity check
         if (isset($entry['room_capacity']) && isset($entry['class_size'])) {
@@ -265,6 +297,32 @@ class GeneticAlgorithm {
                 $totalPenalty += $this->constraints['hard']['room_capacity']['weight'];
                 $constraintViolations[] = $this->constraints['hard']['room_capacity']['description'];
             }
+        }
+        
+        // Working day check
+        $isWorkingDay = false;
+        foreach ($this->workingDays as $workingDay) {
+            if ($workingDay['day'] === $day && $workingDay['is_active']) {
+                $isWorkingDay = true;
+                break;
+            }
+        }
+        if (!$isWorkingDay) {
+            $totalPenalty += $this->constraints['hard']['working_day_violation']['weight'];
+            $constraintViolations[] = $this->constraints['hard']['working_day_violation']['description'];
+        }
+        
+        // Time slot validity check
+        $isValidTimeSlot = false;
+        foreach ($this->timeSlots as $timeSlot) {
+            if ($timeSlot['id'] == $timeSlotId && $timeSlot['session_id'] == $this->sessionId && !$timeSlot['is_break']) {
+                $isValidTimeSlot = true;
+                break;
+            }
+        }
+        if (!$isValidTimeSlot) {
+            $totalPenalty += $this->constraints['hard']['time_slot_invalid']['weight'];
+            $constraintViolations[] = $this->constraints['hard']['time_slot_invalid']['description'];
         }
     }
 
@@ -274,7 +332,7 @@ class GeneticAlgorithm {
     private function trackDailyCounts($entry, &$dailyCount, &$lecturerDailyCount) {
         $day = $entry['day'];
         $classId = $entry['class_id'];
-        $lecturerId = $entry['lecturer_id'];
+        $lecturerIds = $entry['lecturer_ids'];
         
         // Class daily count
         $classDayKey = $classId . '-' . $day;
@@ -284,11 +342,13 @@ class GeneticAlgorithm {
         $dailyCount[$classDayKey]++;
         
         // Lecturer daily count
-        $lecturerDayKey = $lecturerId . '-' . $day;
-        if (!isset($lecturerDailyCount[$lecturerDayKey])) {
-            $lecturerDailyCount[$lecturerDayKey] = 0;
+        foreach ($lecturerIds as $lecturerId) {
+            $lecturerDayKey = $lecturerId . '-' . $day;
+            if (!isset($lecturerDailyCount[$lecturerDayKey])) {
+                $lecturerDailyCount[$lecturerDayKey] = 0;
+            }
+            $lecturerDailyCount[$lecturerDayKey]++;
         }
-        $lecturerDailyCount[$lecturerDayKey]++;
     }
 
     /**
@@ -320,11 +380,11 @@ class GeneticAlgorithm {
     private function selection() {
         // 80% chance of tournament selection, 20% chance of selecting from top 10%
         if (mt_rand() / mt_getrandmax() < 0.8) {
-        $i = rand(0, $this->populationSize - 1);
-        $j = rand(0, $this->populationSize - 1);
-        return ($this->fitness($this->population[$i]) > $this->fitness($this->population[$j]))
-            ? $this->population[$i]
-            : $this->population[$j];
+            $i = rand(0, $this->populationSize - 1);
+            $j = rand(0, $this->populationSize - 1);
+            return ($this->fitness($this->population[$i]) > $this->fitness($this->population[$j]))
+                ? $this->population[$i]
+                : $this->population[$j];
         } else {
             // Select from top 10% of population
             $topCount = max(1, intval($this->populationSize * 0.1));
@@ -373,11 +433,19 @@ class GeneticAlgorithm {
      */
     private function wouldCreateConflicts($entry, $timetable) {
         foreach ($timetable as $existing) {
-            if ($existing['day'] === $entry['day'] && $existing['time_slot'] === $entry['time_slot']) {
+            if ($existing['day'] === $entry['day'] && $existing['time_slot_id'] === $entry['time_slot_id']) {
                 if ($existing['class_id'] === $entry['class_id'] ||
-                    $existing['lecturer_id'] === $entry['lecturer_id'] ||
                     $existing['room_id'] === $entry['room_id']) {
                     return true;
+                }
+                
+                // Check lecturer conflicts
+                foreach ($entry['lecturer_ids'] as $lecturerId) {
+                    foreach ($existing['lecturer_ids'] as $existingLecturerId) {
+                        if ($lecturerId === $existingLecturerId) {
+                            return true;
+                        }
+                    }
                 }
             }
         }
@@ -393,14 +461,15 @@ class GeneticAlgorithm {
         
         while ($attempts < $maxAttempts) {
             $newTimeSlot = $this->timeSlots[array_rand($this->timeSlots)];
-            $newDay = $this->days[array_rand($this->days)];
+            $newDay = $this->workingDays[array_rand($this->workingDays)];
             $newRoom = $this->rooms[array_rand($this->rooms)];
             
             $alternative = $entry;
-            $alternative['time_slot'] = $newTimeSlot;
-            $alternative['day'] = $newDay;
-            $alternative['room_id'] = $newRoom['room_id'];
-            $alternative['room_name'] = $newRoom['room_name'];
+            $alternative['time_slot_id'] = $newTimeSlot['id'];
+            $alternative['time_slot'] = $newTimeSlot['start_time'] . '-' . $newTimeSlot['end_time'];
+            $alternative['day'] = $newDay['day'];
+            $alternative['room_id'] = $newRoom['id'];
+            $alternative['room_name'] = $newRoom['name'];
             
             if (!$this->wouldCreateConflicts($alternative, $timetable)) {
                 return $alternative;
@@ -423,11 +492,15 @@ class GeneticAlgorithm {
                     $entry = $betterAssignment;
                 } else {
                     // Fall back to random mutation
-                $entry['time_slot'] = $this->timeSlots[array_rand($this->timeSlots)];
-                $entry['day'] = $this->days[array_rand($this->days)];
-                $room = $this->rooms[array_rand($this->rooms)];
-                $entry['room_id'] = $room['room_id'];
-                $entry['room_name'] = $room['room_name'];
+                    $newTimeSlot = $this->timeSlots[array_rand($this->timeSlots)];
+                    $newDay = $this->workingDays[array_rand($this->workingDays)];
+                    $newRoom = $this->rooms[array_rand($this->rooms)];
+                    
+                    $entry['time_slot_id'] = $newTimeSlot['id'];
+                    $entry['time_slot'] = $newTimeSlot['start_time'] . '-' . $newTimeSlot['end_time'];
+                    $entry['day'] = $newDay['day'];
+                    $entry['room_id'] = $newRoom['id'];
+                    $entry['room_name'] = $newRoom['name'];
                 }
             }
         }
@@ -442,14 +515,15 @@ class GeneticAlgorithm {
         
         for ($attempt = 0; $attempt < 10; $attempt++) {
             $newTimeSlot = $this->timeSlots[array_rand($this->timeSlots)];
-            $newDay = $this->days[array_rand($this->days)];
+            $newDay = $this->workingDays[array_rand($this->workingDays)];
             $newRoom = $this->rooms[array_rand($this->rooms)];
             
             $newEntry = $entry;
-            $newEntry['time_slot'] = $newTimeSlot;
-            $newEntry['day'] = $newDay;
-            $newEntry['room_id'] = $newRoom['room_id'];
-            $newEntry['room_name'] = $newRoom['room_name'];
+            $newEntry['time_slot_id'] = $newTimeSlot['id'];
+            $newEntry['time_slot'] = $newTimeSlot['start_time'] . '-' . $newTimeSlot['end_time'];
+            $newEntry['day'] = $newDay['day'];
+            $newEntry['room_id'] = $newRoom['id'];
+            $newEntry['room_name'] = $newRoom['name'];
             
             $newConflicts = $this->countConflictsForEntry($newEntry, $timetable);
             
@@ -470,11 +544,19 @@ class GeneticAlgorithm {
         foreach ($timetable as $other) {
             if ($other === $entry) continue;
             
-            if ($other['day'] === $entry['day'] && $other['time_slot'] === $entry['time_slot']) {
+            if ($other['day'] === $entry['day'] && $other['time_slot_id'] === $entry['time_slot_id']) {
                 if ($other['class_id'] === $entry['class_id'] ||
-                    $other['lecturer_id'] === $entry['lecturer_id'] ||
                     $other['room_id'] === $entry['room_id']) {
                     $conflicts++;
+                }
+                
+                // Check lecturer conflicts
+                foreach ($entry['lecturer_ids'] as $lecturerId) {
+                    foreach ($other['lecturer_ids'] as $otherLecturerId) {
+                        if ($lecturerId === $otherLecturerId) {
+                            $conflicts++;
+                        }
+                    }
                 }
             }
         }
@@ -545,3 +627,4 @@ class GeneticAlgorithm {
     }
 }
 ?>
+

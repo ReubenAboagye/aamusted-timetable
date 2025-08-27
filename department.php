@@ -2,7 +2,7 @@
 // Connect to the database and fetch department data
 include 'connect.php';
 
-$sql = "SELECT * FROM department";
+$sql = "SELECT * FROM departments";
 $result = $conn->query($sql);
 ?>
 <!DOCTYPE html>
@@ -10,7 +10,7 @@ $result = $conn->query($sql);
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Departments Management - TimeTable Generator</title>
+  <title>Departments Management - University Timetable Generator</title>
   <!-- Bootstrap CSS -->
   <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.2/css/bootstrap.min.css" rel="stylesheet" />
   <!-- Font Awesome -->
@@ -20,11 +20,11 @@ $result = $conn->query($sql);
   <style>
     :root {
       --primary-color: #800020;   /* AAMUSTED maroon */
-      --hover-color: #600010;       /* Darker maroon */
-      --accent-color: #FFD700;      /* Accent goldenrod */
-      --bg-color: #ffffff;          /* White background */
-      --sidebar-bg: #f8f8f8;         /* Light gray sidebar */
-      --footer-bg: #800020;         /* Footer same as primary */
+      --hover-color: #600010;     /* Darker maroon */
+      --accent-color: #FFD700;    /* Accent goldenrod */
+      --bg-color: #ffffff;        /* White background */
+      --sidebar-bg: #f8f8f8;      /* Light gray sidebar */
+      --footer-bg: #800020;       /* Footer same as primary */
     }
     /* Global Styles */
     body {
@@ -33,8 +33,7 @@ $result = $conn->query($sql);
       margin: 0;
       padding-top: 70px; /* For fixed header */
       overflow: auto;
-      font-size: 14px; /* <--- Added this line to match smaller font style */
-
+      font-size: 14px;
     }
     /* Header */
     .navbar {
@@ -51,12 +50,10 @@ $result = $conn->query($sql);
       display: flex;
       align-items: center;
     }
-    /* Uncomment the next block to add a logo image if desired
     .navbar-brand img {
       height: 40px;
       margin-right: 10px;
     }
-    */
     #sidebarToggle {
       border: none;
       background: transparent;
@@ -64,7 +61,7 @@ $result = $conn->query($sql);
       font-size: 1.5rem;
       margin-right: 10px;
     }
-    /* Sidebar – Dashboard Style */
+    /* Sidebar */
     .sidebar {
       background-color: var(--sidebar-bg);
       position: fixed;
@@ -76,6 +73,8 @@ $result = $conn->query($sql);
       box-shadow: 2px 0 5px rgba(0,0,0,0.1);
       transition: transform 0.3s ease;
       transform: translateX(-100%);
+      z-index: 1040; /* Higher than footer, lower than navbar */
+      overflow-y: auto; /* Scrollable if content is too long */
     }
     .sidebar.show {
       transform: translateX(0);
@@ -84,6 +83,7 @@ $result = $conn->query($sql);
       display: flex;
       flex-direction: column;
       gap: 5px;
+      padding-bottom: 20px; /* Add bottom padding to prevent overlap with footer */
     }
     .nav-links a {
       display: block;
@@ -139,6 +139,7 @@ $result = $conn->query($sql);
       left: 0;
       right: 0;
       transition: left 0.3s ease;
+      z-index: 1030; /* Lower than sidebar */
     }
     .footer.shift {
       left: 250px;
@@ -192,33 +193,8 @@ $result = $conn->query($sql);
     }
   </style>
 </head>
-<body>
-  <!-- Header -->
-  <nav class="navbar navbar-dark">
-    <div class="container-fluid">
-      <button id="sidebarToggle"><i class="fas fa-bars"></i></button>
-      <span class="navbar-brand mb-0 h1">Departments Management</span>
-      <div class="ms-auto text-white" id="currentTime">12:00:00 PM</div>
-    </div>
-  </nav>
-  
-  <!-- Sidebar -->
-  <?php $currentPage = basename($_SERVER['PHP_SELF']); ?>
-  <div class="sidebar" id="sidebar">
-    <div class="nav-links">
-      <a href="index.php" class="<?= ($currentPage == 'index.php') ? 'active' : '' ?>"><i class="fas fa-home me-2"></i>Dashboard</a>
-      <a href="timetable.php" class="<?= ($currentPage == 'timetable.php') ? 'active' : '' ?>"><i class="fas fa-calendar-alt me-2"></i>Generate Timetable</a>
-      <a href="view_timetable.php" class="<?= ($currentPage == 'view_timetable.php') ? 'active' : '' ?>"><i class="fas fa-table me-2"></i>View Timetable</a>
-      <a href="department.php" class="<?= ($currentPage == 'department.php') ? 'active' : '' ?>"><i class="fas fa-building me-2"></i>Department</a>
-      <a href="lecturer.php" class="<?= ($currentPage == 'lecturer.php') ? 'active' : '' ?>"><i class="fas fa-chalkboard-teacher me-2"></i>Lecturers</a>
-      <a href="rooms.php" class="<?= ($currentPage == 'rooms.php') ? 'active' : '' ?>"><i class="fas fa-door-open me-2"></i>Rooms</a>
-      <a href="courses.php" class="<?= ($currentPage == 'courses.php') ? 'active' : '' ?>"><i class="fas fa-book me-2"></i>Course</a>
-      <a href="classes.php" class="<?= ($currentPage == 'classes.php') ? 'active' : '' ?>"><i class="fas fa-users me-2"></i>Classes</a>
-      <a href="buildings.php" class="<?= ($currentPage == 'buildings.php') ? 'active' : '' ?>"><i class="fas fa-city me-2"></i>Buildings</a>
-    </div>
-  </div>
-  
-  <!-- Main Content -->
+<?php $pageTitle = 'Departments Management'; include 'includes/header.php'; include 'includes/sidebar.php'; ?>
+
   <div class="main-content" id="mainContent">
     <h2>Departments Management</h2>
     <!-- Search & Action Buttons -->
@@ -234,13 +210,23 @@ $result = $conn->query($sql);
     </div>
     
     <!-- Departments Table -->
-    <div class="table-responsive">
-      <table class="table table-striped table-custom" id="departmentsTable">
+    <div class="table-container">
+      <div class="table-header">
+        <h4><i class="fas fa-building me-2"></i>Existing Departments</h4>
+      </div>
+      <div class="search-container">
+        <input type="text" id="searchInput" class="search-input" placeholder="Search departments...">
+      </div>
+      <div class="table-responsive">
+        <table class="table" id="departmentsTable">
         <thead>
           <tr>
             <th>Department ID</th>
             <th>Department Name</th>
+            <th>Department Code</th>
             <th>Department Short Name</th>
+            <th>Head of Department</th>
+            <th>Status</th>
             <th>Actions</th>
           </tr>
         </thead>
@@ -248,29 +234,34 @@ $result = $conn->query($sql);
           <?php
           if ($result) {
               while ($row = $result->fetch_assoc()) {
+                  $status = $row['is_active'] ? '<span class="badge bg-success">Active</span>' : '<span class="badge bg-danger">Inactive</span>';
                   echo "<tr>
-                          <td>{$row['department_id']}</td>
-                          <td>{$row['department_name']}</td>
-                          <td>{$row['department_short_name']}</td>
+                          <td>{$row['id']}</td>
+                          <td>{$row['name']}</td>
+                          <td>{$row['code']}</td>
+                          <td>{$row['short_name']}</td>
+                          <td>{$row['head_of_department']}</td>
+                          <td>{$status}</td>
                           <td>
-                              <a href='delete_department.php?department_id={$row['department_id']}' class='btn btn-danger btn-sm' onclick='return confirm(\"Are you sure you want to delete this department?\")'>Delete</a>
+                              <a href='delete_department.php?department_id={$row['id']}' class='btn btn-danger btn-sm' onclick='return confirm(\"Are you sure you want to delete this department?\")'>Delete</a>
                           </td>
                         </tr>";
               }
           } else {
-              echo "<tr><td colspan='4' class='text-center'>No departments found</td></tr>";
+              echo "<tr><td colspan='7' class='text-center'>No departments found</td></tr>";
           }
           $conn->close();
           ?>
         </tbody>
       </table>
-    </div>
-  </div>
+        </div>
+        <div class="mt-3">
   
-  <!-- Footer -->
-  <div class="footer" id="footer">
-    &copy; 2025 TimeTable Generator
-  </div>
+        </div>
+      </div>
+    </div>
+    
+<?php include 'includes/footer.php'; ?>
   
   <!-- Import Modal (Excel Files Only) -->
   <div class="modal fade" id="importModal" tabindex="-1" aria-labelledby="importModalLabel" aria-hidden="true">
@@ -298,35 +289,55 @@ $result = $conn->query($sql);
     <div class="modal-dialog">
       <div class="modal-content">
         <div class="modal-header">
-          <h5 class="modal-title" id="dataEntryModalLabel">Enter Department Details</h5>
+          <h5 class="modal-title" id="dataEntryModalLabel">Add New Department</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body">
-          <form action="adddepartmentform.php" method="POST">
+          <form action="department.php" method="POST">
             <div class="mb-3">
-              <label for="departmentId" class="form-label">Department ID</label>
-              <input type="text" class="form-control" id="departmentId" name="departmentId" placeholder="Enter Department ID" required>
+              <label for="departmentName" class="form-label">Department Name *</label>
+              <input type="text" class="form-control" id="departmentName" name="departmentName" required>
             </div>
             <div class="mb-3">
-              <label for="departmentName" class="form-label">Department Name</label>
-              <input type="text" class="form-control" id="departmentName" name="departmentName" placeholder="Enter Department Name" required>
+              <label for="departmentCode" class="form-label">Department Code *</label>
+              <input type="text" class="form-control" id="departmentCode" name="departmentCode" required maxlength="20">
+              <small class="form-text text-muted">Unique code for the department (max 20 characters)</small>
             </div>
             <div class="mb-3">
               <label for="departmentShortName" class="form-label">Department Short Name</label>
-              <input type="text" class="form-control" id="departmentShortName" name="departmentShortName" placeholder="Enter Department Short Name" required>
+              <input type="text" class="form-control" id="departmentShortName" name="departmentShortName" maxlength="10">
+              <small class="form-text text-muted">Abbreviated name (max 10 characters)</small>
             </div>
-            <div class="modal-footer">
-              <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-              <button type="submit" class="btn btn-primary">Save changes</button>
+            <div class="mb-3">
+              <label for="headOfDepartment" class="form-label">Head of Department</label>
+              <input type="text" class="form-control" id="headOfDepartment" name="headOfDepartment" maxlength="100">
             </div>
+            <div class="mb-3">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="isActive" name="isActive" checked>
+                <label class="form-check-label" for="isActive">
+                  Department is Active
+                </label>
+              </div>
+            </div>
+            <button type="submit" class="btn btn-primary">Add Department</button>
           </form>
         </div>
       </div>
     </div>
   </div>
   
-  <!-- Bootstrap Bundle with Popper JS -->
+  <!-- Back to Top Button -->
+  <button id="backToTop">
+    <svg width="50" height="50" viewBox="0 0 50 50">
+      <circle id="progressCircle" cx="25" cy="25" r="20" fill="none" stroke="#FFD700" stroke-width="4" stroke-dasharray="126" stroke-dashoffset="126"/>
+    </svg>
+    <i class="fas fa-arrow-up arrow-icon"></i>
+  </button>
+  
+  <!-- Bootstrap Bundle with Popper -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.2/js/bootstrap.bundle.min.js"></script>
+  
   <script>
     // Update current time in header
     function updateTime() {
@@ -356,7 +367,7 @@ $result = $conn->query($sql);
         footer.classList.remove('shift');
       }
     });
-  
+    
     // Search functionality for departments table
     document.getElementById('searchInput').addEventListener('keyup', function() {
       let searchValue = this.value.toLowerCase();
@@ -373,59 +384,40 @@ $result = $conn->query($sql);
           row.style.display = matchFound ? '' : 'none';
       });
     });
-  </script>
-  
-  <!-- Back to Top Button with Progress Indicator -->
-  <button id="backToTop">
-    <svg width="50" height="50" viewBox="0 0 50 50">
-      <circle id="progressCircle" cx="25" cy="25" r="20" fill="none" stroke="#FFD700" stroke-width="4" stroke-dasharray="126" stroke-dashoffset="126"/>
-    </svg>
-    <i class="fas fa-arrow-up arrow-icon"></i>
-  </button>
-  
-  <style>
-    /* Back to Top Button Additional Styling */
-    #backToTop {
-      position: fixed;
-      bottom: 30px;
-      right: 30px;
-      z-index: 9999;
-      display: none; /* Hidden by default */
-      background: rgba(128, 0, 32, 0.7); /* AAMUSTED maroon with transparency */
-      border: none;
-      outline: none;
-      width: 50px;
-      height: 50px;
-      border-radius: 50%;
-      cursor: pointer;
-      transition: background 0.3s ease, transform 0.3s ease;
-      padding: 0;
-      overflow: hidden;
-    }
-    /* Ensure the SVG fills the button */
-    #backToTop svg {
-      display: block;
-      width: 100%;
-      height: 100%;
-    }
-    /* Arrow Icon styling: Center it within the button */
-    #backToTop .arrow-icon {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      color: #FFD700;
-      font-size: 1.5rem;
-      pointer-events: none;
-    }
-    /* Hover state */
-    #backToTop:hover {
-      background: rgba(96, 0, 16, 0.9);
-      transform: scale(1.1);
-    }
-  </style>
-  
-  <script>
+    
+    // Add form submission handler for the data entry modal
+    document.querySelector('#dataEntryModal form').addEventListener('submit', function(e) {
+      e.preventDefault();
+      
+      // Get form data
+      const formData = new FormData(this);
+      formData.append('action', 'add');
+      
+      // Handle checkbox value for isActive
+      const isActiveCheckbox = document.getElementById('isActive');
+      formData.set('isActive', isActiveCheckbox.checked ? '1' : '0');
+      
+      // Submit form data to adddepartmentform.php for processing
+      fetch('adddepartmentform.php', {
+        method: 'POST',
+        body: formData
+      })
+      .then(response => response.text())
+      .then(data => {
+        // Close modal
+        const modal = bootstrap.Modal.getInstance(document.getElementById('dataEntryModal'));
+        modal.hide();
+        
+        // Show success message and reload page
+        alert('Department added successfully!');
+        window.location.reload();
+      })
+      .catch(error => {
+        console.error('Error:', error);
+        alert('Error adding department. Please try again.');
+      });
+    });
+    
     // Back to Top Button Setup
     const backToTopButton = document.getElementById("backToTop");
     const progressCircle = document.getElementById("progressCircle");
@@ -451,6 +443,5 @@ $result = $conn->query($sql);
       window.scrollTo({ top: 0, behavior: "smooth" });
     });
   </script>
-  
 </body>
 </html>

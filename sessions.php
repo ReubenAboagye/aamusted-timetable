@@ -1,12 +1,8 @@
 <?php
-// Connect to the database and fetch classes data
+// Connect to the database and fetch sessions data
 include 'connect.php';
 
-$sql = "SELECT c.*, d.name as department_name, 
-        CONCAT(s.academic_year, ' - Semester ', s.semester) as session_name 
-        FROM classes c 
-        LEFT JOIN departments d ON c.department_id = d.id 
-        LEFT JOIN sessions s ON c.session_id = s.id";
+$sql = "SELECT * FROM sessions";
 $result = $conn->query($sql);
 ?>
 <!DOCTYPE html>
@@ -14,7 +10,7 @@ $result = $conn->query($sql);
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Classes Management - University Timetable Generator</title>
+  <title>Sessions Management - University Timetable Generator</title>
   <!-- Bootstrap CSS -->
   <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.2/css/bootstrap.min.css" rel="stylesheet" />
   <!-- Font Awesome -->
@@ -197,15 +193,15 @@ $result = $conn->query($sql);
     }
   </style>
 </head>
-<?php $pageTitle = 'Classes Management'; include 'includes/header.php'; include 'includes/sidebar.php'; ?>
+<?php $pageTitle = 'Sessions Management'; include 'includes/header.php'; include 'includes/sidebar.php'; ?>
 
   <div class="main-content" id="mainContent">
-    <h2>Classes Management</h2>
+    <h2>Sessions Management</h2>
     <!-- Search & Action Buttons -->
     <div class="d-flex justify-content-between align-items-center mb-4">
       <div class="input-group" style="width: 300px;">
         <span class="input-group-text"><i class="fas fa-search"></i></span>
-        <input type="text" class="form-control" id="searchInput" placeholder="Search for classes...">
+        <input type="text" class="form-control" id="searchInput" placeholder="Search for sessions...">
       </div>
       <div>
         <button class="btn btn-primary me-2" data-bs-toggle="modal" data-bs-target="#importModal">Import</button>
@@ -213,29 +209,24 @@ $result = $conn->query($sql);
       </div>
     </div>
     
-    <!-- Classes Table -->
+    <!-- Sessions Table -->
     <div class="table-container">
       <div class="table-header">
-        <h4><i class="fas fa-users me-2"></i>Existing Classes</h4>
+        <h4><i class="fas fa-calendar-alt me-2"></i>Existing Sessions</h4>
       </div>
       <div class="search-container">
-        <input type="text" id="searchInput" class="search-input" placeholder="Search classes...">
+        <input type="text" id="searchInput" class="search-input" placeholder="Search sessions...">
       </div>
       <div class="table-responsive">
-        <table class="table" id="classesTable">
+        <table class="table" id="sessionsTable">
         <thead>
           <tr>
-            <th>Class ID</th>
-            <th>Class Name</th>
-            <th>Department</th>
-            <th>Level</th>
-            <th>Session</th>
-            <th>Capacity</th>
-            <th>Current Enrollment</th>
-            <th>Max Daily Courses</th>
-            <th>Max Weekly Hours</th>
-            <th>Preferred Start Time</th>
-            <th>Preferred End Time</th>
+            <th>Session ID</th>
+            <th>Academic Year</th>
+            <th>Semester</th>
+            <th>Semester Name</th>
+            <th>Start Date</th>
+            <th>End Date</th>
             <th>Status</th>
             <th>Actions</th>
           </tr>
@@ -245,26 +236,22 @@ $result = $conn->query($sql);
           if ($result) {
               while ($row = $result->fetch_assoc()) {
                   $status = $row['is_active'] ? '<span class="badge bg-success">Active</span>' : '<span class="badge bg-secondary">Inactive</span>';
-                  echo "<tr>
-                          <td>{$row['id']}</td>
-                          <td>{$row['name']}</td>
-                          <td>{$row['department_name']}</td>
-                          <td>{$row['level']}</td>
-                          <td>{$row['session_name']}</td>
-                          <td>{$row['capacity']}</td>
-                          <td>{$row['current_enrollment']}</td>
-                          <td>{$row['max_daily_courses']}</td>
-                          <td>{$row['max_weekly_hours']}</td>
-                          <td>{$row['preferred_start_time']}</td>
-                          <td>{$row['preferred_end_time']}</td>
-                          <td>{$status}</td>
-                          <td>
-                              <a href='delete_class.php?class_id={$row['id']}' class='btn btn-danger btn-sm' onclick='return confirm(\"Are you sure you want to delete this class?\")'>Delete</a>
-                          </td>
-                        </tr>";
+                  echo "<tr>";
+                  echo "<td>{$row['id']}</td>";
+                  echo "<td>{$row['academic_year']}</td>";
+                  echo "<td>Semester {$row['semester_number']}</td>";
+                  echo "<td>{$row['semester_name']}</td>";
+                  echo "<td>" . ($row['start_date'] ? date('M d, Y', strtotime($row['start_date'])) : 'Not set') . "</td>";
+                  echo "<td>" . ($row['end_date'] ? date('M d, Y', strtotime($row['end_date'])) : 'Not set') . "</td>";
+                  echo "<td>{$status}</td>";
+                  echo "<td>";
+                  echo "<button type='button' class='btn btn-secondary btn-sm me-1 edit-session-btn' data-id='" . $row['id'] . "' data-academic-year='" . htmlspecialchars($row['academic_year'], ENT_QUOTES) . "' data-semester='" . htmlspecialchars($row['semester_number'], ENT_QUOTES) . "' data-semester-name='" . htmlspecialchars($row['semester_name'], ENT_QUOTES) . "' data-start-date='" . $row['start_date'] . "' data-end-date='" . $row['end_date'] . "'>Edit</button>";
+                  echo "<a href='delete_session.php?session_id={$row['id']}' class='btn btn-danger btn-sm' onclick='return confirm(\"Are you sure you want to delete this session?\")'>Delete</a>";
+                  echo "</td>";
+                  echo "</tr>";
               }
           } else {
-              echo "<tr><td colspan='13' class='text-center'>No classes found</td></tr>";
+              echo "<tr><td colspan='8' class='text-center'>No sessions found</td></tr>";
           }
           $conn->close();
           ?>
@@ -277,18 +264,21 @@ $result = $conn->query($sql);
     </div>
   </div>
   
-<?php include 'includes/footer.php'; ?>
-
+  <!-- Footer -->
+  <div class="footer" id="footer">
+    &copy; 2025 University Timetable Generator
+  </div>
+  
   <!-- Import Modal (Excel Files Only) -->
   <div class="modal fade" id="importModal" tabindex="-1" aria-labelledby="importModalLabel" aria-hidden="true">
     <div class="modal-dialog">
       <div class="modal-content">
         <div class="modal-header">
-          <h5 class="modal-title" id="importModalLabel">Import Classes</h5>
+          <h5 class="modal-title" id="importModalLabel">Import Sessions</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body">
-          <form action="import_class.php" method="POST" enctype="multipart/form-data">
+          <form action="import_session.php" method="POST" enctype="multipart/form-data">
             <div class="mb-3">
               <label for="file" class="form-label">Choose Excel File</label>
               <input type="file" class="form-control" id="file" name="file" required accept=".xls, .xlsx">
@@ -303,97 +293,101 @@ $result = $conn->query($sql);
   <!-- Data Entry Modal -->
   <div class="modal fade" id="dataEntryModal" tabindex="-1" aria-labelledby="dataEntryModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h5 class="modal-title" id="dataEntryModalLabel">Add New Class</h5>
+      <div class="modal-content p-2">
+        <div class="modal-header py-1">
+          <h5 class="modal-title fs-6" id="dataEntryModalLabel">Add New Session</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
-        <div class="modal-body">
-          <form action="classes.php" method="POST">
-            <div class="row">
-              <div class="col-md-6">
-                <div class="mb-3">
-                  <label for="className" class="form-label">Class Name</label>
-                  <input type="text" class="form-control" id="className" name="className" placeholder="e.g., L100 A" required>
-                </div>
-                <div class="mb-3">
-                  <label for="departmentId" class="form-label">Department</label>
-                  <select class="form-control" id="departmentId" name="departmentId" required>
-                    <option value="">Select Department</option>
-                    <?php
-                    include 'connect.php';
-                    $deptSql = "SELECT id, name FROM departments WHERE is_active = 1";
-                    $deptResult = $conn->query($deptSql);
-                    if ($deptResult) {
-                        while ($dept = $deptResult->fetch_assoc()) {
-                            echo "<option value='{$dept['id']}'>{$dept['name']}</option>";
-                        }
-                    }
-                    ?>
-                  </select>
-                </div>
-                <div class="mb-3">
-                  <label for="level" class="form-label">Level</label>
-                  <input type="text" class="form-control" id="level" name="level" placeholder="e.g., Year 1" required>
-                </div>
-                <div class="mb-3">
-                  <label for="sessionId" class="form-label">Session</label>
-                  <select class="form-control" id="sessionId" name="sessionId" required>
-                    <option value="">Select Session</option>
-                    <?php
-                    $sessionSql = "SELECT id, CONCAT(academic_year, ' - Semester ', semester) as name FROM sessions WHERE is_active = 1";
-                    $sessionResult = $conn->query($sessionSql);
-                    if ($sessionResult) {
-                        while ($session = $sessionResult->fetch_assoc()) {
-                            echo "<option value='{$session['id']}'>{$session['name']}</option>";
-                        }
-                    }
-                    ?>
-                  </select>
-                </div>
-              </div>
-              <div class="col-md-6">
-                <div class="mb-3">
-                  <label for="capacity" class="form-label">Capacity</label>
-                  <input type="number" class="form-control" id="capacity" name="capacity" value="30" min="1" required>
-                </div>
-                <div class="mb-3">
-                  <label for="currentEnrollment" class="form-label">Current Enrollment</label>
-                  <input type="number" class="form-control" id="currentEnrollment" name="currentEnrollment" value="0" min="0" required>
-                </div>
-                <div class="mb-3">
-                  <label for="maxDailyCourses" class="form-label">Max Daily Courses</label>
-                  <input type="number" class="form-control" id="maxDailyCourses" name="maxDailyCourses" value="3" min="1" max="8" required>
-                </div>
-                <div class="mb-3">
-                  <label for="maxWeeklyHours" class="form-label">Max Weekly Hours</label>
-                  <input type="number" class="form-control" id="maxWeeklyHours" name="maxWeeklyHours" value="25" min="1" max="40" required>
-                </div>
-                <div class="mb-3">
-                  <label for="preferredStartTime" class="form-label">Preferred Start Time</label>
-                  <input type="time" class="form-control" id="preferredStartTime" name="preferredStartTime" value="08:00" required>
-                </div>
-                <div class="mb-3">
-                  <label for="preferredEndTime" class="form-label">Preferred End Time</label>
-                  <input type="time" class="form-control" id="preferredEndTime" name="preferredEndTime" value="17:00" required>
-                </div>
-              </div>
-
+        <div class="modal-body py-2">
+          <form action="addsessionform.php" method="POST" class="row g-2">
+            <div class="col-6">
+              <label for="academicYear" class="form-label">Academic Year</label>
+              <input type="text" class="form-control form-control-sm" id="academicYear" name="academicYear" placeholder="e.g., 2024/2025" required>
             </div>
-            <div class="mb-3">
+            <div class="col-6">
+              <label for="semester" class="form-label">Semester</label>
+              <select class="form-select form-select-sm" id="semester" name="semester" required>
+                <option value="">Select Semester</option>
+                <option value="1">First Semester</option>
+                <option value="2">Second Semester</option>
+                <option value="3">Third Semester</option>
+              </select>
+            </div>
+            <div class="col-12">
+              <label for="semester_name" class="form-label">Semester Name</label>
+              <input type="text" class="form-control form-control-sm" id="semester_name" name="semester_name" placeholder="e.g., First Semester 2024/2025" required>
+            </div>
+            <div class="col-6">
+              <label for="startDate" class="form-label">Start Date</label>
+              <input type="date" class="form-control form-control-sm" id="startDate" name="startDate">
+            </div>
+            <div class="col-6">
+              <label for="endDate" class="form-label">End Date</label>
+              <input type="date" class="form-control form-control-sm" id="endDate" name="endDate">
+            </div>
+            <div class="col-12">
               <div class="form-check">
                 <input class="form-check-input" type="checkbox" id="isActive" name="isActive" checked>
                 <label class="form-check-label" for="isActive">
-                  Class is Active
+                  Session is Active
                 </label>
               </div>
             </div>
-            <button type="submit" class="btn btn-primary">Add Class</button>
+            <div class="col-12 text-end">
+              <button type="submit" class="btn btn-primary btn-sm">Add Session</button>
+            </div>
           </form>
         </div>
       </div>
     </div>
   </div>
+  
+  <!-- Edit Data Modal -->
+  <div class="modal fade" id="editDataModal" tabindex="-1" aria-labelledby="editDataModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content p-2">
+        <div class="modal-header py-1">
+          <h5 class="modal-title fs-6" id="editDataModalLabel">Edit Session</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body py-2">
+          <form id="editSessionForm" action="update_session.php" method="POST" class="row g-2">
+            <input type="hidden" name="action" value="update">
+            <input type="hidden" id="edit_session_id" name="session_id">
+            <div class="col-6">
+              <label for="edit_academicYear" class="form-label">Academic Year</label>
+              <input type="text" class="form-control form-control-sm" id="edit_academicYear" name="academicYear" placeholder="e.g., 2024/2025" required>
+            </div>
+            <div class="col-6">
+              <label for="edit_semester" class="form-label">Semester</label>
+              <select class="form-select form-select-sm" id="edit_semester" name="semester" required>
+                <option value="">Select Semester</option>
+                <option value="1">First Semester</option>
+                <option value="2">Second Semester</option>
+                <option value="3">Third Semester</option>
+              </select>
+            </div>
+            <div class="col-12">
+              <label for="edit_semester_name" class="form-label">Semester Name</label>
+              <input type="text" class="form-control form-control-sm" id="edit_semester_name" name="semester_name" placeholder="e.g., First Semester 2024/2025" required>
+            </div>
+            <div class="col-6">
+              <label for="edit_startDate" class="form-label">Start Date</label>
+              <input type="date" class="form-control form-control-sm" id="edit_startDate" name="startDate">
+            </div>
+            <div class="col-6">
+              <label for="edit_endDate" class="form-label">End Date</label>
+              <input type="date" class="form-control form-control-sm" id="edit_endDate" name="endDate">
+            </div>
+            <div class="col-12 text-end">
+              <button type="submit" class="btn btn-primary btn-sm">Save Changes</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
   
   <!-- Back to Top Button -->
   <button id="backToTop">
@@ -436,10 +430,10 @@ $result = $conn->query($sql);
       }
     });
     
-    // Search functionality for classes table
+    // Search functionality for sessions table
     document.getElementById('searchInput').addEventListener('keyup', function() {
       let searchValue = this.value.toLowerCase();
-      let rows = document.querySelectorAll('#classesTable tbody tr');
+      let rows = document.querySelectorAll('#sessionsTable tbody tr');
       rows.forEach(row => {
           let cells = row.querySelectorAll('td');
           let matchFound = false;
@@ -453,32 +447,36 @@ $result = $conn->query($sql);
       });
     });
     
-    // Add form submission handler for the data entry modal
+        // Add form submission handler for the data entry modal
     document.querySelector('#dataEntryModal form').addEventListener('submit', function(e) {
       e.preventDefault();
       
       // Get form data
-      const formData = new FormData(this);
-      formData.append('action', 'add');
-      
-      // Submit form data to addclassform.php for processing
-      fetch('addclassform.php', {
+      const form = this;
+      const formData = new FormData(form);
+
+      // Submit form data to addsessionform.php for processing
+      fetch('addsessionform.php', {
         method: 'POST',
         body: formData
       })
-      .then(response => response.text())
+      .then(response => response.json())
       .then(data => {
-        // Close modal
-        const modal = bootstrap.Modal.getInstance(document.getElementById('dataEntryModal'));
-        modal.hide();
-        
-        // Show success message and reload page
-        alert('Class added successfully!');
-        window.location.reload();
+        if (data.success) {
+          // Close modal
+          const modal = bootstrap.Modal.getInstance(document.getElementById('dataEntryModal'));
+          modal.hide();
+
+          // Show success message and reload page
+          alert(data.message);
+          window.location.reload();
+        } else {
+          alert(data.message);
+        }
       })
       .catch(error => {
         console.error('Error:', error);
-        alert('Error adding class. Please try again.');
+        alert('Error adding session. Please try again.');
       });
     });
     
@@ -505,6 +503,30 @@ $result = $conn->query($sql);
     
     backToTopButton.addEventListener("click", function() {
       window.scrollTo({ top: 0, behavior: "smooth" });
+    });
+
+    // Edit button handler: populate edit modal and show
+    document.addEventListener('click', function(e) {
+      if (e.target && e.target.classList.contains('edit-session-btn')) {
+        const btn = e.target;
+        const id = btn.getAttribute('data-id');
+        const academicYear = btn.getAttribute('data-academic-year');
+        const semester = btn.getAttribute('data-semester');
+        const semesterName = btn.getAttribute('data-semester-name');
+        const startDate = btn.getAttribute('data-start-date');
+        const endDate = btn.getAttribute('data-end-date');
+
+        document.getElementById('edit_session_id').value = id;
+        document.getElementById('edit_academicYear').value = academicYear;
+        document.getElementById('edit_semester').value = semester;
+        document.getElementById('edit_semester_name').value = semesterName;
+        document.getElementById('edit_startDate').value = startDate;
+        document.getElementById('edit_endDate').value = endDate;
+
+        const modalEl = document.getElementById('editDataModal');
+        const modal = new bootstrap.Modal(modalEl);
+        modal.show();
+      }
     });
   </script>
 </body>

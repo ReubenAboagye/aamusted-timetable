@@ -1,444 +1,488 @@
 <?php
-// Connect to the database and fetch room data
 include 'connect.php';
 
-$sql = "SELECT * FROM room";
+// Handle form submissions
+if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+    if (isset($_POST['action'])) {
+        switch ($_POST['action']) {
+            case 'add':
+                $name = $_POST['name'];
+                $building = $_POST['building'];
+                $roomType = $_POST['roomType'];
+                $capacity = $_POST['capacity'];
+                $sessionAvailability = isset($_POST['sessionAvailability']) ? json_encode($_POST['sessionAvailability']) : '[]';
+                $facilities = isset($_POST['facilities']) ? json_encode($_POST['facilities']) : '[]';
+                $accessibilityFeatures = isset($_POST['accessibilityFeatures']) ? json_encode($_POST['accessibilityFeatures']) : '[]';
+
+                // Check if room already exists
+                $checkSql = "SELECT id FROM rooms WHERE name = ? AND building = ?";
+                $checkStmt = $conn->prepare($checkSql);
+                $checkStmt->bind_param("ss", $name, $building);
+                $checkStmt->execute();
+                $result = $checkStmt->get_result();
+                
+                if ($result->num_rows > 0) {
+                    echo "<script>alert('Room already exists in this building!');</script>";
+                } else {
+                    $sql = "INSERT INTO rooms (name, building, room_type, capacity, session_availability, facilities, accessibility_features) VALUES (?, ?, ?, ?, ?, ?, ?)";
+                    $stmt = $conn->prepare($sql);
+                    if ($stmt) {
+                        $stmt->bind_param("sssisss", $name, $building, $roomType, $capacity, $sessionAvailability, $facilities, $accessibilityFeatures);
+                        if ($stmt->execute()) {
+                            echo "<script>alert('Room added successfully!'); window.location.href='rooms.php';</script>";
+                        } else {
+                            echo "Error: " . $stmt->error;
+                        }
+                        $stmt->close();
+                    }
+                }
+                $checkStmt->close();
+                break;
+
+            case 'update':
+                $id = $_POST['id'];
+                $name = $_POST['name'];
+                $building = $_POST['building'];
+                $roomType = $_POST['roomType'];
+                $capacity = $_POST['capacity'];
+                $sessionAvailability = isset($_POST['sessionAvailability']) ? json_encode($_POST['sessionAvailability']) : '[]';
+                $facilities = isset($_POST['facilities']) ? json_encode($_POST['facilities']) : '[]';
+                $accessibilityFeatures = isset($_POST['accessibilityFeatures']) ? json_encode($_POST['accessibilityFeatures']) : '[]';
+
+                // Check if room already exists for other rooms
+                $checkSql = "SELECT id FROM rooms WHERE name = ? AND building = ? AND id != ?";
+                $checkStmt = $conn->prepare($checkSql);
+                $checkStmt->bind_param("ssi", $name, $building, $id);
+                $checkStmt->execute();
+                $result = $checkStmt->get_result();
+                
+                if ($result->num_rows > 0) {
+                    echo "<script>alert('Room already exists in this building!');</script>";
+                } else {
+                    $sql = "UPDATE rooms SET name = ?, building = ?, room_type = ?, capacity = ?, session_availability = ?, facilities = ?, accessibility_features = ? WHERE id = ?";
+                    $stmt = $conn->prepare($sql);
+                    if ($stmt) {
+                        $stmt->bind_param("sssisssi", $name, $building, $roomType, $capacity, $sessionAvailability, $facilities, $accessibilityFeatures, $id);
+                        if ($stmt->execute()) {
+                            echo "<script>alert('Room updated successfully!'); window.location.href='rooms.php';</script>";
+                        } else {
+                            echo "Error: " . $stmt->error;
+                        }
+                        $stmt->close();
+                    }
+                }
+                $checkStmt->close();
+                break;
+
+            case 'delete':
+                $id = $_POST['id'];
+                
+                // Check if room has dependent records
+                $checkSql = "SELECT 
+                    (SELECT COUNT(*) FROM timetable WHERE room_id = ?) as timetable_count";
+                $checkStmt = $conn->prepare($checkSql);
+                $checkStmt->bind_param("i", $id);
+                $checkStmt->execute();
+                $result = $checkStmt->get_result();
+                $dependencies = $result->fetch_assoc();
+                $checkStmt->close();
+                
+                if ($dependencies['timetable_count'] > 0) {
+                    echo "<script>alert('Cannot delete room: It has dependent timetables. Consider deactivating instead.');</script>";
+                } else {
+                    $sql = "DELETE FROM rooms WHERE id = ?";
+                    $stmt = $conn->prepare($sql);
+                    if ($stmt) {
+                        $stmt->bind_param("i", $id);
+                        if ($stmt->execute()) {
+                            echo "<script>alert('Room deleted successfully!'); window.location.href='rooms.php';</script>";
+                        } else {
+                            echo "Error: " . $stmt->error;
+                        }
+                        $stmt->close();
+                    }
+                }
+                break;
+        }
+    }
+}
+
+// Fetch existing rooms for display
+$rooms = [];
+$sql = "SELECT * FROM rooms ORDER BY building, name";
 $result = $conn->query($sql);
+if ($result) {
+    while ($row = $result->fetch_assoc()) {
+        $rooms[] = $row;
+    }
+}
+
+// Get unique buildings for the form
+$buildings = [];
+$buildingSql = "SELECT DISTINCT building FROM rooms ORDER BY building";
+$buildingResult = $conn->query($buildingSql);
+if ($buildingResult) {
+    while ($row = $buildingResult->fetch_assoc()) {
+        $buildings[] = $row['building'];
+    }
+}
+
+// Predefined options
+$roomTypes = ['classroom', 'lecture_hall', 'laboratory', 'computer_lab', 'seminar_room', 'auditorium'];
+$sessionTypes = ['regular', 'evening', 'weekend', 'sandwich', 'distance'];
+$facilityOptions = ['projector', 'whiteboard', 'computer', 'audio_system', 'air_conditioning', 'wifi'];
+$accessibilityOptions = ['wheelchair_access', 'elevator', 'ramp', 'accessible_bathroom'];
 ?>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Room Management - TimeTable Generator</title>
-  <!-- Bootstrap CSS -->
-  <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.2/css/bootstrap.min.css" rel="stylesheet" />
-  <!-- Font Awesome -->
-  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet" />
-  <style>
-    :root {
-      --primary-color: #800020;   /* AAMUSTED maroon */
-      --hover-color: #600010;     /* Darker maroon */
-      --accent-color: #FFD700;    /* Accent goldenrod */
-      --bg-color: #ffffff;        /* White background */
-      --sidebar-bg: #f8f8f8;       /* Light gray sidebar */
-      --footer-bg: #800020;       /* Footer same as primary */
-    }
-    /* Global Styles */
-    body {
-      font-family: 'Open Sans', sans-serif;
-      background-color: var(--bg-color);
-      margin: 0;
-      padding-top: 70px; /* For fixed header */
-      font-size: 14px; /* Smaller font style */
-    }
-    /* Header */
-    .navbar {
-      background-color: var(--primary-color);
-      position: fixed;
-      top: 0;
-      width: 100%;
-      z-index: 1050;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
-    .navbar-brand {
-      font-weight: 600;
-      font-size: 1.75rem;
-      display: flex;
-      align-items: center;
-    }
-    .navbar-brand img {
-      height: 40px;
-      margin-right: 10px;
-    }
-    #sidebarToggle {
-      border: none;
-      background: transparent;
-      color: #fff;
-      font-size: 1.5rem;
-      margin-right: 10px;
-    }
-    /* Sidebar – Updated to match Dashboard Sidebar */
-    .sidebar {
-      background-color: var(--sidebar-bg);
-      position: fixed;
-      top: 70px;
-      left: 0;
-      width: 250px;
-      height: calc(100vh - 70px);
-      padding: 20px;
-      box-shadow: 2px 0 5px rgba(0,0,0,0.1);
-      transition: transform 0.3s ease;
-      transform: translateX(-100%);
-    }
-    .sidebar.show {
-      transform: translateX(0);
-    }
-    /* Sidebar Links Container */
-    .nav-links {
-      display: flex;
-      flex-direction: column;
-      gap: 5px;
-    }
-    .nav-links a {
-      display: block;
-      width: 100%;
-      padding: 5px 10px;  /* Smaller padding */
-      color: var(--primary-color);
-      text-decoration: none;
-      font-weight: 600;
-      font-size: 1rem;
-      transition: background-color 0.3s, color 0.3s;
-    }
-    .nav-links a:not(:last-child) {
-      border-bottom: 1px solid #ccc;
-      margin-bottom: 5px;
-      padding-bottom: 5px;
-    }
-    .nav-links a:hover,
-    .nav-links a.active {
-      background-color: var(--primary-color);
-      color: #fff;
-      border-radius: 4px;
-    }
-    /* Main Content */
-    .main-content {
-      transition: margin-left 0.3s ease;
-      margin-left: 0;
-      padding: 20px;
-      height: calc(100vh - 70px);
-      overflow: auto;
-    }
-    .main-content.shift {
-      margin-left: 250px;
-    }
-    /* Table Styles */
-    .table-custom {
-      background-color: var(--bg-color);
-      border-radius: 8px;
-      overflow: hidden;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-    }
-    .table-custom th {
-      background-color: var(--primary-color);
-      color: var(--accent-color);
-    }
-    /* Footer */
-    .footer {
-      background-color: var(--footer-bg);
-      color: #fff;
-      padding: 10px;
-      text-align: center;
-      position: fixed;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      transition: left 0.3s ease;
-    }
-    .footer.shift {
-      left: 250px;
-    }
-    /* Back to Top Button with Progress Indicator */
-    #backToTop {
-      position: fixed;
-      bottom: 30px;
-      right: 30px;
-      z-index: 9999;
-      display: none; /* Hidden by default */
-      background: rgba(128, 0, 32, 0.7);
-      border: none;
-      outline: none;
-      width: 50px;
-      height: 50px;
-      border-radius: 50%;
-      cursor: pointer;
-      transition: background 0.3s ease, transform 0.3s ease;
-      padding: 0;
-      overflow: hidden;
-    }
-    #backToTop svg {
-      display: block;
-      width: 100%;
-      height: 100%;
-    }
-    #backToTop .arrow-icon {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      color: #FFD700;
-      font-size: 1.5rem;
-      pointer-events: none;
-    }
-    #backToTop:hover {
-      background: rgba(96, 0, 16, 0.9);
-      transform: scale(1.1);
-    }
-    /* Responsive Adjustments */
-    @media (max-width: 768px) {
-      .sidebar {
-        width: 200px;
-      }
-      .main-content.shift {
-        margin-left: 200px;
-      }
-      .footer.shift {
-        left: 200px;
-      }
-    }
-    @media (max-width: 576px) {
-      .sidebar {
-        width: 250px;
-      }
-      .main-content.shift {
-        margin-left: 0;
-      }
-      .footer.shift {
-        left: 0;
-      }
-    }
-  </style>
-</head>
-<body>
-  <!-- Header -->
-  <nav class="navbar navbar-expand-lg">
-    <div class="container-fluid">
-      <button id="sidebarToggle">
-        <i class="fas fa-bars"></i>
-      </button>
-      <a class="navbar-brand text-white" href="#">
-        <img src="images/aamustedLog.png" alt="AAMUSTED Logo">TimeTable Generator
-      </a>
-      <div class="ms-auto text-white" id="currentTime">12:00:00 PM</div>
-    </div>
-  </nav>
-  
-  <!-- Sidebar (Updated with View Timetable Link) -->
-  <?php $currentPage = basename($_SERVER['PHP_SELF']); ?>
-  <div class="sidebar" id="sidebar">
-    <div class="nav-links">
-      <a href="index.php" class="<?= ($currentPage == 'index.php') ? 'active' : '' ?>"><i class="fas fa-home me-2"></i>Dashboard</a>
-      <a href="timetable.php" class="<?= ($currentPage == 'timetable.php') ? 'active' : '' ?>"><i class="fas fa-calendar-alt me-2"></i>Generate Timetable</a>
-      <a href="view_timetable.php" class="<?= ($currentPage == 'view_timetable.php') ? 'active' : '' ?>"><i class="fas fa-table me-2"></i>View Timetable</a>
-      <a href="department.php" class="<?= ($currentPage == 'department.php') ? 'active' : '' ?>"><i class="fas fa-building me-2"></i>Department</a>
-      <a href="lecturer.php" class="<?= ($currentPage == 'lecturer.php') ? 'active' : '' ?>"><i class="fas fa-chalkboard-teacher me-2"></i>Lecturers</a>
-      <a href="rooms.php" class="<?= ($currentPage == 'rooms.php') ? 'active' : '' ?>"><i class="fas fa-door-open me-2"></i>Rooms</a>
-      <a href="courses.php" class="<?= ($currentPage == 'courses.php') ? 'active' : '' ?>"><i class="fas fa-book me-2"></i>Course</a>
-      <a href="classes.php" class="<?= ($currentPage == 'classes.php') ? 'active' : '' ?>"><i class="fas fa-users me-2"></i>Classes</a>
-      <a href="buildings.php" class="<?= ($currentPage == 'buildings.php') ? 'active' : '' ?>"><i class="fas fa-city me-2"></i>Buildings</a>
-    </div>
-  </div>
-  
-  <!-- Main Content -->
-  <div class="main-content" id="mainContent">
-    <h2>Room Management</h2>
-    <!-- Search & Action Buttons -->
+
+<?php $pageTitle = 'Manage Rooms'; include 'includes/header.php'; include 'includes/sidebar.php'; ?>
+
+<div class="main-content" id="mainContent">
+    <h2>Manage Rooms</h2>
+    
+    <!-- Search Bar -->
     <div class="d-flex justify-content-between align-items-center mb-4">
-      <div class="input-group" style="width: 300px;">
-        <span class="input-group-text"><i class="fas fa-search"></i></span>
-        <input type="text" class="form-control" id="searchInput" placeholder="Search for rooms...">
-      </div>
-      <div>
-        <button class="btn btn-primary me-2" data-bs-toggle="modal" data-bs-target="#importModal">Import</button>
-        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#dataEntryModal">Add Room</button>
-      </div>
+        <div class="input-group" style="width: 300px;">
+            <span class="input-group-text"><i class="fas fa-search"></i></span>
+            <input type="text" class="form-control search-input" id="searchInput" placeholder="Search rooms...">
+        </div>
+        <div>
+            <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#roomModal">
+                <i class="fas fa-plus me-2"></i>Add New Room
+            </button>
+        </div>
     </div>
     
-    <!-- Rooms Table -->
-    <div class="table-responsive">
-      <table class="table table-striped table-custom" id="roomTable">
-        <thead>
-          <tr>
-            <th>Room Type</th>
-            <th>Room Name</th>
-            <th>Capacity</th>
-            <th>Building ID</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          <?php
-            include 'connect.php';
-            if ($conn->connect_error) {
-                die("Connection failed: " . $conn->connect_error);
-            }
-            $sql = "SELECT * FROM room";
-            $result = $conn->query($sql);
-            if ($result->num_rows > 0) {
-              while ($row = $result->fetch_assoc()) {
-                echo "<tr>
-                        <td>{$row['room_type']}</td>
-                        <td>{$row['room_name']}</td>
-                        <td>{$row['capacity']}</td>
-                        <td>{$row['building_id']}</td>
-                        <td>
-                          <a href='delete_room.php?room_name={$row['room_name']}' class='btn btn-danger btn-sm' onclick='return confirm(\"Are you sure you want to delete this Room?\")'>Delete</a>
-                        </td>
-                      </tr>";
-              }
-            } else {
-              echo "<tr><td colspan='5' class='text-center'>No room found</td></tr>";
-            }
-            $conn->close();
-          ?>
-        </tbody>
-      </table>
+    <div class="row">
+        <!-- Display Rooms -->
+        <div class="col-md-12">
+            <div class="table-container">
+                <div class="table-header">
+                    <h4><i class="fas fa-door-open me-2"></i>Existing Rooms</h4>
+                </div>
+                <?php if (empty($rooms)): ?>
+                    <div class="empty-state">
+                        <i class="fas fa-door-open"></i>
+                        <h5>No rooms found</h5>
+                        <p>Start by adding your first room using the button above.</p>
+                    </div>
+                <?php else: ?>
+                    <div class="table-responsive">
+                        <table class="table" id="roomsTable">
+                            <thead>
+                                <tr>
+                                    <th>Room</th>
+                                    <th>Building</th>
+                                    <th>Type</th>
+                                    <th>Capacity</th>
+                                    <th>Session Availability</th>
+                                    <th>Facilities</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($rooms as $room): ?>
+                                    <tr>
+                                        <td>
+                                            <strong><?php echo htmlspecialchars($room['name']); ?></strong>
+                                        </td>
+                                        <td><?php echo htmlspecialchars($room['building']); ?></td>
+                                        <td>
+                                            <span class="badge bg-primary"><?php echo ucfirst(str_replace('_', ' ', $room['room_type'])); ?></span>
+                                        </td>
+                                        <td>
+                                            <span class="badge bg-info"><?php echo $room['capacity']; ?> seats</span>
+                                        </td>
+                                        <td>
+                                            <?php 
+                                            $sessions = json_decode($room['session_availability'], true);
+                                            if ($sessions): 
+                                                foreach ($sessions as $session): ?>
+                                                    <span class="badge bg-secondary me-1"><?php echo ucfirst($session); ?></span>
+                                                <?php endforeach;
+                                            else: ?>
+                                                <span class="text-muted">All sessions</span>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td>
+                                            <?php 
+                                            $facilities = json_decode($room['facilities'], true);
+                                            if ($facilities): 
+                                                foreach ($facilities as $facility): ?>
+                                                    <span class="badge bg-success me-1"><?php echo ucfirst(str_replace('_', ' ', $facility)); ?></span>
+                                                <?php endforeach;
+                                            else: ?>
+                                                <span class="text-muted">Basic</span>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td>
+                                            <button class="btn btn-sm btn-outline-primary" onclick="editRoom(<?php echo $room['id']; ?>, '<?php echo htmlspecialchars($room['name']); ?>', '<?php echo htmlspecialchars($room['building']); ?>', '<?php echo $room['room_type']; ?>', <?php echo $room['capacity']; ?>, <?php echo htmlspecialchars($room['session_availability']); ?>, <?php echo htmlspecialchars($room['facilities']); ?>, <?php echo htmlspecialchars($room['accessibility_features']); ?>)">Edit</button>
+                                            <button class="btn btn-sm btn-outline-danger" onclick="deleteRoom(<?php echo $room['id']; ?>, '<?php echo htmlspecialchars($room['name']); ?>')">Delete</button>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <div class="mt-3">
+                        <div class="row text-center">
+                            <div class="col-md-3">
+                                <div class="card bg-primary text-white">
+                                    <div class="card-body p-2">
+                                        <h6 class="mb-0"><?php echo count($rooms); ?></h6>
+                                        <small>Total Rooms</small>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="card bg-success text-white">
+                                    <div class="card-body p-2">
+                                        <h6 class="mb-0"><?php echo count(array_unique(array_column($rooms, 'building'))); ?></h6>
+                                        <small>Buildings</small>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="card bg-info text-white">
+                                    <div class="card-body p-2">
+                                        <h6 class="mb-0"><?php echo array_sum(array_column($rooms, 'capacity')); ?></h6>
+                                        <small>Total Capacity</small>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="card bg-warning text-dark">
+                                    <div class="card-body p-2">
+                                        <h6 class="mb-0"><?php echo count(array_filter($rooms, function($r) { return $r['room_type'] === 'laboratory'; })); ?></h6>
+                                        <small>Labs</small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                <?php endif; ?>
+            </div>
+        </div>
     </div>
-  </div>
-  
-  <!-- Footer -->
-  <div class="footer" id="footer">
-    &copy; 2025 TimeTable Generator
-  </div>
-  
-  <!-- Back to Top Button with Progress Indicator -->
-  <button id="backToTop">
-    <svg width="50" height="50" viewBox="0 0 50 50">
-      <circle id="progressCircle" cx="25" cy="25" r="20" fill="none" stroke="#FFD700" stroke-width="4" stroke-dasharray="126" stroke-dashoffset="126"/>
-    </svg>
-    <i class="fas fa-arrow-up arrow-icon"></i>
-  </button>
-  
-  <!-- Import Modal (Accept Only Excel Files) -->
-  <div class="modal fade" id="importModal" tabindex="-1" aria-labelledby="importModalLabel" aria-hidden="true">
-    <div class="modal-dialog">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h5 class="modal-title" id="importModalLabel">Import Rooms</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-        </div>
-        <div class="modal-body">
-          <form action="import_room.php" method="POST" enctype="multipart/form-data">
-            <div class="mb-3">
-              <label for="file" class="form-label">Choose Excel File</label>
-              <input type="file" class="form-control" id="file" name="file" required accept=".xls, .xlsx">
+</div>
+
+<?php include 'includes/footer.php'; ?>
+
+<!-- Room Modal -->
+<div class="modal fade" id="roomModal" tabindex="-1" aria-labelledby="roomModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="roomModalLabel">Add New Room</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
-            <button type="submit" class="btn btn-primary">Upload</button>
-          </form>
+            <form method="POST" action="" id="roomForm">
+                <div class="modal-body">
+                    <input type="hidden" id="action" name="action" value="add">
+                    <input type="hidden" id="roomId" name="id" value="">
+                    
+                    <div class="alert alert-info" id="formMode" style="display: none;">
+                        <strong>Edit Mode:</strong> You are currently editing an existing room. Click "Cancel Edit" to return to add mode.
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="name" class="form-label">Room Name *</label>
+                                <input type="text" class="form-control" id="name" name="name" required>
+                                <div class="form-text">e.g., Room 101, Lab A, Auditorium</div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="building" class="form-label">Building *</label>
+                                <input type="text" class="form-control" id="building" name="building" list="buildingList" required>
+                                <datalist id="buildingList">
+                                    <?php foreach ($buildings as $building): ?>
+                                        <option value="<?php echo htmlspecialchars($building); ?>">
+                                    <?php endforeach; ?>
+                                </datalist>
+                                <div class="form-text">e.g., Main Building, Science Block</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="roomType" class="form-label">Room Type *</label>
+                                <select class="form-select" id="roomType" name="roomType" required>
+                                    <option value="">Select room type</option>
+                                    <?php foreach ($roomTypes as $type): ?>
+                                        <option value="<?php echo $type; ?>"><?php echo ucfirst(str_replace('_', ' ', $type)); ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="capacity" class="form-label">Capacity *</label>
+                                <input type="number" class="form-control" id="capacity" name="capacity" min="1" required>
+                                <div class="form-text">Number of students the room can accommodate</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Session Availability</label>
+                        <div class="row">
+                            <?php foreach ($sessionTypes as $session): ?>
+                                <div class="col-md-4">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" name="sessionAvailability[]" value="<?php echo $session; ?>" id="session_<?php echo $session; ?>">
+                                        <label class="form-check-label" for="session_<?php echo $session; ?>">
+                                            <?php echo ucfirst($session); ?>
+                                        </label>
+                                    </div>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+                        <div class="form-text">Leave unchecked for all sessions</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Facilities</label>
+                        <div class="row">
+                            <?php foreach ($facilityOptions as $facility): ?>
+                                <div class="col-md-4">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" name="facilities[]" value="<?php echo $facility; ?>" id="facility_<?php echo $facility; ?>">
+                                        <label class="form-check-label" for="facility_<?php echo $facility; ?>">
+                                            <?php echo ucfirst(str_replace('_', ' ', $facility)); ?>
+                                        </label>
+                                    </div>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Accessibility Features</label>
+                        <div class="row">
+                            <?php foreach ($accessibilityOptions as $feature): ?>
+                                <div class="col-md-6">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" name="accessibilityFeatures[]" value="<?php echo $feature; ?>" id="accessibility_<?php echo $feature; ?>">
+                                        <label class="form-check-label" for="accessibility_<?php echo $feature; ?>">
+                                            <?php echo ucfirst(str_replace('_', ' ', $feature)); ?>
+                                        </label>
+                                    </div>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="button" class="btn btn-secondary" id="cancelBtn" style="display: none;" onclick="cancelEdit()">Cancel Edit</button>
+                    <button type="submit" class="btn btn-primary" id="submitBtn">Add Room</button>
+                </div>
+            </form>
         </div>
-      </div>
     </div>
-  </div>
-  
-  <!-- Data Entry Modal -->
-  <div class="modal fade" id="dataEntryModal" tabindex="-1" aria-labelledby="dataEntryModalLabel" aria-hidden="true">
-    <div class="modal-dialog">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h5 class="modal-title" id="dataEntryModalLabel">Enter Room Details</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-        </div>
-        <div class="modal-body">
-          <form action="addroomform.php" method="POST">
-            <label for="room_type" class="form-label">Room Type:</label>
-            <select class="form-select" id="room_type" name="room_type" required>
-              <option value="classroom">LECTURER ROOM</option>
-              <option value="lab">LAB</option>
-            </select>
-            <br>
-            <div class="mb-3">
-              <label for="room_name" class="form-label">Room Name</label>
-              <input type="text" class="form-control" id="room_name" name="room_name" placeholder="Enter room name" required>
-            </div>
-            <div class="mb-3">
-              <label for="capacity" class="form-label">Capacity</label>
-              <input type="text" class="form-control" id="capacity" name="capacity" placeholder="Enter Capacity" required>
-            </div>
-            <label for="building_id" class="form-label">Building:</label>
-            <select class="form-select" id="building_id" name="building_id" required>
-              <option value="">Select Building</option>
-              <?php
-              include 'connect.php';
-              $result = $conn->query("SELECT building_id, building_name FROM building");
-              while ($row = $result->fetch_assoc()) {
-                  echo "<option value='{$row['building_id']}'>{$row['building_name']}</option>";
-              }
-              ?>
-            </select>
-            <div class="modal-footer">
-              <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-              <button type="submit" class="btn btn-primary">Save changes</button>
-            </div>
-          </form>
-        </div>
-      </div>
-    </div>
-  </div>
-  
-  <!-- Bootstrap Bundle with Popper JS -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.2/js/bootstrap.bundle.min.js"></script>
-  <script>
-    // Update current time in header
-    function updateTime() {
-      const now = new Date();
-      const timeString = now.toLocaleTimeString('en-US', {
-        hour12: true,
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit'
-      });
-      document.getElementById('currentTime').textContent = timeString;
+</div>
+
+<script>
+    function editRoom(id, name, building, roomType, capacity, sessionAvailability, facilities, accessibilityFeatures) {
+        // Set form to edit mode
+        document.getElementById('action').value = 'update';
+        document.getElementById('roomId').value = id;
+        document.getElementById('name').value = name;
+        document.getElementById('building').value = building;
+        document.getElementById('roomType').value = roomType;
+        document.getElementById('capacity').value = capacity;
+        
+        // Reset all checkboxes first
+        document.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+        
+        // Set session availability
+        try {
+            const sessions = JSON.parse(sessionAvailability);
+            sessions.forEach(session => {
+                const checkbox = document.getElementById('session_' + session);
+                if (checkbox) checkbox.checked = true;
+            });
+        } catch (e) {}
+        
+        // Set facilities
+        try {
+            const facs = JSON.parse(facilities);
+            facs.forEach(facility => {
+                const checkbox = document.getElementById('facility_' + facility);
+                if (checkbox) checkbox.checked = true;
+            });
+        } catch (e) {}
+        
+        // Set accessibility features
+        try {
+            const features = JSON.parse(accessibilityFeatures);
+            features.forEach(feature => {
+                const checkbox = document.getElementById('accessibility_' + feature);
+                if (checkbox) checkbox.checked = true;
+            });
+        } catch (e) {}
+        
+        // Update form appearance
+        document.getElementById('roomModalLabel').textContent = 'Edit Room';
+        document.getElementById('submitBtn').textContent = 'Update Room';
+        document.getElementById('submitBtn').className = 'btn btn-warning';
+        document.getElementById('cancelBtn').style.display = 'inline-block';
+        document.getElementById('formMode').style.display = 'block';
+        
+        // Show modal
+        var modal = new bootstrap.Modal(document.getElementById('roomModal'));
+        modal.show();
     }
-    setInterval(updateTime, 1000);
-    updateTime();
-  
-    // Toggle sidebar visibility
-    document.getElementById('sidebarToggle').addEventListener('click', function() {
-      const sidebar = document.getElementById('sidebar');
-      const mainContent = document.getElementById('mainContent');
-      const footer = document.getElementById('footer');
-      sidebar.classList.toggle('show');
-      if (sidebar.classList.contains('show')) {
-        mainContent.classList.add('shift');
-        footer.classList.add('shift');
-      } else {
-        mainContent.classList.remove('shift');
-        footer.classList.remove('shift');
-      }
-    });
-  
-    // Search functionality for rooms table
-    document.getElementById('searchInput').addEventListener('keyup', function() {
-      let searchValue = this.value.toLowerCase();
-      let rows = document.querySelectorAll('#roomTable tbody tr');
-      rows.forEach(row => {
-          let cells = row.querySelectorAll('td');
-          let matchFound = false;
-          for (let i = 0; i < cells.length - 1; i++) {
-              if (cells[i].textContent.toLowerCase().includes(searchValue)) {
-                  matchFound = true;
-                  break;
-              }
-          }
-          row.style.display = matchFound ? '' : 'none';
-      });
-    });
-  
-    // Back to Top Button with Progress Indicator using mainContent scroll
-    const backToTopButton = document.getElementById("backToTop");
-    const progressCircle = document.getElementById("progressCircle");
-    const circumference = 2 * Math.PI * 20;
-    progressCircle.style.strokeDasharray = circumference;
-    progressCircle.style.strokeDashoffset = circumference;
     
-    const mainContent = document.getElementById("mainContent");
-    mainContent.addEventListener("scroll", function() {
-      const scrollTop = mainContent.scrollTop;
-      if (scrollTop > 100) {
-        backToTopButton.style.display = "block";
-      } else {
-        backToTopButton.style.display = "none";
-      }
-      
-      const scrollHeight = mainContent.scrollHeight - mainContent.clientHeight;
-      const scrollPercentage = scrollTop / scrollHeight;
-      const offset = circumference - (scrollPercentage * circumference);
-      progressCircle.style.strokeDashoffset = offset;
-    });
+    function cancelEdit() {
+        // Reset form to add mode
+        document.getElementById('action').value = 'add';
+        document.getElementById('roomForm').reset();
+        document.getElementById('roomId').value = '';
+        
+        // Update form appearance
+        document.getElementById('roomModalLabel').textContent = 'Add New Room';
+        document.getElementById('submitBtn').textContent = 'Add Room';
+        document.getElementById('submitBtn').className = 'btn btn-primary';
+        document.getElementById('cancelBtn').style.display = 'none';
+        document.getElementById('formMode').style.display = 'none';
+    }
     
-    backToTopButton.addEventListener("click", function() {
-      mainContent.scrollTo({ top: 0, behavior: "smooth" });
+    function deleteRoom(id, roomName) {
+        if (confirm(`Are you sure you want to delete the room "${roomName}"?`)) {
+            // Create a form to submit the deletion
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = '';
+            
+            const actionInput = document.createElement('input');
+            actionInput.type = 'hidden';
+            actionInput.name = 'action';
+            actionInput.value = 'delete';
+            
+            const idInput = document.createElement('input');
+            idInput.type = 'hidden';
+            idInput.name = 'id';
+            idInput.value = id;
+            
+            form.appendChild(actionInput);
+            form.appendChild(idInput);
+            document.body.appendChild(form);
+            form.submit();
+        }
+    }
+    
+    // Reset modal when it's closed
+    document.addEventListener('DOMContentLoaded', function() {
+        var roomModal = document.getElementById('roomModal');
+        roomModal.addEventListener('hidden.bs.modal', function () {
+            cancelEdit();
+        });
     });
-  </script>
-</body>
-</html>
+</script>
+

@@ -34,29 +34,8 @@ include 'connect.php';
   </style>
 </head>
 <body>
-  <nav class="navbar navbar-dark">
-    <div class="container-fluid">
-      <button id="sidebarToggle"><i class="fas fa-bars"></i></button>
-      <a class="navbar-brand text-white" href="#">
-        <img src="images/aamustedLog.png" alt="AAMUSTED Logo">TimeTable Generator
-      </a>
-      <div class="ms-auto text-white" id="currentTime">12:00:00 PM</div>
-    </div>
-  </nav>
-  <?php $currentPage = basename($_SERVER['PHP_SELF']); ?>
-  <div class="sidebar" id="sidebar">
-    <div class="nav-links">
-      <a href="index.php" class="<?= ($currentPage == 'index.php') ? 'active' : '' ?>"><i class="fas fa-home me-2"></i>Dashboard</a>
-      <a href="timetable.php" class="<?= ($currentPage == 'timetable.php') ? 'active' : '' ?>"><i class="fas fa-calendar-alt me-2"></i>Generate Timetable</a>
-      <a href="view_timetable.php" class="<?= ($currentPage == 'view_timetable.php') ? 'active' : '' ?>"><i class="fas fa-table me-2"></i>View Timetable</a>
-      <a href="department.php" class="<?= ($currentPage == 'department.php') ? 'active' : '' ?>"><i class="fas fa-building me-2"></i>Department</a>
-      <a href="lecturer.php" class="<?= ($currentPage == 'lecturer.php') ? 'active' : '' ?>"><i class="fas fa-chalkboard-teacher me-2"></i>Lecturers</a>
-      <a href="rooms.php" class="<?= ($currentPage == 'rooms.php') ? 'active' : '' ?>"><i class="fas fa-door-open me-2"></i>Rooms</a>
-      <a href="courses.php" class="<?= ($currentPage == 'courses.php') ? 'active' : '' ?>"><i class="fas fa-book me-2"></i>Course</a>
-      <a href="classes.php" class="<?= ($currentPage == 'classes.php') ? 'active' : '' ?>"><i class="fas fa-users me-2"></i>Classes</a>
-      <a href="buildings.php" class="<?= ($currentPage == 'buildings.php') ? 'active' : '' ?>"><i class="fas fa-city me-2"></i>Buildings</a>
-    </div>
-  </div>
+<?php $pageTitle = 'Generate Timetable'; include 'includes/header.php'; include 'includes/sidebar.php'; ?>
+
   <div class="main-content" id="mainContent">
     <h2>Generate Timetable</h2>
     <form id="generateTimetableForm" class="timetable-form mb-4">
@@ -72,22 +51,4 @@ include 'connect.php';
     </form>
     <div id="timetableContainer"></div>
   </div>
-  <div class="footer" id="footer">&copy; 2025 TimeTable Generator</div>
-  <button id="backToTop">
-    <svg width="50" height="50" viewBox="0 0 50 50">
-      <circle id="progressCircle" cx="25" cy="25" r="20" fill="none" stroke="#FFD700" stroke-width="4" stroke-dasharray="126" stroke-dashoffset="126"/>
-    </svg>
-    <i class="fas fa-arrow-up arrow-icon"></i>
-  </button>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.2/js/bootstrap.bundle.min.js"></script>
-  <script>
-    function updateTime(){const now=new Date(),timeString=now.toLocaleTimeString('en-US',{hour12:true,hour:'2-digit',minute:'2-digit',second:'2-digit'});document.getElementById('currentTime').textContent=timeString;}
-    setInterval(updateTime,1000);updateTime();
-    document.getElementById('sidebarToggle').addEventListener('click',function(){const sidebar=document.getElementById('sidebar'),mainContent=document.getElementById('mainContent'),footer=document.getElementById('footer');sidebar.classList.toggle('show');if(sidebar.classList.contains('show')){mainContent.classList.add('shift');footer.classList.add('shift');}else{mainContent.classList.remove('shift');footer.classList.remove('shift');}});
-    document.getElementById('generateTimetableForm').addEventListener('submit',function(e){e.preventDefault();const formData=new FormData(this);fetch('generate_timetable.php',{method:'POST',body:formData}).then(response=>response.text()).then(data=>{document.getElementById('timetableContainer').innerHTML=data;}).catch(error=>console.error('Error:',error));});
-    const backToTopButton=document.getElementById("backToTop"),progressCircle=document.getElementById("progressCircle"),circumference=2*Math.PI*20;progressCircle.style.strokeDasharray=circumference;progressCircle.style.strokeDashoffset=circumference;
-    window.addEventListener("scroll",function(){const scrollTop=document.documentElement.scrollTop||document.body.scrollTop;backToTopButton.style.display=scrollTop>100?"block":"none";const scrollHeight=document.documentElement.scrollHeight-document.documentElement.clientHeight,scrollPercentage=scrollTop/scrollHeight;progressCircle.style.strokeDashoffset=circumference-(scrollPercentage*circumference);});
-    backToTopButton.addEventListener("click",function(){window.scrollTo({top:0,behavior:"smooth"});});
-  </script>
-</body>
-</html>
+<?php include 'includes/footer.php'; ?>

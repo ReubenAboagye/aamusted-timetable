@@ -1,758 +1,857 @@
 <?php
-include 'connect.php';
+include 'connect.php'; // Include database connection
 
-// -------------------------
-// When no semester is provided:
-// Show the selection form with AJAX and a loading overlay.
-if (!isset($_POST['semester'])) {
-    ?>
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-      <meta charset="UTF-8" />
-      <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-      <title>Select Semester - TimeTable Generator</title>
-      <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.2/css/bootstrap.min.css" rel="stylesheet" />
-      <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet" />
-      <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600&display=swap" rel="stylesheet" />
-      <style>
-        :root { 
-          --primary-color: #800020; 
-          --hover-color: #600010; 
-          --accent-color: #FFD700; 
-          --bg-color: #ffffff; 
-          --sidebar-bg: #f8f8f8; 
-          --footer-bg: #800020; 
+// Handle form submissions
+if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+    if (isset($_POST['action'])) {
+        switch ($_POST['action']) {
+            case 'add':
+                // Add new timetable entry
+                $classId = $_POST['classId'];
+                $courseId = $_POST['courseId'];
+                $lecturerId = $_POST['lecturerId'];
+                $roomId = $_POST['roomId'];
+                $timeSlotId = $_POST['timeSlotId'];
+                $day = $_POST['day'];
+                $semesterId = $_POST['semesterId'];
+                $sessionId = $_POST['sessionId'];
+                $activityType = $_POST['activityType'];
+                $notes = $_POST['notes'];
+
+                // Validate that the class is actually taking this course in this semester
+                $classCourseCheck = "SELECT id FROM class_courses WHERE class_id = ? AND course_id = ? AND semester_id = ? AND is_active = 1";
+                $classCourseStmt = $conn->prepare($classCourseCheck);
+                $classCourseStmt->bind_param("iii", $classId, $courseId, $semesterId);
+                $classCourseStmt->execute();
+                $classCourseResult = $classCourseStmt->get_result();
+                
+                if ($classCourseResult->num_rows == 0) {
+                    echo "<script>alert('This class is not taking this course in the selected semester!');</script>";
+                    $classCourseStmt->close();
+                    break;
+                }
+                $classCourseStmt->close();
+
+                // Validate that the lecturer can teach this course
+                $lecturerCourseCheck = "SELECT id FROM lecturer_courses WHERE lecturer_id = ? AND course_id = ? AND is_active = 1";
+                $lecturerCourseStmt = $conn->prepare($lecturerCourseCheck);
+                $lecturerCourseStmt->bind_param("ii", $lecturerId, $courseId);
+                $lecturerCourseStmt->execute();
+                $lecturerCourseResult = $lecturerCourseStmt->get_result();
+                
+                if ($lecturerCourseResult->num_rows == 0) {
+                    echo "<script>alert('This lecturer is not assigned to teach this course!');</script>";
+                    $lecturerCourseStmt->close();
+                    break;
+                }
+                $lecturerCourseStmt->close();
+
+                // Validate that the lecturer is available in this session
+                $lecturerSessionCheck = "SELECT lecturer_id FROM lecturer_session_availability WHERE lecturer_id = ? AND session_id = ?";
+                $lecturerSessionStmt = $conn->prepare($lecturerSessionCheck);
+                $lecturerSessionStmt->bind_param("ii", $lecturerId, $sessionId);
+                $lecturerSessionStmt->execute();
+                $lecturerSessionResult = $lecturerSessionStmt->get_result();
+                
+                if ($lecturerSessionResult->num_rows == 0) {
+                    echo "<script>alert('This lecturer is not available in the selected session!');</script>";
+                    $lecturerSessionStmt->close();
+                    break;
+                }
+                $lecturerSessionStmt->close();
+
+                // Validate that the course is offered in this session
+                $courseSessionCheck = "SELECT course_id FROM course_session_availability WHERE course_id = ? AND session_id = ?";
+                $courseSessionStmt = $conn->prepare($courseSessionCheck);
+                $courseSessionStmt->bind_param("ii", $courseId, $sessionId);
+                $courseSessionStmt->execute();
+                $courseSessionResult = $courseSessionStmt->get_result();
+                
+                if ($courseSessionResult->num_rows == 0) {
+                    echo "<script>alert('This course is not offered in the selected session!');</script>";
+                    $courseSessionStmt->close();
+                    break;
+                }
+                $courseSessionStmt->close();
+
+                // Validate that the class belongs to this session
+                $classSessionCheck = "SELECT id FROM classes WHERE id = ? AND session_id = ? AND is_active = 1";
+                $classSessionStmt = $conn->prepare($classSessionCheck);
+                $classSessionStmt->bind_param("ii", $classId, $sessionId);
+                $classSessionStmt->execute();
+                $classSessionResult = $classSessionStmt->get_result();
+                
+                if ($classSessionResult->num_rows == 0) {
+                    echo "<script>alert('This class does not belong to the selected session!');</script>";
+                    $classSessionStmt->close();
+                    break;
+                }
+                $classSessionStmt->close();
+
+                // Check for conflicts (class, room, lecturer cannot collide in same day+slot+semester+session)
+                $conflictCheck = "SELECT id FROM timetable WHERE 
+                                  (class_id = ? OR room_id = ? OR lecturer_id = ?) 
+                                  AND day = ? AND time_slot_id = ? AND semester_id = ? AND session_id = ?";
+                $conflictStmt = $conn->prepare($conflictCheck);
+                $conflictStmt->bind_param("iiisiii", $classId, $roomId, $lecturerId, $day, $timeSlotId, $semesterId, $sessionId);
+                $conflictStmt->execute();
+                $conflictResult = $conflictStmt->get_result();
+                
+                if ($conflictResult->num_rows > 0) {
+                    echo "<script>alert('Conflict detected! Class, room, or lecturer is already scheduled at this time.');</script>";
+                    $conflictStmt->close();
+                    break;
+                }
+                $conflictStmt->close();
+
+                // Check if this is a break time slot
+                $breakCheck = "SELECT is_break FROM time_slots WHERE id = ?";
+                $breakStmt = $conn->prepare($breakCheck);
+                $breakStmt->bind_param("i", $timeSlotId);
+                $breakStmt->execute();
+                $breakResult = $breakStmt->get_result();
+                $breakData = $breakResult->fetch_assoc();
+                
+                if ($breakData['is_break'] == 1) {
+                    echo "<script>alert('Cannot schedule classes during break time slots!');</script>";
+                    $breakStmt->close();
+                    break;
+                }
+                $breakStmt->close();
+
+                // All validations passed, insert the timetable entry
+                $sql = "INSERT INTO timetable (class_id, course_id, lecturer_id, room_id, time_slot_id, day, semester_id, session_id, activity_type, notes, is_confirmed) 
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)";
+                
+                $stmt = $conn->prepare($sql);
+                if ($stmt) {
+                    $stmt->bind_param("iiiiississ", $classId, $courseId, $lecturerId, $roomId, $timeSlotId, $day, $semesterId, $sessionId, $activityType, $notes);
+                    
+                    if ($stmt->execute()) {
+                        $timetableId = $conn->insert_id;
+                        
+                        // Insert into timetable_lecturers for co-teaching support
+                        $lecturerInsert = "INSERT INTO timetable_lecturers (timetable_id, lecturer_id) VALUES (?, ?)";
+                        $lecturerStmt = $conn->prepare($lecturerInsert);
+                        $lecturerStmt->bind_param("ii", $timetableId, $lecturerId);
+                        $lecturerStmt->execute();
+                        $lecturerStmt->close();
+                        
+                        echo "<script>alert('Class scheduled successfully!'); window.location.href='timetable.php';</script>";
+                    } else {
+                        echo "Error: " . $stmt->error;
+                    }
+                    $stmt->close();
+                }
+                break;
+
+            case 'update':
+                // Update existing timetable entry
+                $id = $_POST['id'];
+                $classId = $_POST['classId'];
+                $courseId = $_POST['courseId'];
+                $lecturerId = $_POST['lecturerId'];
+                $roomId = $_POST['roomId'];
+                $timeSlotId = $_POST['timeSlotId'];
+                $day = $_POST['day'];
+                $semesterId = $_POST['semesterId'];
+                $sessionId = $_POST['sessionId'];
+                $activityType = $_POST['activityType'];
+                $notes = $_POST['notes'];
+                $isConfirmed = isset($_POST['isConfirmed']) ? 1 : 0;
+
+                // Validate that the class is actually taking this course in this semester
+                $classCourseCheck = "SELECT id FROM class_courses WHERE class_id = ? AND course_id = ? AND semester_id = ? AND is_active = 1";
+                $classCourseStmt = $conn->prepare($classCourseCheck);
+                $classCourseStmt->bind_param("iii", $classId, $courseId, $semesterId);
+                $classCourseStmt->execute();
+                $classCourseResult = $classCourseStmt->get_result();
+                
+                if ($classCourseResult->num_rows == 0) {
+                    echo "<script>alert('This class is not taking this course in the selected semester!');</script>";
+                    $classCourseStmt->close();
+                    break;
+                }
+                $classCourseStmt->close();
+
+                // Validate that the lecturer can teach this course
+                $lecturerCourseCheck = "SELECT id FROM lecturer_courses WHERE lecturer_id = ? AND course_id = ? AND is_active = 1";
+                $lecturerCourseStmt = $conn->prepare($lecturerCourseCheck);
+                $lecturerCourseStmt->bind_param("ii", $lecturerId, $courseId);
+                $lecturerCourseStmt->execute();
+                $lecturerCourseResult = $lecturerCourseStmt->get_result();
+                
+                if ($lecturerCourseResult->num_rows == 0) {
+                    echo "<script>alert('This lecturer is not assigned to teach this course!');</script>";
+                    $lecturerCourseStmt->close();
+                    break;
+                }
+                $lecturerCourseStmt->close();
+
+                // Validate that the lecturer is available in this session
+                $lecturerSessionCheck = "SELECT lecturer_id FROM lecturer_session_availability WHERE lecturer_id = ? AND session_id = ?";
+                $lecturerSessionStmt = $conn->prepare($lecturerSessionCheck);
+                $lecturerSessionStmt->bind_param("ii", $lecturerId, $sessionId);
+                $lecturerSessionStmt->execute();
+                $lecturerSessionResult = $lecturerSessionStmt->get_result();
+                
+                if ($lecturerSessionResult->num_rows == 0) {
+                    echo "<script>alert('This lecturer is not available in the selected session!');</script>";
+                    $lecturerSessionStmt->close();
+                    break;
+                }
+                $lecturerSessionStmt->close();
+
+                // Validate that the course is offered in this session
+                $courseSessionCheck = "SELECT course_id FROM course_session_availability WHERE course_id = ? AND session_id = ?";
+                $courseSessionStmt = $conn->prepare($courseSessionCheck);
+                $courseSessionStmt->bind_param("ii", $courseId, $sessionId);
+                $courseSessionStmt->execute();
+                $courseSessionResult = $courseSessionStmt->get_result();
+                
+                if ($courseSessionResult->num_rows == 0) {
+                    echo "<script>alert('This course is not offered in the selected session!');</script>";
+                    $courseSessionStmt->close();
+                    break;
+                }
+                $courseSessionStmt->close();
+
+                // Validate that the class belongs to this session
+                $classSessionCheck = "SELECT id FROM classes WHERE id = ? AND session_id = ? AND is_active = 1";
+                $classSessionStmt = $conn->prepare($classSessionCheck);
+                $classSessionStmt->bind_param("ii", $classId, $sessionId);
+                $classSessionStmt->execute();
+                $classSessionResult = $classSessionStmt->get_result();
+                
+                if ($classSessionResult->num_rows == 0) {
+                    echo "<script>alert('This class does not belong to the selected session!');</script>";
+                    $classSessionStmt->close();
+                    break;
+                }
+                $classSessionStmt->close();
+
+                // Check for conflicts (excluding current entry)
+                $conflictCheck = "SELECT id FROM timetable WHERE 
+                                  (class_id = ? OR room_id = ? OR lecturer_id = ?) 
+                                  AND day = ? AND time_slot_id = ? AND semester_id = ? AND session_id = ? AND id != ?";
+                $conflictStmt = $conn->prepare($conflictCheck);
+                $conflictStmt->bind_param("iiisiiii", $classId, $roomId, $lecturerId, $day, $timeSlotId, $semesterId, $sessionId, $id);
+                $conflictStmt->execute();
+                $conflictResult = $conflictStmt->get_result();
+                
+                if ($conflictResult->num_rows > 0) {
+                    echo "<script>alert('Conflict detected! Class, room, or lecturer is already scheduled at this time.');</script>";
+                    $conflictStmt->close();
+                    break;
+                }
+                $conflictStmt->close();
+
+                // Check if this is a break time slot
+                $breakCheck = "SELECT is_break FROM time_slots WHERE id = ?";
+                $breakStmt = $conn->prepare($breakCheck);
+                $breakStmt->bind_param("i", $timeSlotId);
+                $breakStmt->execute();
+                $breakResult = $breakStmt->get_result();
+                $breakData = $breakResult->fetch_assoc();
+                
+                if ($breakData['is_break'] == 1) {
+                    echo "<script>alert('Cannot schedule classes during break time slots!');</script>";
+                    $breakStmt->close();
+                    break;
+                }
+                $breakStmt->close();
+
+                // All validations passed, update the timetable entry
+                $sql = "UPDATE timetable SET class_id = ?, course_id = ?, lecturer_id = ?, room_id = ?, time_slot_id = ?, 
+                        day = ?, semester_id = ?, session_id = ?, activity_type = ?, notes = ?, is_confirmed = ? 
+                        WHERE id = ?";
+                
+                $stmt = $conn->prepare($sql);
+                if ($stmt) {
+                    $stmt->bind_param("iiiiississi", $classId, $courseId, $lecturerId, $roomId, $timeSlotId, $day, $semesterId, $sessionId, $activityType, $notes, $isConfirmed, $id);
+                    
+                    if ($stmt->execute()) {
+                        // Update timetable_lecturers for co-teaching support
+                        $lecturerUpdate = "UPDATE timetable_lecturers SET lecturer_id = ? WHERE timetable_id = ?";
+                        $lecturerStmt = $conn->prepare($lecturerUpdate);
+                        $lecturerStmt->bind_param("ii", $lecturerId, $id);
+                        $lecturerStmt->execute();
+                        $lecturerStmt->close();
+                        
+                        echo "<script>alert('Schedule updated successfully!'); window.location.href='timetable.php';</script>";
+                    } else {
+                        echo "Error: " . $stmt->error;
+                    }
+                    $stmt->close();
+                }
+                break;
+
+            case 'delete':
+                // Delete timetable entry
+                $id = $_POST['id'];
+                
+                // Check if entry has dependent records in timetable_lecturers
+                $checkSql = "SELECT COUNT(*) as count FROM timetable_lecturers WHERE timetable_id = ?";
+                $checkStmt = $conn->prepare($checkSql);
+                $checkStmt->bind_param("i", $id);
+                $checkStmt->execute();
+                $result = $checkStmt->get_result();
+                $dependencies = $result->fetch_assoc();
+                $checkStmt->close();
+                
+                if ($dependencies['count'] > 0) {
+                    // Delete dependent records first
+                    $deleteLecturers = "DELETE FROM timetable_lecturers WHERE timetable_id = ?";
+                    $lecturerStmt = $conn->prepare($deleteLecturers);
+                    $lecturerStmt->bind_param("i", $id);
+                    $lecturerStmt->execute();
+                    $lecturerStmt->close();
+                }
+                
+                // Delete the main timetable entry
+                $sql = "DELETE FROM timetable WHERE id = ?";
+                $stmt = $conn->prepare($sql);
+                if ($stmt) {
+                    $stmt->bind_param("i", $id);
+                    if ($stmt->execute()) {
+                        echo "<script>alert('Schedule deleted successfully!'); window.location.href='timetable.php';</script>";
+                    } else {
+                        echo "Error: " . $stmt->error;
+                    }
+                    $stmt->close();
+                }
+                break;
         }
-        body { 
-          font-family: 'Open Sans', sans-serif; 
-          background: var(--bg-color); 
-          margin: 0; 
-          padding-top: 70px; 
-          font-size: 14px; 
-        }
-        .navbar { 
-          background: var(--primary-color); 
-          position: fixed; 
-          top: 0; 
-          width: 100%; 
-          z-index: 1050; 
-          box-shadow: 0 2px 4px rgba(0,0,0,0.1); 
-        }
-        .navbar-brand { 
-          font-weight: 600; 
-          font-size: 1.75rem; 
-          display: flex; 
-          align-items: center; 
-          color: var(--accent-color) !important; 
-        }
-        #sidebarToggle { 
-          border: none; 
-          background: transparent; 
-          color: #fff; 
-          font-size: 1.5rem; 
-          margin-right: 10px; 
-        }
-        .sidebar { 
-          background: var(--sidebar-bg); 
-          position: fixed; 
-          top: 70px; 
-          left: 0; 
-          width: 250px; 
-          padding: 20px; 
-          box-shadow: 2px 0 5px rgba(0,0,0,0.1); 
-          transition: transform 0.3s ease; 
-          transform: translateX(-100%); 
-        }
-        .sidebar.show { 
-          transform: translateX(0); 
-        }
-        .nav-links { 
-          display: flex; 
-          flex-direction: column; 
-          gap: 5px; 
-        }
-        .nav-links a { 
-          display: flex; 
-          align-items: center; 
-          width: 100%; 
-          padding: 5px 10px; 
-          color: var(--primary-color); 
-          text-decoration: none; 
-          font-weight: 600; 
-          font-size: 1rem; 
-          transition: background 0.3s, color 0.3s; 
-        }
-        .nav-links a:hover, .nav-links a.active { 
-          background: var(--primary-color); 
-          color: #fff; 
-          border-radius: 4px; 
-        }
-        .main-content { 
-          transition: margin-left 0.3s ease; 
-          margin-left: 0; 
-          padding: 20px; 
-          height: calc(100vh - 70px); 
-          overflow: auto; 
-        }
-        .main-content.shift { 
-          margin-left: 250px; 
-        }
-        .footer { 
-          background: var(--footer-bg); 
-          color: #fff; 
-          padding: 10px; 
-          text-align: center; 
-          position: fixed; 
-          bottom: 0; 
-          left: 0; 
-          right: 0; 
-          transition: left 0.3s ease; 
-        }
-        .footer.shift { 
-          left: 250px; 
-        }
-        .timetable-form { 
-          max-width: 400px; 
-          margin: 0 auto; 
-        }
-        /* Loading overlay styles */
-        #loadingOverlay {
-          display: none;
-          position: fixed;
-          top: 0;
-          left: 0;
-          width: 100%;
-          height: 100%;
-          background: rgba(0,0,0,0.5);
-          z-index: 9999;
-          align-items: center;
-          justify-content: center;
-          flex-direction: column;
-        }
-        #loadingOverlay .loading-content {
-          text-align: center;
-        }
-        #loadingOverlay .loading-content img {
-          height: 80px;
-          margin-bottom: 20px;
-          border-radius: 50%;
-          /* Pop animation using scale effect */
-          animation: pop 1.5s infinite;
-        }
-        #loadingOverlay .loading-content #loadingPercentage {
-          color: #fff;
-          font-size: 24px;
-        }
-        @keyframes pop {
-          0% { transform: scale(1); }
-          50% { transform: scale(1.2); }
-          100% { transform: scale(1); }
-        }
-      </style>
-    </head>
-    <body>
-      <nav class="navbar navbar-dark">
-        <div class="container-fluid">
-          <button id="sidebarToggle"><i class="fas fa-bars"></i></button>
-          <a class="navbar-brand text-white" href="#">
-            <img src="images/aamustedLog.png" alt="AAMUSTED Logo" style="height:40px; margin-right:10px;">TimeTable Generator
-          </a>
-          <div class="ms-auto text-white" id="currentTime">12:00:00 PM</div>
-        </div>
-      </nav>
-      <?php $currentPage = basename($_SERVER['PHP_SELF']); ?>
-      <div class="sidebar" id="sidebar">
-        <div class="nav-links">
-          <a href="index.php" class="<?= ($currentPage == 'index.php') ? 'active' : '' ?>"><i class="fas fa-home me-2"></i>Dashboard</a>
-          <a href="Timetable.php" class="<?= ($currentPage == 'Timetable.php') ? 'active' : '' ?>"><i class="fas fa-calendar-alt me-2"></i>Generate Timetable</a>
-          <a href="view_timetable.php" class="<?= ($currentPage == 'view_timetable.php') ? 'active' : '' ?>"><i class="fas fa-table me-2"></i>View Timetable</a>
-          <a href="department.php" class="<?= ($currentPage == 'department.php') ? 'active' : '' ?>"><i class="fas fa-building me-2"></i>Department</a>
-          <a href="lecturer.php" class="<?= ($currentPage == 'lecturer.php') ? 'active' : '' ?>"><i class="fas fa-chalkboard-teacher me-2"></i>Lecturers</a>
-          <a href="rooms.php" class="<?= ($currentPage == 'rooms.php') ? 'active' : '' ?>"><i class="fas fa-door-open me-2"></i>Rooms</a>
-          <a href="courses.php" class="<?= ($currentPage == 'courses.php') ? 'active' : '' ?>"><i class="fas fa-book me-2"></i>Course</a>
-          <a href="classes.php" class="<?= ($currentPage == 'classes.php') ? 'active' : '' ?>"><i class="fas fa-users me-2"></i>Classes</a>
-          <a href="buildings.php" class="<?= ($currentPage == 'buildings.php') ? 'active' : '' ?>"><i class="fas fa-city me-2"></i>Buildings</a>
-        </div>
-      </div>
-      <div class="main-content" id="mainContent">
-        <h2>Select Semester to Generate Timetable</h2>
-        <form id="generateTimetableForm" action="Timetable.php" method="POST" class="timetable-form mb-4">
-          <div class="mb-3">
-            <label for="semester" class="form-label">Semester:</label>
-            <select name="semester" id="semester" class="form-select" required>
-              <option value="" disabled selected>Select Semester</option>
-              <option value="1">Semester 1</option>
-              <option value="2">Semester 2</option>
-            </select>
-          </div>
-          <button type="submit" class="btn btn-primary w-100">Generate Timetable</button>
-        </form>
-        <div id="timetableContainer"></div>
-      </div>
-      <!-- Edit Timetable Button Added Here -->
-    <div id="editTimetableButton" class="mt-3 text-center">
-      <a href="edit_timetable.php" class="btn btn-secondary">Edit Timetable</a>
-    </div>
-      <div class="footer" id="footer">&copy; 2025 TimeTable Generator</div>
-      <!-- Loading overlay with round logo and percentage -->
-      <div id="loadingOverlay">
-        <div class="loading-content">
-          <img src="images/aamustedLog.png" alt="AAMUSTED Logo">
-          <div id="loadingPercentage">0%</div>
-        </div>
-      </div>
-      <button id="backToTop" style="display: none;">
-        <svg width="50" height="50" viewBox="0 0 50 50">
-          <circle id="progressCircle" cx="25" cy="25" r="20" fill="none" stroke="#FFD700" stroke-width="4" stroke-dasharray="126" stroke-dashoffset="126"/>
-        </svg>
-        <i class="fas fa-arrow-up arrow-icon"></i>
-      </button>
-      <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.2/js/bootstrap.bundle.min.js"></script>
-      <script>
-        // Update time in navbar
-        function updateTime(){
-          const now = new Date(),
-                timeString = now.toLocaleTimeString('en-US', {hour12:true, hour:'2-digit', minute:'2-digit', second:'2-digit'});
-          document.getElementById('currentTime').textContent = timeString;
-        }
-        setInterval(updateTime, 1000);
-        updateTime();
-        
-        // Toggle sidebar
-        document.getElementById('sidebarToggle').addEventListener('click', function(){
-          const sidebar = document.getElementById('sidebar'),
-                mainContent = document.getElementById('mainContent'),
-                footer = document.getElementById('footer');
-          sidebar.classList.toggle('show');
-          if(sidebar.classList.contains('show')){
-            mainContent.classList.add('shift');
-            footer.classList.add('shift');
-          } else {
-            mainContent.classList.remove('shift');
-            footer.classList.remove('shift');
-          }
-        });
-        
-        // AJAX submission for timetable generation with loading overlay and progress
-        document.getElementById('generateTimetableForm').addEventListener('submit', function(e){
-          e.preventDefault();
-          var loadingOverlay = document.getElementById('loadingOverlay');
-          loadingOverlay.style.display = 'flex';
-          var xhr = new XMLHttpRequest();
-          xhr.open('POST', 'Timetable.php', true);
-          
-          var uploadProgress = 0, downloadProgress = 0;
-          
-          function updateLoadingPercentage(){
-            var overall = uploadProgress + downloadProgress;
-            document.getElementById('loadingPercentage').innerText = overall + '%';
-          }
-          
-          xhr.upload.addEventListener('progress', function(e) {
-            if(e.lengthComputable){
-              uploadProgress = Math.round((e.loaded / e.total) * 50);
-              updateLoadingPercentage();
-            }
-          });
-          
-          xhr.addEventListener('progress', function(e) {
-            if(e.lengthComputable){
-              downloadProgress = Math.round((e.loaded / e.total) * 50);
-              updateLoadingPercentage();
-            }
-          });
-          
-          xhr.onreadystatechange = function() {
-            if(xhr.readyState == 4 && xhr.status == 200) {
-              document.getElementById('timetableContainer').innerHTML = xhr.responseText;
-              // In AJAX response, you may already include an Edit button if needed.
-              loadingOverlay.style.display = 'none';
-            }
-          };
-          
-          var formData = new FormData(document.getElementById('generateTimetableForm'));
-          formData.append('ajax', 'true'); // flag for AJAX response
-          xhr.send(formData);
-        });
-        
-        // Back-to-top button
-        const backToTopButton = document.getElementById("backToTop"),
-              progressCircle = document.getElementById("progressCircle"),
-              circumference = 2 * Math.PI * 20;
-        progressCircle.style.strokeDasharray = circumference;
-        progressCircle.style.strokeDashoffset = circumference;
-        window.addEventListener("scroll", function(){
-          const scrollTop = document.documentElement.scrollTop || document.body.scrollTop;
-          backToTopButton.style.display = scrollTop > 100 ? "block" : "none";
-          const scrollHeight = document.documentElement.scrollHeight - document.documentElement.clientHeight,
-                scrollPercentage = scrollTop / scrollHeight;
-          progressCircle.style.strokeDashoffset = circumference - (scrollPercentage * circumference);
-        });
-        backToTopButton.addEventListener("click", function(){
-          window.scrollTo({top:0, behavior:"smooth"});
-        });
-      </script>
-    </body>
-    </html>
-    <?php
-    $conn->close();
-    exit;
+    }
 }
 
-// -------------------------
-// When a semester is provided, generate the timetable
-
-$semester = intval($_POST['semester']);
-
-// 1. Retrieve courses (with lecturer info) for the selected semester.
-$sql = "SELECT co.course_id, co.course_name, cc.class_id, l.lecturer_id, l.lecturer_name
-        FROM course co
-        JOIN class_course cc ON co.course_id = cc.course_id
-        JOIN lecturer_course lc ON co.course_id = lc.course_id
-        JOIN lecturer l ON lc.lecturer_id = l.lecturer_id
-        WHERE co.semester = ?";
-
-$stmt = $conn->prepare($sql);
-if (!$stmt) {
-    die("Error preparing courses statement: " . $conn->error);
+// Fetch existing timetable entries for display
+$timetableEntries = [];
+$sql = "SELECT t.*, c.name as class_name, co.code as course_code, co.name as course_name, co.credits,
+               l.name as lecturer_name, l.rank, r.name as room_name, r.building,
+               ts.start_time, ts.end_time, ts.duration, CONCAT(s.academic_year, ' - Semester ', s.semester) as session_name, 
+               'Regular' as session_type,
+               sem.name as semester_name, d.name as department_name, d.code as department_code
+        FROM timetable t
+        JOIN classes c ON t.class_id = c.id
+        JOIN courses co ON t.course_id = co.id
+        JOIN lecturers l ON t.lecturer_id = l.id
+        JOIN rooms r ON t.room_id = r.id
+        JOIN time_slots ts ON t.time_slot_id = ts.id
+        JOIN sessions s ON t.session_id = s.id
+        JOIN semesters sem ON t.semester_id = sem.id
+        JOIN departments d ON c.department_id = d.id
+        ORDER BY t.day, ts.start_time, t.semester_id, t.session_id";
+$result = $conn->query($sql);
+if ($result) {
+    while ($row = $result->fetch_assoc()) {
+        $timetableEntries[] = $row;
+    }
 }
 
-$stmt->bind_param("i", $semester);
-$stmt->execute();
-$coursesResult = $stmt->get_result();
-
-if (!$coursesResult) {
-    die("Error retrieving courses: " . $conn->error);
-}
-
-$courses = [];
-while ($row = $coursesResult->fetch_assoc()) {
-    $courses[] = $row;
-}
-$stmt->close();
-
-if (empty($courses)) {
-    die("No courses available for Semester $semester.");
-}
-
-// 2. Retrieve distinct class information for the selected semester.
-$classSql = "SELECT DISTINCT c.class_id, c.class_name, c.class_size
-             FROM class c
-             JOIN class_course cc ON c.class_id = cc.class_id
-             JOIN course co ON cc.course_id = co.course_id
-             WHERE co.semester = ?";
-
-$stmt = $conn->prepare($classSql);
-if (!$stmt) {
-    die("Error preparing class statement: " . $conn->error);
-}
-
-$stmt->bind_param("i", $semester);
-$stmt->execute();
-$classResult = $stmt->get_result();
-
-if (!$classResult) {
-    die("Error retrieving class information: " . $conn->error);
-}
-
+// Fetch classes for dropdown
 $classes = [];
-while ($row = $classResult->fetch_assoc()) {
-    $classes[] = $row;
-}
-$stmt->close();
-
-if (empty($classes)) {
-    die("No classes found for Semester $semester.");
-}
-
-// 3. Retrieve rooms from the room table with capacity information.
-$roomSql = "SELECT room_id, room_name, capacity, room_type FROM room";
-$roomResult = $conn->query($roomSql);
-if (!$roomResult) {
-    die("Error retrieving rooms: " . $conn->error);
-}
-$rooms = [];
-while ($row = $roomResult->fetch_assoc()) {
-    $rooms[] = $row;
-}
-if (empty($rooms)) {
-    die("No rooms found.");
+$sql = "SELECT c.id, c.name, c.level, c.capacity, c.current_enrollment,
+               s.name as session_name, s.type as session_type,
+               d.name as department_name, d.code as department_code
+        FROM classes c
+        JOIN sessions s ON c.session_id = s.id
+        JOIN departments d ON c.department_id = d.id
+        WHERE c.is_active = 1
+        ORDER BY c.name";
+$result = $conn->query($sql);
+if ($result) {
+    while ($row = $result->fetch_assoc()) {
+        $classes[] = $row;
+    }
 }
 
-// 4. Retrieve lecturer information with availability constraints
-$lecturerSql = "SELECT l.lecturer_id, l.lecturer_name, l.max_daily_courses, l.preferred_times
-                FROM lecturer l
-                JOIN lecturer_course lc ON l.lecturer_id = lc.lecturer_id
-                JOIN course co ON lc.course_id = co.course_id
-                WHERE co.semester = ?
-                GROUP BY l.lecturer_id";
-
-$stmt = $conn->prepare($lecturerSql);
-if (!$stmt) {
-    die("Error preparing lecturer statement: " . $conn->error);
+// Fetch courses for dropdown
+$courses = [];
+$sql = "SELECT id, code, name, credits, hours_per_week, level FROM courses WHERE is_active = 1 ORDER BY code";
+$result = $conn->query($sql);
+if ($result) {
+    while ($row = $result->fetch_assoc()) {
+        $courses[] = $row;
+    }
 }
 
-$stmt->bind_param("i", $semester);
-$stmt->execute();
-$lecturerResult = $stmt->get_result();
-
+// Fetch lecturers for dropdown
 $lecturers = [];
-while ($row = $lecturerResult->fetch_assoc()) {
-    $lecturers[] = $row;
-}
-$stmt->close();
-
-// Include the improved GA timetable generator.
-include 'ga_timetable_generator.php';
-
-// Create an instance of the GA using classes, courses, rooms, and lecturers.
-$ga = new GeneticAlgorithm($classes, $courses, $rooms, $lecturers);
-
-// Initialize with a larger population for better results
-$ga->initializePopulation(100);
-
-// Evolve for more generations with the improved algorithm
-$bestTimetable = $ga->evolve(200);
-
-// Get constraint violation report
-$constraintReport = $ga->getConstraintReport($bestTimetable);
-
-// Insert the GA-generated timetable into the database using INSERT IGNORE.
-$insertedCount = 0;
-$errorCount = 0;
-
-foreach ($bestTimetable as $entry) {
-    $class_id    = $entry['class_id'];
-    $course_id   = $entry['course_id'];
-    $lecturer_id = $entry['lecturer_id'];
-    $room_id     = $entry['room_id'];
-    $day         = $entry['day'];
-    $time_slot   = $entry['time_slot'];
-    
-    $stmt = $conn->prepare("INSERT IGNORE INTO timetable (semester, day, time_slot, class_id, course_id, lecturer_id, room_id) VALUES (?, ?, ?, ?, ?, ?, ?)");
-    if (!$stmt) {
-        $errorCount++;
-        continue;
-    }
-    
-    $stmt->bind_param("issiiii", $semester, $day, $time_slot, $class_id, $course_id, $lecturer_id, $room_id);
-    if ($stmt->execute()) {
-        $insertedCount++;
-    } else {
-        $errorCount++;
-    }
-    $stmt->close();
-}
-
-// Display generation results
-echo "<div class='alert alert-info'>";
-echo "<h4>Timetable Generation Complete!</h4>";
-echo "<p><strong>Generated for:</strong> Semester $semester</p>";
-echo "<p><strong>Courses assigned:</strong> $insertedCount</p>";
-echo "<p><strong>Errors:</strong> $errorCount</p>";
-echo "<p><strong>Fitness Score:</strong> " . number_format($constraintReport['fitness_score'], 4) . "</p>";
-echo "</div>";
-
-// Build a grid for rendering.
-// Define days and time blocks for rendering. We include a fixed break slot.
-$days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
-$timeBlocks = [
-    '07:00-10:00',
-    '10:00-13:00',
-    'BREAK (13:00-14:00)',  // Fixed break column.
-    '14:00-17:00',
-    '17:00-20:00'
-];
-$timetableGrid = [];
-foreach ($days as $d) {
-    foreach ($timeBlocks as $tb) {
-        if ($tb === 'BREAK (13:00-14:00)') {
-            $timetableGrid[$d][$tb] = "BREAK";
-        } else {
-            $timetableGrid[$d][$tb] = [];
-        }
+$sql = "SELECT l.id, l.name, l.rank,
+               d.name as department_name, d.code as department_code
+        FROM lecturers l
+        JOIN departments d ON l.department_id = d.id
+        WHERE l.is_active = 1
+        ORDER BY l.name";
+$result = $conn->query($sql);
+if ($result) {
+    while ($row = $result->fetch_assoc()) {
+        $lecturers[] = $row;
     }
 }
 
-// Populate the grid with GA results.
-foreach ($bestTimetable as $entry) {
+// Fetch rooms for dropdown
+$rooms = [];
+$sql = "SELECT id, name, building, room_type, capacity FROM rooms WHERE is_active = 1 ORDER BY building, name";
+$result = $conn->query($sql);
+if ($result) {
+    while ($row = $result->fetch_assoc()) {
+        $rooms[] = $row;
+    }
+}
+
+// Fetch time slots for dropdown (excluding breaks)
+$timeSlots = [];
+$sql = "SELECT id, start_time, end_time, duration FROM time_slots WHERE is_break = 0 ORDER BY start_time";
+$result = $conn->query($sql);
+if ($result) {
+    while ($row = $result->fetch_assoc()) {
+        $timeSlots[] = $row;
+    }
+}
+
+// Fetch semesters for dropdown
+$semesters = [];
+$sql = "SELECT id, name, start_date, end_date FROM semesters WHERE is_active = 1 ORDER BY start_date";
+$result = $conn->query($sql);
+if ($result) {
+    while ($row = $result->fetch_assoc()) {
+        $semesters[] = $row;
+    }
+}
+
+// Fetch sessions for dropdown
+$sessions = [];
+$sql = "SELECT id, CONCAT(academic_year, ' - Semester ', semester) as name, 
+               'Regular' as type, start_date as start_time, end_date as end_time 
+        FROM sessions WHERE is_active = 1 ORDER BY academic_year, semester";
+$result = $conn->query($sql);
+if ($result) {
+    while ($row = $result->fetch_assoc()) {
+        $sessions[] = $row;
+    }
+}
+
+// Get statistics
+$totalEntries = count($timetableEntries);
+$confirmedEntries = count(array_filter($timetableEntries, function($e) { return $e['is_confirmed']; }));
+$pendingEntries = $totalEntries - $confirmedEntries;
+
+// Group by day for better analysis
+$dayCounts = [];
+foreach ($timetableEntries as $entry) {
     $day = $entry['day'];
-    $timeSlot = $entry['time_slot']; // Must be one of the available slots.
-    if (in_array($timeSlot, ['07:00-10:00','10:00-13:00','14:00-17:00','17:00-20:00'])) {
-        $className = $entry['class_name'];
-        $courseName = $entry['course_name'];
-        $lecturerName = $entry['lecturer_name'];
-        $roomName = $entry['room_name'];
-        $info = "<strong>$className</strong><br>$courseName<br>$lecturerName<br><em>Room: $roomName</em>";
-        $timetableGrid[$day][$timeSlot][] = $info;
+    if (!isset($dayCounts[$day])) {
+        $dayCounts[$day] = 0;
     }
+    $dayCounts[$day]++;
 }
 
-// If this is an AJAX request, output only the timetable table markup along with an "Edit Timetable" button.
-if(isset($_POST['ajax']) && $_POST['ajax'] == 'true'){
-    ?>
-    <table class="table table-bordered text-center align-middle">
-      <thead>
-        <tr>
-          <th>Day</th>
-          <?php foreach ($timeBlocks as $tb): ?>
-            <th><?php echo htmlspecialchars($tb); ?></th>
-          <?php endforeach; ?>
-        </tr>
-      </thead>
-      <tbody>
-        <?php foreach ($days as $d): ?>
-          <tr>
-            <th scope="row" style="white-space: nowrap;"><?php echo htmlspecialchars($d); ?></th>
-            <?php foreach ($timeBlocks as $tb): ?>
-              <td>
-                <?php
-                if ($tb === 'BREAK (13:00-14:00)') {
-                    echo "BREAK";
-                } else {
-                    $entries = $timetableGrid[$d][$tb];
-                    if (!empty($entries)) {
-                        echo implode('<hr>', $entries);
-                    } else {
-                        echo '—';
-                    }
-                }
-                ?>
-              </td>
-            <?php endforeach; ?>
-          </tr>
-        <?php endforeach; ?>
-      </tbody>
-    </table>
-    <div id="editTimetableButton" class="mt-3 text-center">
-      <a href="edit_timetable.php" class="btn btn-secondary">Edit Timetable</a>
-    </div>
-    <?php
-    $conn->close();
-    exit;
+// Group by session type for better analysis
+$sessionTypeCounts = [];
+foreach ($timetableEntries as $entry) {
+    $type = $entry['session_type'];
+    if (!isset($sessionTypeCounts[$type])) {
+        $sessionTypeCounts[$type] = 0;
+    }
+    $sessionTypeCounts[$type]++;
 }
-  
-// If not an AJAX request, output the full UI for the generated timetable.
+
+// Group by activity type for better analysis
+$activityTypeCounts = [];
+foreach ($timetableEntries as $entry) {
+    $type = $entry['activity_type'];
+    if (!isset($activityTypeCounts[$type])) {
+        $activityTypeCounts[$type] = 0;
+    }
+    $activityTypeCounts[$type]++;
+}
 ?>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <title>Generated Timetable</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.2/css/bootstrap.min.css" rel="stylesheet" />
-  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet" />  
-  <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600&display=swap" rel="stylesheet" />
-  <style>
-    :root { 
-      --primary-color: #800020; 
-      --hover-color: #600010; 
-      --accent-color: #FFD700; 
-      --bg-color: #ffffff; 
-      --sidebar-bg: #f8f8f8; 
-      --footer-bg: #800020; 
-    }
-    body { 
-      font-family: 'Open Sans', sans-serif; 
-      background: var(--bg-color); 
-      margin: 0; 
-      padding-top: 70px; 
-      font-size: 14px; 
-    }
-    .navbar { 
-      background: var(--primary-color); 
-      position: fixed; 
-      top: 0; 
-      width: 100%; 
-      z-index: 1050; 
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1); 
-    }
-    .navbar-brand { 
-      font-weight: 600; 
-      font-size: 1.75rem; 
-      display: flex; 
-      align-items: center; 
-      color: var(--accent-color) !important; 
-    }
-    #sidebarToggle { 
-      border: none; 
-      background: transparent; 
-      color: #fff; 
-      font-size: 1.5rem; 
-      margin-right: 10px; 
-    }
-    .sidebar { 
-      background: var(--sidebar-bg); 
-      position: fixed; 
-      top: 70px; 
-      left: 0; 
-      width: 250px; 
-      padding: 20px; 
-      box-shadow: 2px 0 5px rgba(0,0,0,0.1); 
-      transition: transform 0.3s ease; 
-      transform: translateX(-100%); 
-    }
-    .sidebar.show { 
-      transform: translateX(0); 
-    }
-    .nav-links { 
-      display: flex; 
-      flex-direction: column; 
-      gap: 5px; 
-    }
-    .nav-links a { 
-      display: flex; 
-      align-items: center; 
-      width: 100%; 
-      padding: 5px 10px; 
-      color: var(--primary-color); 
-      text-decoration: none; 
-      font-weight: 600; 
-      font-size: 1rem; 
-      transition: background 0.3s, color 0.3s; 
-    }
-    .nav-links a:hover, .nav-links a.active { 
-      background: var(--primary-color); 
-      color: #fff; 
-      border-radius: 4px; 
-    }
-    .main-content { 
-      transition: margin-left 0.3s ease; 
-      margin-left: 0; 
-      padding: 20px; 
-      height: calc(100vh - 70px); 
-      overflow: auto; 
-    }
-    .main-content.shift { 
-      margin-left: 250px; 
-    }
-    .footer { 
-      background: var(--footer-bg); 
-      color: #fff; 
-      padding: 10px; 
-      text-align: center; 
-      position: fixed; 
-      bottom: 0; 
-      left: 0; 
-      right: 0; 
-      transition: left 0.3s ease; 
-    }
-    .footer.shift { 
-      left: 250px; 
-    }
-    table { margin-top: 20px; }
-    th, td { vertical-align: middle !important; }
-  </style>
-</head>
-<body>
-  <nav class="navbar navbar-dark">
-    <div class="container-fluid">
-      <button id="sidebarToggle"><i class="fas fa-bars"></i></button>
-      <a class="navbar-brand text-white" href="#">
-        <img src="images/aamustedLog.png" alt="AAMUSTED Logo" style="height:40px; margin-right:10px;">TimeTable Generator
-      </a>
-      <div class="ms-auto text-white" id="currentTime">12:00:00 PM</div>
-    </div>
-  </nav>
-  <?php $currentPage = basename($_SERVER['PHP_SELF']); ?>
-  <div class="sidebar" id="sidebar">
-    <div class="nav-links">
-      <a href="index.php" class="<?= ($currentPage == 'index.php') ? 'active' : '' ?>"><i class="fas fa-home me-2"></i>Dashboard</a>
-      <a href="Timetable.php" class="<?= ($currentPage == 'Timetable.php') ? 'active' : '' ?>"><i class="fas fa-calendar-alt me-2"></i>Generate Timetable</a>
-      <a href="view_timetable.php" class="<?= ($currentPage == 'view_timetable.php') ? 'active' : '' ?>"><i class="fas fa-table me-2"></i>View Timetable</a>
-      <a href="department.php" class="<?= ($currentPage == 'department.php') ? 'active' : '' ?>"><i class="fas fa-building me-2"></i>Department</a>
-      <a href="lecturer.php" class="<?= ($currentPage == 'lecturer.php') ? 'active' : '' ?>"><i class="fas fa-chalkboard-teacher me-2"></i>Lecturers</a>
-      <a href="rooms.php" class="<?= ($currentPage == 'rooms.php') ? 'active' : '' ?>"><i class="fas fa-door-open me-2"></i>Rooms</a>
-      <a href="courses.php" class="<?= ($currentPage == 'courses.php') ? 'active' : '' ?>"><i class="fas fa-book me-2"></i>Course</a>
-      <a href="classes.php" class="<?= ($currentPage == 'classes.php') ? 'active' : '' ?>"><i class="fas fa-users me-2"></i>Classes</a>
-      <a href="buildings.php" class="<?= ($currentPage == 'buildings.php') ? 'active' : '' ?>"><i class="fas fa-city me-2"></i>Buildings</a>
-    </div>
-  </div>
+
+<?php $pageTitle = 'Manage Timetable'; include 'includes/header.php'; include 'includes/sidebar.php'; ?>
+
   <div class="main-content" id="mainContent">
-    <h3 class="mb-3">Generated Timetable for Semester <?php echo htmlspecialchars($semester); ?></h3>
-    <table class="table table-bordered text-center align-middle">
-      <thead>
-        <tr>
-          <th>Day</th>
-          <?php foreach ($timeBlocks as $tb): ?>
-            <th><?php echo htmlspecialchars($tb); ?></th>
-          <?php endforeach; ?>
-        </tr>
-      </thead>
-      <tbody>
-        <?php foreach ($days as $d): ?>
-          <tr>
-            <th scope="row" style="white-space: nowrap;"><?php echo htmlspecialchars($d); ?></th>
-            <?php foreach ($timeBlocks as $tb): ?>
-              <td>
-                <?php
-                if ($tb === 'BREAK (13:00-14:00)') {
-                    echo "BREAK";
-                } else {
-                    $entries = $timetableGrid[$d][$tb];
-                    if (!empty($entries)) {
-                        echo implode('<hr>', $entries);
-                    } else {
-                        echo '—';
-                    }
-                }
-                ?>
-              </td>
-            <?php endforeach; ?>
-          </tr>
-        <?php endforeach; ?>
-      </tbody>
-    </table>
-   
-  </div>
-  <div class="footer" id="footer">&copy; 2025 TimeTable Generator</div>
-  <button id="backToTop" style="display: none;">
-    <svg width="50" height="50" viewBox="0 0 50 50">
-      <circle id="progressCircle" cx="25" cy="25" r="20" fill="none" stroke="#FFD700" stroke-width="4" stroke-dasharray="126" stroke-dashoffset="126"/>
-    </svg>
-    <i class="fas fa-arrow-up arrow-icon"></i>
-  </button>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.2/js/bootstrap.bundle.min.js"></script>
-  <script>
-    function updateTime(){
-      const now = new Date(),
-            timeString = now.toLocaleTimeString('en-US', {hour12:true, hour:'2-digit', minute:'2-digit', second:'2-digit'});
-      document.getElementById('currentTime').textContent = timeString;
-    }
-    setInterval(updateTime, 1000);
-    updateTime();
-    document.getElementById('sidebarToggle').addEventListener('click', function(){
-      const sidebar = document.getElementById('sidebar'),
-            mainContent = document.getElementById('mainContent'),
-            footer = document.getElementById('footer');
-      sidebar.classList.toggle('show');
-      if(sidebar.classList.contains('show')){
-        mainContent.classList.add('shift');
-        footer.classList.add('shift');
-      } else {
-        mainContent.classList.remove('shift');
-        footer.classList.remove('shift');
-      }
-    });
-    const backToTopButton = document.getElementById("backToTop"),
-          progressCircle = document.getElementById("progressCircle"),
-          circumference = 2 * Math.PI * 20;
-    progressCircle.style.strokeDasharray = circumference;
-    progressCircle.style.strokeDashoffset = circumference;
-    window.addEventListener("scroll", function(){
-      const scrollTop = document.documentElement.scrollTop || document.body.scrollTop;
-      backToTopButton.style.display = scrollTop > 100 ? "block" : "none";
-      const scrollHeight = document.documentElement.scrollHeight - document.documentElement.clientHeight,
-            scrollPercentage = scrollTop / scrollHeight;
-      progressCircle.style.strokeDashoffset = circumference - (scrollPercentage * circumference);
-    });
-    backToTopButton.addEventListener("click", function(){
-      window.scrollTo({top:0, behavior:"smooth"});
-    });
-  </script>
-</body>
-</html>
-<?php
-$conn->close();
-?>
+    <div class="container mt-3">
+        <!-- Statistics Cards -->
+        <div class="row mb-4">
+            <div class="col-md-3">
+                <div class="card bg-primary text-white">
+                    <div class="card-body text-center">
+                        <h4 class="mb-0"><?php echo $totalEntries; ?></h4>
+                        <small>Total Entries</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card bg-success text-white">
+                    <div class="card-body text-center">
+                        <h4 class="mb-0"><?php echo $confirmedEntries; ?></h4>
+                        <small>Confirmed</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card bg-warning text-dark">
+                    <div class="card-body text-center">
+                        <h4 class="mb-0"><?php echo $pendingEntries; ?></h4>
+                        <small>Pending</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card bg-info text-white">
+                    <div class="card-body text-center">
+                        <h4 class="mb-0"><?php echo count($sessionTypeCounts); ?></h4>
+                        <small>Session Types</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Analysis Breakdowns -->
+        <div class="row mb-4">
+            <!-- Day Distribution -->
+            <?php if (!empty($dayCounts)): ?>
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">Daily Distribution</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <?php foreach ($dayCounts as $day => $count): ?>
+                                <div class="col-md-6 mb-2">
+                                    <div class="card bg-light">
+                                        <div class="card-body text-center p-2">
+                                            <h6 class="mb-0"><?php echo ucfirst($day); ?></h6>
+                                            <small class="text-muted"><?php echo $count; ?> classes</small>
+                                        </div>
+                                    </div>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <?php endif; ?>
+
+            <!-- Session Type Distribution -->
+            <?php if (!empty($sessionTypeCounts)): ?>
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">Session Type Distribution</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <?php foreach ($sessionTypeCounts as $type => $count): ?>
+                                <div class="col-md-6 mb-2">
+                                    <div class="card bg-light">
+                                        <div class="card-body text-center p-2">
+                                            <h6 class="mb-0"><?php echo ucfirst($type); ?></h6>
+                                            <small class="text-muted"><?php echo $count; ?> classes</small>
+                                        </div>
+                                    </div>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <?php endif; ?>
+
+            <!-- Activity Type Distribution -->
+            <?php if (!empty($activityTypeCounts)): ?>
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">Activity Type Distribution</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <?php foreach ($activityTypeCounts as $type => $count): ?>
+                                <div class="col-md-6 mb-2">
+                                    <div class="card bg-light">
+                                        <div class="card-body text-center p-2">
+                                            <h6 class="mb-0"><?php echo ucfirst($type); ?></h6>
+                                            <small class="text-muted"><?php echo $count; ?> classes</small>
+                                        </div>
+                                    </div>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <?php endif; ?>
+        </div>
+
+        <div class="row">
+            <!-- Add Timetable Entry Form -->
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h4 id="formHeader">Schedule Class</h4>
+                    </div>
+                    <div class="card-body">
+                        <form method="POST" action="" id="timetableForm">
+                            <input type="hidden" id="action" name="action" value="add">
+                            <input type="hidden" id="timetableId" name="id" value="">
+                            
+                            <div class="alert alert-info" id="formMode" style="display: none;">
+                                <strong>Edit Mode:</strong> You are currently editing an existing schedule. Click "Cancel Edit" to return to add mode.
+                            </div>
+                            <div class="mb-3">
+                                <label for="classId" class="form-label">Class *</label>
+                                <select class="form-select" id="classId" name="classId" required>
+                                    <option value="">Select Class</option>
+                                    <?php foreach ($classes as $class): ?>
+                                        <option value="<?php echo $class['id']; ?>">
+                                            <?php echo htmlspecialchars($class['name']); ?> (Level <?php echo $class['level']; ?>)<br>
+                                            <small class="text-muted">
+                                                <?php echo htmlspecialchars($class['session_name']); ?> (<?php echo ucfirst($class['session_type']); ?>)<br>
+                                                <?php echo htmlspecialchars($class['department_code']); ?> - <?php echo htmlspecialchars($class['department_name']); ?><br>
+                                                Capacity: <?php echo $class['current_enrollment']; ?>/<?php echo $class['capacity']; ?>
+                                            </small>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                                <div class="form-text">Select the class to schedule</div>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="courseId" class="form-label">Course *</label>
+                                <select class="form-select" id="courseId" name="courseId" required>
+                                    <option value="">Select Course</option>
+                                    <?php foreach ($courses as $course): ?>
+                                        <option value="<?php echo $course['id']; ?>">
+                                            <?php echo htmlspecialchars($course['code']); ?> - <?php echo htmlspecialchars($course['name']); ?><br>
+                                            <small class="text-muted">
+                                                <?php echo $course['credits']; ?> credits, Level <?php echo $course['level']; ?>, <?php echo $course['hours_per_week']; ?> hrs/week
+                                            </small>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                                <div class="form-text">Select the course to schedule</div>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="lecturerId" class="form-label">Lecturer *</label>
+                                <select class="form-select" id="lecturerId" name="lecturerId" required>
+                                    <option value="">Select Lecturer</option>
+                                    <?php foreach ($lecturers as $lecturer): ?>
+                                        <option value="<?php echo $lecturer['id']; ?>">
+                                            <?php echo htmlspecialchars($lecturer['name']); ?>
+                                            <?php if ($lecturer['rank']): ?>
+                            (<?php echo htmlspecialchars($lecturer['rank']); ?>)
+                        <?php endif; ?><br>
+                                            <small class="text-muted">
+                                                <?php echo htmlspecialchars($lecturer['department_code']); ?> - <?php echo htmlspecialchars($lecturer['department_name']); ?><br>
+                                                Department: <?php echo htmlspecialchars($lecturer['department_name']); ?>
+                                            </small>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                                <div class="form-text">Select the lecturer to teach this class</div>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="roomId" class="form-label">Room *</label>
+                                <select class="form-select" id="roomId" name="roomId" required>
+                                    <option value="">Select Room</option>
+                                    <?php foreach ($rooms as $room): ?>
+                                        <option value="<?php echo $room['id']; ?>">
+                                            <?php echo htmlspecialchars($room['name']); ?> (<?php echo htmlspecialchars($room['building']); ?>)<br>
+                                            <small class="text-muted">
+                                                <?php echo ucfirst(str_replace('_', ' ', $room['room_type'])); ?>, Capacity: <?php echo $room['capacity']; ?>
+                                            </small>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                                <div class="form-text">Select the room for this class</div>
+                            </div>
+                            
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="timeSlotId" class="form-label">Time Slot *</label>
+                                        <select class="form-select" id="timeSlotId" name="timeSlotId" required>
+                                            <option value="">Select Time</option>
+                                            <?php foreach ($timeSlots as $slot): ?>
+                                                <option value="<?php echo $slot['id']; ?>">
+                                                    <?php echo date('g:i A', strtotime($slot['start_time'])); ?> - <?php echo date('g:i A', strtotime($slot['end_time'])); ?><br>
+                                                    <small class="text-muted"><?php echo $slot['duration']; ?> minutes</small>
+                                                </option>
+                                            <?php endforeach; ?>
+                                        </select>
+                                        <div class="form-text">Select the time slot</div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="day" class="form-label">Day *</label>
+                                        <select class="form-select" id="day" name="day" required>
+                                            <option value="">Select Day</option>
+                                            <option value="monday">Monday</option>
+                                            <option value="tuesday">Tuesday</option>
+                                            <option value="wednesday">Wednesday</option>
+                                            <option value="thursday">Thursday</option>
+                                            <option value="friday">Friday</option>
+                                            <option value="saturday">Saturday</option>
+                                            <option value="sunday">Sunday</option>
+                                        </select>
+                                        <div class="form-text">Select the day of the week</div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="semesterId" class="form-label">Semester *</label>
+                                        <select class="form-select" id="semesterId" name="semesterId" required>
+                                            <option value="">Select Semester</option>
+                                            <?php foreach ($semesters as $semester): ?>
+                                                <option value="<?php echo $semester['id']; ?>">
+                                                    <?php echo htmlspecialchars($semester['name']); ?><br>
+                                                    <small class="text-muted">
+                                                        <?php echo date('M j', strtotime($semester['start_date'])); ?> - <?php echo date('M j', strtotime($semester['end_date'])); ?>
+                                                    </small>
+                                                </option>
+                                            <?php endforeach; ?>
+                                        </select>
+                                        <div class="form-text">Select the semester</div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="sessionId" class="form-label">Session *</label>
+                                        <select class="form-select" id="sessionId" name="sessionId" required>
+                                            <option value="">Select Session</option>
+                                            <?php foreach ($sessions as $session): ?>
+                                                <option value="<?php echo $session['id']; ?>">
+                                                    <?php echo htmlspecialchars($session['name']); ?> (<?php echo ucfirst($session['type']); ?>)<br>
+                                                    <small class="text-muted">
+                                                        <?php echo date('g:i A', strtotime($session['start_time'])); ?> - <?php echo date('g:i A', strtotime($session['end_time'])); ?>
+                                                    </small>
+                                                </option>
+                                            <?php endforeach; ?>
+                                        </select>
+                                        <div class="form-text">Select the session</div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="activityType" class="form-label">Activity Type</label>
+                                <select class="form-select" id="activityType" name="activityType">
+                                    <option value="lecture">Lecture</option>
+                                    <option value="tutorial">Tutorial</option>
+                                    <option value="laboratory">Laboratory</option>
+                                    <option value="seminar">Seminar</option>
+                                </select>
+                                <div class="form-text">Select the type of activity</div>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="notes" class="form-label">Notes</label>
+                                <textarea class="form-control" id="notes" name="notes" rows="2" placeholder="Optional notes about this schedule"></textarea>
+                                <div class="form-text">Additional information about this schedule</div>
+                            </div>
+                            
+                            <div class="mb-3" id="confirmationDiv" style="display: none;">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="isConfirmed" name="isConfirmed">
+                                    <label class="form-check-label" for="isConfirmed">
+                                        Mark as Confirmed
+                                    </label>
+                                </div>
+                                <div class="form-text">Check this to confirm the schedule is finalized</div>
+                            </div>
+                            
+                            <div class="d-grid gap-2">
+                                <button type="submit" class="btn btn-primary" id="submitBtn">Schedule Class</button>
+                                <button type="button" class="btn btn-secondary" id="cancelBtn" style="display: none;" onclick="cancelEdit()">Cancel Edit</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Display Timetable Entries -->
+            <div class="col-md-6">
+                <div class="table-container">
+                    <div class="table-header">
+                        <h4><i class="fas fa-calendar-check me-2"></i>Current Schedule</h4>
+                    </div>
+                    <div class="search-container">
+                        <input type="text" id="searchInput" class="search-input" placeholder="Search schedule...">
+                    </div>
+                    <?php if (empty($timetableEntries)): ?>
+                        <div class="empty-state">
+                            <i class="fas fa-calendar-times"></i>
+                            <h5>No scheduled classes found</h5>
+                            <p>Start by scheduling your first class using the form on the left.</p>
+                        </div>
+                    <?php else: ?>
+                        <div class="table-responsive">
+                            <table class="table">
+                                    <thead>
+                                        <tr>
+                                            <th>Class</th>
+                                            <th>Course</th>
+                                            <th>Schedule</th>
+                                            <th>Status</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php foreach ($timetableEntries as $entry): ?>
+                                            <tr>
+                                                <td>
+                                                    <strong><?php echo htmlspecialchars($entry['class_name']); ?></strong><br>
+                                                    <small class="text-muted"><?php echo htmlspecialchars($entry['department_code']); ?></small>
+                                                </td>
+                                                <td>
+                                                    <strong><?php echo htmlspecialchars($entry['course_code']); ?></strong><br>
+                                                    <small class="text-muted"><?php echo htmlspecialchars($entry['course_name']); ?></small><br>
+                                                    <span class="badge bg-secondary"><?php echo ucfirst($entry['activity_type']); ?></span>
+                                                </td>
+                                                <td>
+                                                    <div class="small">
+                                                        <strong><?php echo ucfirst($entry['day']); ?></strong><br>
+                                                        <?php echo date('g:i A', strtotime($entry['start_time'])); ?> - <?php echo date('g:i A', strtotime($entry['end_time'])); ?><br>
+                                                        <small class="text-muted">
+                                                            <?php echo htmlspecialchars($entry['room_name']); ?> (<?php echo htmlspecialchars($entry['building']); ?>)<br>
+                                                            <?php echo htmlspecialchars($entry['session_name']); ?> - <?php echo htmlspecialchars($entry['semester_name']); ?>
+                                                        </small>
+                                                    </div>
+                                                </td>
+                                                <td>
+                                                    <?php if ($entry['is_confirmed']): ?>
+                                                        <span class="badge bg-success">Confirmed</span>
+                                                    <?php else: ?>
+                                                        <span class="badge bg-warning">Pending</span>
+                                                    <?php endif; ?>
+                                                </td>
+                                                <td>
+                                                    <button class="btn btn-sm btn-outline-primary" onclick="editEntry(<?php echo $entry['id']; ?>, <?php echo $entry['class_id']; ?>, <?php echo $entry['course_id']; ?>, <?php echo $entry['lecturer_id']; ?>, <?php echo $entry['room_id']; ?>, <?php echo $entry['time_slot_id']; ?>, '<?php echo $entry['day']; ?>', <?php echo $entry['semester_id']; ?>, <?php echo $entry['session_id']; ?>, '<?php echo $entry['activity_type']; ?>', '<?php echo htmlspecialchars($entry['notes']); ?>', <?php echo $entry['is_confirmed']; ?>)">Edit</button>
+                                                    <button class="btn btn-sm btn-outline-danger" onclick="deleteEntry(<?php echo $entry['id']; ?>, '<?php echo htmlspecialchars($entry['class_name']); ?> - <?php echo htmlspecialchars($entry['course_code']); ?>')">Delete</button>
+                                                </td>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                        <?php endif; ?>
+                </div>
+            </div>
+        </div>
+        
+        <div class="mt-3">
+    
+        </div>
+    </div>
+
+<?php include 'includes/footer.php'; ?>

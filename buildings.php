@@ -180,35 +180,8 @@ $result = $conn->query($sql);
     }
   </style>
 </head>
-<body>
-  <!-- Header -->
-  <nav class="navbar navbar-dark">
-    <div class="container-fluid">
-      <button id="sidebarToggle"><i class="fas fa-bars"></i></button>
-      <a class="navbar-brand text-white" href="#">
-        <img src="images/aamustedLog.png" alt="AAMUSTED Logo">TimeTable Generator
-      </a>
-      <div class="ms-auto text-white" id="currentTime">12:00:00 PM</div>
-    </div>
-  </nav>
-  
-  <!-- Sidebar -->
-  <?php $currentPage = basename($_SERVER['PHP_SELF']); ?>
-  <div class="sidebar" id="sidebar">
-    <div class="nav-links">
-      <a href="index.php" class="<?= ($currentPage == 'index.php') ? 'active' : '' ?>"><i class="fas fa-home me-2"></i>Dashboard</a>
-      <a href="timetable.php" class="<?= ($currentPage == 'timetable.php') ? 'active' : '' ?>"><i class="fas fa-calendar-alt me-2"></i>Generate Timetable</a>
-      <a href="view_timetable.php" class="<?= ($currentPage == 'view_timetable.php') ? 'active' : '' ?>"><i class="fas fa-table me-2"></i>View Timetable</a>
-      <a href="department.php" class="<?= ($currentPage == 'department.php') ? 'active' : '' ?>"><i class="fas fa-building me-2"></i>Department</a>
-      <a href="lecturer.php" class="<?= ($currentPage == 'lecturer.php') ? 'active' : '' ?>"><i class="fas fa-chalkboard-teacher me-2"></i>Lecturers</a>
-      <a href="rooms.php" class="<?= ($currentPage == 'rooms.php') ? 'active' : '' ?>"><i class="fas fa-door-open me-2"></i>Rooms</a>
-      <a href="courses.php" class="<?= ($currentPage == 'courses.php') ? 'active' : '' ?>"><i class="fas fa-book me-2"></i>Course</a>
-      <a href="classes.php" class="<?= ($currentPage == 'classes.php') ? 'active' : '' ?>"><i class="fas fa-users me-2"></i>Classes</a>
-      <a href="buildings.php" class="<?= ($currentPage == 'buildings.php') ? 'active' : '' ?>"><i class="fas fa-city me-2"></i>Buildings</a>
-    </div>
-  </div>
-  
-  <!-- Main Content -->
+<?php $pageTitle = 'Buildings Management'; include 'includes/header.php'; include 'includes/sidebar.php'; ?>
+
   <div class="main-content" id="mainContent">
     <h2>Buildings Management</h2>
     <!-- Search & Action Buttons -->
@@ -224,8 +197,15 @@ $result = $conn->query($sql);
     </div>
     
     <!-- Buildings Table -->
-    <div class="table-responsive">
-      <table class="table table-striped table-custom" id="buildingTable">
+    <div class="table-container">
+      <div class="table-header">
+        <h4><i class="fas fa-building me-2"></i>Existing Buildings</h4>
+      </div>
+      <div class="search-container">
+        <input type="text" id="searchInput" class="search-input" placeholder="Search buildings...">
+      </div>
+      <div class="table-responsive">
+        <table class="table" id="buildingTable">
         <thead>
           <tr>
             <th>Building Id</th>
@@ -262,13 +242,11 @@ $result = $conn->query($sql);
           ?>
         </tbody>
       </table>
+        </div>
     </div>
   </div>
   
-  <!-- Footer -->
-  <div class="footer" id="footer">
-    &copy; 2025 TimeTable Generator
-  </div>
+<?php include 'includes/footer.php'; ?>
   
   <!-- Back to Top Button with Progress Indicator -->
   <button id="backToTop">

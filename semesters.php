@@ -1,13 +1,8 @@
 <?php
-// Connect to the database and query lecturer data
+// Connect to the database and fetch semesters data
 include 'connect.php';
 
-$sql = "SELECT lecturer.lecturer_id, lecturer.lecturer_name, lecturer.department, 
-               GROUP_CONCAT(course.course_name SEPARATOR ', ') AS courses
-        FROM lecturer
-        LEFT JOIN lecturer_course ON lecturer.lecturer_id = lecturer_course.lecturer_id
-        LEFT JOIN course ON lecturer_course.course_id = course.course_id
-        GROUP BY lecturer.lecturer_id";
+$sql = "SELECT * FROM semesters";
 $result = $conn->query($sql);
 ?>
 <!DOCTYPE html>
@@ -15,7 +10,7 @@ $result = $conn->query($sql);
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Lecturers Management - TimeTable Generator</title>
+  <title>Semesters Management - University Timetable Generator</title>
   <!-- Bootstrap CSS -->
   <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.2/css/bootstrap.min.css" rel="stylesheet" />
   <!-- Font Awesome -->
@@ -28,7 +23,7 @@ $result = $conn->query($sql);
       --hover-color: #600010;     /* Darker maroon */
       --accent-color: #FFD700;    /* Accent goldenrod */
       --bg-color: #ffffff;        /* White background */
-      --sidebar-bg: #f8f8f8;       /* Light gray sidebar */
+      --sidebar-bg: #f8f8f8;      /* Light gray sidebar */
       --footer-bg: #800020;       /* Footer same as primary */
     }
     /* Global Styles */
@@ -37,7 +32,7 @@ $result = $conn->query($sql);
       background-color: var(--bg-color);
       margin: 0;
       padding-top: 70px; /* For fixed header */
-      overflow: hidden;
+      overflow: auto;
       font-size: 14px;
     }
     /* Header */
@@ -73,10 +68,13 @@ $result = $conn->query($sql);
       top: 70px;
       left: 0;
       width: 250px;
+      height: calc(100vh - 70px);
       padding: 20px;
       box-shadow: 2px 0 5px rgba(0,0,0,0.1);
       transition: transform 0.3s ease;
       transform: translateX(-100%);
+      z-index: 1040; /* Higher than footer, lower than navbar */
+      overflow-y: auto; /* Scrollable if content is too long */
     }
     .sidebar.show {
       transform: translateX(0);
@@ -85,10 +83,10 @@ $result = $conn->query($sql);
       display: flex;
       flex-direction: column;
       gap: 5px;
+      padding-bottom: 20px; /* Add bottom padding to prevent overlap with footer */
     }
     .nav-links a {
-      display: flex;
-      align-items: center;
+      display: block;
       width: 100%;
       padding: 5px 10px;
       color: var(--primary-color);
@@ -113,7 +111,7 @@ $result = $conn->query($sql);
       transition: margin-left 0.3s ease;
       margin-left: 0;
       padding: 20px;
-      height: calc(100vh - 70px);
+      min-height: calc(100vh - 70px);
       overflow: auto;
     }
     .main-content.shift {
@@ -141,6 +139,7 @@ $result = $conn->query($sql);
       left: 0;
       right: 0;
       transition: left 0.3s ease;
+      z-index: 1030; /* Lower than sidebar */
     }
     .footer.shift {
       left: 250px;
@@ -194,106 +193,88 @@ $result = $conn->query($sql);
     }
   </style>
 </head>
-<body>
-  <!-- Header -->
-  <nav class="navbar navbar-dark">
-    <div class="container-fluid">
-      <button id="sidebarToggle"><i class="fas fa-bars"></i></button>
-      <a class="navbar-brand text-white" href="#">
-        <img src="images/aamustedLog.png" alt="AAMUSTED Logo">TimeTable Generator
-      </a>
-      <div class="ms-auto text-white" id="currentTime">12:00:00 PM</div>
-    </div>
-  </nav>
-  
-  <!-- Sidebar (Dashboard Style with View Timetable Link) -->
-  <?php $currentPage = basename($_SERVER['PHP_SELF']); ?>
-  <div class="sidebar" id="sidebar">
-    <div class="nav-links">
-      <a href="index.php" class="<?= ($currentPage == 'index.php') ? 'active' : '' ?>"><i class="fas fa-home me-2"></i>Dashboard</a>
-      <a href="timetable.php" class="<?= ($currentPage == 'timetable.php') ? 'active' : '' ?>"><i class="fas fa-calendar-alt me-2"></i>Generate Timetable</a>
-      <a href="view_timetable.php" class="<?= ($currentPage == 'view_timetable.php') ? 'active' : '' ?>"><i class="fas fa-table me-2"></i>View Timetable</a>
-      <a href="department.php" class="<?= ($currentPage == 'department.php') ? 'active' : '' ?>"><i class="fas fa-building me-2"></i>Department</a>
-      <a href="lecturer.php" class="<?= ($currentPage == 'lecturer.php') ? 'active' : '' ?>"><i class="fas fa-chalkboard-teacher me-2"></i>Lecturers</a>
-      <a href="rooms.php" class="<?= ($currentPage == 'rooms.php') ? 'active' : '' ?>"><i class="fas fa-door-open me-2"></i>Rooms</a>
-      <a href="courses.php" class="<?= ($currentPage == 'courses.php') ? 'active' : '' ?>"><i class="fas fa-book me-2"></i>Course</a>
-      <a href="classes.php" class="<?= ($currentPage == 'classes.php') ? 'active' : '' ?>"><i class="fas fa-users me-2"></i>Classes</a>
-      <a href="buildings.php" class="<?= ($currentPage == 'buildings.php') ? 'active' : '' ?>"><i class="fas fa-city me-2"></i>Buildings</a>
-    </div>
-  </div>
-  
-  <!-- Main Content -->
+<?php $pageTitle = 'Semesters Management'; include 'includes/header.php'; include 'includes/sidebar.php'; ?>
+
   <div class="main-content" id="mainContent">
-    <h2>Lecturers Management</h2>
+    <h2>Semesters Management</h2>
     <!-- Search & Action Buttons -->
     <div class="d-flex justify-content-between align-items-center mb-4">
       <div class="input-group" style="width: 300px;">
         <span class="input-group-text"><i class="fas fa-search"></i></span>
-        <input type="text" id="searchInput" class="form-control" placeholder="Search for lecturers...">
+        <input type="text" class="form-control" id="searchInput" placeholder="Search for semesters...">
       </div>
       <div>
         <button class="btn btn-primary me-2" data-bs-toggle="modal" data-bs-target="#importModal">Import</button>
-        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#dataEntryModal">Add Lecturer</button>
+        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#dataEntryModal">Add</button>
       </div>
     </div>
     
-    <!-- Table for displaying lecturers -->
-    <div class="table-responsive">
-      <table class="table table-striped table-custom" id="lecturerTable">
+    <!-- Semesters Table -->
+    <div class="table-container">
+      <div class="table-header">
+        <h4><i class="fas fa-calendar me-2"></i>Existing Semesters</h4>
+      </div>
+      <div class="search-container">
+        <input type="text" id="searchInput" class="search-input" placeholder="Search semesters...">
+      </div>
+      <div class="table-responsive">
+        <table class="table" id="semestersTable">
         <thead>
           <tr>
-            <th>Lecturer ID</th>
-            <th>Lecturer Name</th>
-            <th>Department</th>
-            <th>Courses</th>
+            <th>Semester ID</th>
+            <th>Semester Name</th>
+            <th>Start Date</th>
+            <th>End Date</th>
+            <th>Status</th>
             <th>Actions</th>
           </tr>
         </thead>
         <tbody>
           <?php
           if ($result) {
-              while ($row = $result->fetch_assoc()) { ?>
-                  <tr>
-                      <td><?php echo $row['lecturer_id']; ?></td>
-                      <td><?php echo $row['lecturer_name']; ?></td>
-                      <td><?php echo $row['department']; ?></td>
-                      <td><?php echo $row['courses'] ?: 'No Courses Assigned'; ?></td>
-                      <td>
-                          <a href="delete_lecturer.php?lecturer_id=<?php echo $row['lecturer_id']; ?>" class="btn btn-danger btn-sm" onclick="return confirm('Are you sure you want to delete this lecturer?');">Delete</a>
-                      </td>
-                  </tr>
-          <?php }
+              while ($row = $result->fetch_assoc()) {
+                  $status = $row['is_active'] ? '<span class="badge bg-success">Active</span>' : '<span class="badge bg-secondary">Inactive</span>';
+                  echo "<tr>
+                          <td>{$row['id']}</td>
+                          <td>{$row['name']}</td>
+                          <td>" . ($row['start_date'] ? date('M d, Y', strtotime($row['start_date'])) : 'Not set') . "</td>
+                          <td>" . ($row['end_date'] ? date('M d, Y', strtotime($row['end_date'])) : 'Not set') . "</td>
+                          <td>{$status}</td>
+                          <td>
+                              <button type='button' class='btn btn-secondary btn-sm me-1 edit-semester-btn' data-id='" . $row['id'] . "' data-name='" . htmlspecialchars($row['name'], ENT_QUOTES) . "' data-start-date='" . $row['start_date'] . "' data-end-date='" . $row['end_date'] . "' data-is-active='" . $row['is_active'] . "'>Edit</button>
+                              <a href='delete_semester.php?semester_id={$row['id']}' class='btn btn-danger btn-sm' onclick='return confirm(\"Are you sure you want to delete this semester?\")'>Delete</a>
+                          </td>
+                        </tr>";
+              }
+          } else {
+              echo "<tr><td colspan='6' class='text-center'>No semesters found</td></tr>";
           }
           $conn->close();
           ?>
         </tbody>
       </table>
+        </div>
+      <div class="mt-3">
+
+      </div>
     </div>
   </div>
   
   <!-- Footer -->
   <div class="footer" id="footer">
-    &copy; 2025 TimeTable Generator
+    &copy; 2025 University Timetable Generator
   </div>
   
-  <!-- Back to Top Button with Progress Indicator -->
-  <button id="backToTop">
-    <svg width="50" height="50" viewBox="0 0 50 50">
-      <circle id="progressCircle" cx="25" cy="25" r="20" fill="none" stroke="#FFD700" stroke-width="4" stroke-dasharray="126" stroke-dashoffset="126"/>
-    </svg>
-    <i class="fas fa-arrow-up arrow-icon"></i>
-  </button>
-  
-  <!-- Import Modal (Accept Only Excel Files) -->
+  <!-- Import Modal (Excel Files Only) -->
   <div class="modal fade" id="importModal" tabindex="-1" aria-labelledby="importModalLabel" aria-hidden="true">
     <div class="modal-dialog">
       <div class="modal-content">
         <div class="modal-header">
-          <h5 class="modal-title" id="importModalLabel">Import Lecturer</h5>
+          <h5 class="modal-title" id="importModalLabel">Import Semesters</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body">
-          <form action="import_lecturer.php" method="POST" enctype="multipart/form-data">
+          <form action="import_semester.php" method="POST" enctype="multipart/form-data">
             <div class="mb-3">
               <label for="file" class="form-label">Choose Excel File</label>
               <input type="file" class="form-control" id="file" name="file" required accept=".xls, .xlsx">
@@ -310,69 +291,88 @@ $result = $conn->query($sql);
     <div class="modal-dialog">
       <div class="modal-content">
         <div class="modal-header">
-          <h5 class="modal-title" id="dataEntryModalLabel">Enter Lecturer Details</h5>
+          <h5 class="modal-title" id="dataEntryModalLabel">Add New Semester</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body">
-          <form action="addlecturerform.php" method="POST">
+          <form action="semesters.php" method="POST">
             <div class="mb-3">
-              <label for="lecturer_id" class="form-label">Lecturer ID</label>
-              <input type="text" class="form-control" id="lecturer_id" name="lecturer_id" placeholder="Enter Lecturer ID" required>
+              <label for="semesterName" class="form-label">Semester Name</label>
+              <input type="text" class="form-control" id="semesterName" name="semesterName" placeholder="e.g., First Semester 2025" required>
             </div>
             <div class="mb-3">
-              <label for="lecturer_name" class="form-label">Lecturer Name</label>
-              <input type="text" class="form-control" id="lecturer_name" name="lecturer_name" placeholder="Enter Lecturer Name" required>
+              <label for="startDate" class="form-label">Start Date</label>
+              <input type="date" class="form-control" id="startDate" name="startDate" required>
             </div>
             <div class="mb-3">
-              <label for="department" class="form-label">Department</label>
-              <select class="form-select" id="department" name="department" required>
-                <option selected disabled>Select Department</option>
-                <?php
-                  include 'connect.php';
-                  $dept_query = "SELECT department_name FROM department";
-                  $dept_result = $conn->query($dept_query);
-                  if ($dept_result->num_rows > 0) {
-                      while ($dept_row = $dept_result->fetch_assoc()) {
-                          echo "<option value='{$dept_row['department_name']}'>{$dept_row['department_name']}</option>";
-                      }
-                  } else {
-                      echo "<option disabled>No departments available</option>";
-                  }
-                  $conn->close();
-                ?>
-              </select>
+              <label for="endDate" class="form-label">End Date</label>
+              <input type="date" class="form-control" id="endDate" name="endDate" required>
             </div>
             <div class="mb-3">
-              <label for="course" class="form-label">Select Courses</label>
-              <div class="dropdown">
-                <button class="btn btn-light w-100 dropdown-toggle" type="button" id="dropdownMenuButton" data-bs-toggle="dropdown" aria-expanded="false">
-                  Select Courses
-                </button>
-                <ul class="dropdown-menu w-100" aria-labelledby="dropdownMenuButton" style="max-height: 200px; overflow-y: auto;">
-                  <?php
-                    include 'connect.php';
-                    $query = "SELECT * FROM course";
-                    $result = mysqli_query($conn, $query);
-                    while ($row = mysqli_fetch_assoc($result)) {
-                        echo "<li><input type='checkbox' class='course-checkbox' name='courses[]' value='{$row['course_id']}'> {$row['course_name']}</li>";
-                    }
-                    $conn->close();
-                  ?>
-                </ul>
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="isActive" name="isActive" checked>
+                <label class="form-check-label" for="isActive">
+                  Semester is Active
+                </label>
               </div>
             </div>
-            <div class="modal-footer">
-              <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-              <button type="submit" class="btn btn-primary">Save changes</button>
-            </div>
+            <button type="submit" class="btn btn-primary">Add Semester</button>
           </form>
         </div>
       </div>
     </div>
   </div>
   
-  <!-- Bootstrap Bundle with Popper JS -->
+  <!-- Edit Data Modal -->
+  <div class="modal fade" id="editDataModal" tabindex="-1" aria-labelledby="editDataModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="editDataModalLabel">Edit Semester</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <form id="editSemesterForm" action="update_semester.php" method="POST">
+            <input type="hidden" name="action" value="update">
+            <input type="hidden" id="edit_semester_id" name="semester_id">
+            <div class="mb-3">
+              <label for="edit_semesterName" class="form-label">Semester Name</label>
+              <input type="text" class="form-control" id="edit_semesterName" name="semesterName" placeholder="e.g., First Semester 2025" required>
+            </div>
+            <div class="mb-3">
+              <label for="edit_startDate" class="form-label">Start Date</label>
+              <input type="date" class="form-control" id="edit_startDate" name="startDate" required>
+            </div>
+            <div class="mb-3">
+              <label for="edit_endDate" class="form-label">End Date</label>
+              <input type="date" class="form-control" id="edit_endDate" name="endDate" required>
+            </div>
+            <div class="mb-3">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="edit_isActive" name="isActive">
+                <label class="form-check-label" for="edit_isActive">
+                  Semester is Active
+                </label>
+              </div>
+            </div>
+            <button type="submit" class="btn btn-primary">Save Changes</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Back to Top Button -->
+  <button id="backToTop">
+    <svg width="50" height="50" viewBox="0 0 50 50">
+      <circle id="progressCircle" cx="25" cy="25" r="20" fill="none" stroke="#FFD700" stroke-width="4" stroke-dasharray="126" stroke-dashoffset="126"/>
+    </svg>
+    <i class="fas fa-arrow-up arrow-icon"></i>
+  </button>
+  
+  <!-- Bootstrap Bundle with Popper -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.2/js/bootstrap.bundle.min.js"></script>
+  
   <script>
     // Update current time in header
     function updateTime() {
@@ -387,7 +387,7 @@ $result = $conn->query($sql);
     }
     setInterval(updateTime, 1000);
     updateTime();
-  
+    
     // Toggle sidebar visibility
     document.getElementById('sidebarToggle').addEventListener('click', function() {
       const sidebar = document.getElementById('sidebar');
@@ -402,76 +402,53 @@ $result = $conn->query($sql);
         footer.classList.remove('shift');
       }
     });
-  
-    // Search functionality for lecturers table
+    
+    // Search functionality for semesters table
     document.getElementById('searchInput').addEventListener('keyup', function() {
-      const searchValue = this.value.toLowerCase();
-      const rows = document.querySelectorAll('#lecturerTable tbody tr');
+      let searchValue = this.value.toLowerCase();
+      let rows = document.querySelectorAll('#semestersTable tbody tr');
       rows.forEach(row => {
-        const cells = row.querySelectorAll('td');
-        let matchFound = false;
-        for (let i = 0; i < cells.length - 1; i++) {
-          if (cells[i].textContent.toLowerCase().includes(searchValue)) {
-            matchFound = true;
-            break;
+          let cells = row.querySelectorAll('td');
+          let matchFound = false;
+          for (let i = 0; i < cells.length - 1; i++) {
+              if (cells[i].textContent.toLowerCase().includes(searchValue)) {
+                  matchFound = true;
+                  break;
+              }
           }
-        }
-        row.style.display = matchFound ? '' : 'none';
+          row.style.display = matchFound ? '' : 'none';
       });
     });
-  </script>
-  
-  <!-- Back to Top Button with Progress Indicator -->
-  <button id="backToTop">
-    <svg width="50" height="50" viewBox="0 0 50 50">
-      <circle id="progressCircle" cx="25" cy="25" r="20" fill="none" stroke="#FFD700" stroke-width="4" stroke-dasharray="126" stroke-dashoffset="126"/>
-    </svg>
-    <i class="fas fa-arrow-up arrow-icon"></i>
-  </button>
-  
-  <style>
-    /* Back to Top Button Container */
-    #backToTop {
-      position: fixed;
-      bottom: 30px;
-      right: 30px;
-      z-index: 9999;
-      display: none; /* Hidden by default */
-      background: rgba(128, 0, 32, 0.7); /* AAMUSTED maroon with transparency */
-      border: none;
-      outline: none;
-      width: 50px;
-      height: 50px;
-      border-radius: 50%;
-      cursor: pointer;
-      transition: background 0.3s ease, transform 0.3s ease;
-      padding: 0;
-      overflow: hidden;
-    }
-    /* Ensure the SVG fills the button */
-    #backToTop svg {
-      display: block;
-      width: 100%;
-      height: 100%;
-    }
-    /* Arrow Icon styling: Center it within the button */
-    #backToTop .arrow-icon {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      color: #FFD700;
-      font-size: 1.5rem;
-      pointer-events: none;
-    }
-    /* Hover state */
-    #backToTop:hover {
-      background: rgba(96, 0, 16, 0.9); /* Darker shade with higher opacity */
-      transform: scale(1.1);
-    }
-  </style>
-  
-  <script>
+    
+    // Add form submission handler for the data entry modal
+    document.querySelector('#dataEntryModal form').addEventListener('submit', function(e) {
+      e.preventDefault();
+      
+      // Get form data
+      const formData = new FormData(this);
+      formData.append('action', 'add');
+      
+      // Submit form data to addsemesterform.php for processing
+      fetch('addsemesterform.php', {
+        method: 'POST',
+        body: formData
+      })
+      .then(response => response.text())
+      .then(data => {
+        // Close modal
+        const modal = bootstrap.Modal.getInstance(document.getElementById('dataEntryModal'));
+        modal.hide();
+        
+        // Show success message and reload page
+        alert('Semester added successfully!');
+        window.location.reload();
+      })
+      .catch(error => {
+        console.error('Error:', error);
+        alert('Error adding semester. Please try again.');
+      });
+    });
+    
     // Back to Top Button Setup
     const backToTopButton = document.getElementById("backToTop");
     const progressCircle = document.getElementById("progressCircle");
@@ -496,7 +473,28 @@ $result = $conn->query($sql);
     backToTopButton.addEventListener("click", function() {
       window.scrollTo({ top: 0, behavior: "smooth" });
     });
+
+    // Edit button handler: populate edit modal and show
+    document.addEventListener('click', function(e) {
+      if (e.target && e.target.classList.contains('edit-semester-btn')) {
+        const btn = e.target;
+        const id = btn.getAttribute('data-id');
+        const name = btn.getAttribute('data-name');
+        const startDate = btn.getAttribute('data-start-date');
+        const endDate = btn.getAttribute('data-end-date');
+        const isActive = btn.getAttribute('data-is-active');
+
+        document.getElementById('edit_semester_id').value = id;
+        document.getElementById('edit_semesterName').value = name;
+        document.getElementById('edit_startDate').value = startDate;
+        document.getElementById('edit_endDate').value = endDate;
+        document.getElementById('edit_isActive').checked = (isActive == 1);
+
+        const modalEl = document.getElementById('editDataModal');
+        const modal = new bootstrap.Modal(modalEl);
+        modal.show();
+      }
+    });
   </script>
-  
 </body>
 </html>

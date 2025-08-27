@@ -1,8 +1,3 @@
--- =========================================
--- UNIVERSITY TIMETABLE SYSTEM SCHEMA
--- Consolidated Sessions Table Structure
--- =========================================
-
 -- Safe migration: disable FK checks, drop timetable-related tables, then create schema
 SET FOREIGN_KEY_CHECKS=0;
 DROP TABLE IF EXISTS timetable_lecturers;
@@ -36,9 +31,7 @@ CREATE TABLE departments (
   code VARCHAR(20) NOT NULL UNIQUE,
   short_name VARCHAR(10),
   head_of_department VARCHAR(100),
-  is_active BOOLEAN DEFAULT TRUE,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  is_active BOOLEAN DEFAULT TRUE
 );
 
 -- =========================================
@@ -82,26 +75,18 @@ CREATE TABLE lecturers (
 );
 
 -- =========================================
--- 5) SESSIONS (CONSOLIDATED - combines academic sessions + calendar semesters)
---    Each academic session with semester information and dates
+-- 3) SEMESTERS (minimal calendar)
 -- =========================================
-CREATE TABLE sessions (
+CREATE TABLE semesters (
   id INT PRIMARY KEY AUTO_INCREMENT,
-  academic_year VARCHAR(20) NOT NULL,        -- e.g., "2024/2025"
-  semester_number ENUM('1','2','3') NOT NULL, -- 1, 2, or 3
-  semester_name VARCHAR(100) NOT NULL,        -- e.g., "First Semester 2024/2025"
+  name VARCHAR(50) NOT NULL,          -- e.g. "First Semester 2025"
   start_date DATE NOT NULL,
   end_date DATE NOT NULL,
-  is_active BOOLEAN DEFAULT TRUE,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  
-  -- Ensure unique academic year + semester combinations
-  UNIQUE KEY uq_academic_semester (academic_year, semester_number)
+  is_active BOOLEAN DEFAULT TRUE
 );
 
 -- =========================================
--- 6) CLASSES (student groups) – each class belongs to a session
+-- 4) CLASSES (student groups) – each class belongs to a session
 -- =========================================
 CREATE TABLE classes (
   id INT PRIMARY KEY AUTO_INCREMENT,
@@ -124,7 +109,7 @@ CREATE TABLE classes (
 );
 
 -- =========================================
--- 7) COURSES
+-- 5) COURSES
 --   (No fixed "semester" column; use mappings below per semester/session)
 -- =========================================
 CREATE TABLE courses (
@@ -142,7 +127,7 @@ CREATE TABLE courses (
 );
 
 -- =========================================
--- 8) LECTURER_COURSES (who is allowed to teach what)
+-- 6) LECTURER_COURSES (who is allowed to teach what)
 -- =========================================
 CREATE TABLE lecturer_courses (
   id INT PRIMARY KEY AUTO_INCREMENT,
@@ -156,7 +141,7 @@ CREATE TABLE lecturer_courses (
 );
 
 -- =========================================
--- 9) ROOMS
+-- 7) ROOMS
 -- =========================================
 CREATE TABLE rooms (
   id INT PRIMARY KEY AUTO_INCREMENT,
@@ -174,7 +159,7 @@ CREATE TABLE rooms (
 );
 
 -- =========================================
--- 10) TIME_SLOTS (reusable across all days)
+-- 8) TIME_SLOTS (reusable across all days)
 --    No day-of-week here -> reuse the same slots Mon..Sun
 -- =========================================
 CREATE TABLE time_slots (
@@ -188,24 +173,23 @@ CREATE TABLE time_slots (
 );
 
 -- =========================================
--- 11) CLASS_COURSES (which courses a class takes per semester)
---    Updated to reference sessions table instead of semesters
+-- 9) CLASS_COURSES (which courses a class takes per semester)
 -- =========================================
 CREATE TABLE class_courses (
   id INT PRIMARY KEY AUTO_INCREMENT,
   class_id INT NOT NULL,
   course_id INT NOT NULL,
-  session_id INT NOT NULL,
+  semester_id INT NOT NULL,
   is_active BOOLEAN DEFAULT TRUE,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (class_id) REFERENCES classes(id) ON DELETE CASCADE,
   FOREIGN KEY (course_id) REFERENCES courses(id) ON DELETE CASCADE,
-  FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
-  UNIQUE KEY uq_class_course_sem (class_id, course_id, session_id)
+  FOREIGN KEY (semester_id) REFERENCES semesters(id) ON DELETE CASCADE,
+  UNIQUE KEY uq_class_course_sem (class_id, course_id, semester_id)
 );
 
 -- =========================================
--- 12) AVAILABILITY GUARDS (hard validation for sessions)
+-- 10) AVAILABILITY GUARDS (hard validation for sessions)
 --     a) Lecturer available in session?
 --     b) Course offered in session?
 -- =========================================
@@ -226,8 +210,17 @@ CREATE TABLE course_session_availability (
 );
 
 -- =========================================
--- 13) SESSION TYPES and DAYS
+-- 11) SESSIONS and SESSION TYPES and DAYS and TIMETABLE
 -- =========================================
+CREATE TABLE sessions (
+  id INT PRIMARY KEY AUTO_INCREMENT,
+  academic_year VARCHAR(20) NOT NULL,
+  semester ENUM('1','2','3') NOT NULL,
+  start_date DATE,
+  end_date DATE,
+  is_active BOOLEAN DEFAULT TRUE
+);
+
 CREATE TABLE session_types (
   id INT PRIMARY KEY AUTO_INCREMENT,
   name VARCHAR(50) NOT NULL UNIQUE
@@ -239,7 +232,7 @@ CREATE TABLE days (
 );
 
 -- =========================================
--- 14) TIMETABLE (core schedule)
+-- 12) TIMETABLE (core schedule)
 -- =========================================
 CREATE TABLE timetable (
   id INT PRIMARY KEY AUTO_INCREMENT,
@@ -272,43 +265,6 @@ CREATE TABLE timetable_lecturers (
   UNIQUE KEY uq_tt_lect (timetable_id, lecturer_id)
 );
 
--- =========================================
--- 15) SAMPLE DATA FOR SESSIONS
--- =========================================
-INSERT INTO sessions (academic_year, semester_number, semester_name, start_date, end_date, is_active) VALUES
-('2024/2025', '1', 'First Semester 2024/2025', '2024-09-01', '2024-12-20', 1),
-('2024/2025', '2', 'Second Semester 2024/2025', '2025-01-15', '2025-05-15', 1),
-('2024/2025', '3', 'Third Semester 2024/2025', '2025-06-01', '2025-08-31', 1),
-('2025/2026', '1', 'First Semester 2025/2026', '2025-09-01', '2025-12-20', 1),
-('2025/2026', '2', 'Second Semester 2025/2026', '2026-01-15', '2026-05-15', 1),
-('2025/2026', '3', 'Third Semester 2025/2026', '2026-06-01', '2026-08-31', 1);
-
--- =========================================
--- 16) SAMPLE DATA FOR DAYS
--- =========================================
-INSERT INTO days (name) VALUES 
-('Monday'), ('Tuesday'), ('Wednesday'), ('Thursday'), ('Friday'), ('Saturday'), ('Sunday');
-
--- =========================================
--- 17) SAMPLE DATA FOR SESSION TYPES
--- =========================================
-INSERT INTO session_types (name) VALUES 
-('Lecture'), ('Tutorial'), ('Laboratory'), ('Seminar'), ('Exam'), ('Break');
-
--- =========================================
--- 18) SAMPLE DATA FOR TIME SLOTS
--- =========================================
-INSERT INTO time_slots (start_time, end_time, duration, is_break, is_mandatory) VALUES
-('08:00:00', '09:00:00', 60, FALSE, TRUE),
-('09:00:00', '10:00:00', 60, FALSE, TRUE),
-('10:00:00', '10:15:00', 15, TRUE, FALSE),
-('10:15:00', '11:15:00', 60, FALSE, TRUE),
-('11:15:00', '12:15:00', 60, FALSE, TRUE),
-('12:15:00', '13:15:00', 60, TRUE, FALSE),
-('13:15:00', '14:15:00', 60, FALSE, TRUE),
-('14:15:00', '15:15:00', 60, FALSE, TRUE),
-('15:15:00', '15:30:00', 15, TRUE, FALSE),
-('15:30:00', '16:30:00', 60, FALSE, TRUE),
-('16:30:00', '17:30:00', 60, FALSE, TRUE);
-
 SET FOREIGN_KEY_CHECKS=1;
+
+
