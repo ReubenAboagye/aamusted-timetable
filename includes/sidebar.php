@@ -6,6 +6,8 @@
     <a href="view_timetable.php" class="<?= ($currentPage == 'view_timetable.php') ? 'active' : '' ?>"><i class="fas fa-table me-2"></i>View Timetable</a>
     <a href="timetable_lecturers.php" class="<?= ($currentPage == 'timetable_lecturers.php') ? 'active' : '' ?>"><i class="fas fa-users-cog me-2"></i>Co-Teaching</a>
     <a href="adddepartmentform.php" class="<?= ($currentPage == 'adddepartmentform.php') ? 'active' : '' ?>"><i class="fas fa-building me-2"></i>Departments</a>
+    <a href="programs.php" class="<?= ($currentPage == 'programs.php') ? 'active' : '' ?>"><i class="fas fa-graduation-cap me-2"></i>Programs</a>
+    <a href="levels.php" class="<?= ($currentPage == 'levels.php') ? 'active' : '' ?>"><i class="fas fa-layer-group me-2"></i>Levels</a>
     <a href="sessions.php" class="<?= ($currentPage == 'sessions.php') ? 'active' : '' ?>"><i class="fas fa-clock me-2"></i>Sessions</a>
     <a href="semesters.php" class="<?= ($currentPage == 'semesters.php') ? 'active' : '' ?>"><i class="fas fa-calendar me-2"></i>Semesters</a>
     <a href="classes.php" class="<?= ($currentPage == 'classes.php') ? 'active' : '' ?>"><i class="fas fa-users me-2"></i>Classes</a>
@@ -17,6 +19,8 @@
     <a href="lecturer_courses.php" class="<?= ($currentPage == 'lecturer_courses.php') ? 'active' : '' ?>"><i class="fas fa-link me-2"></i>Lecturer-Courses</a>
     <a href="lecturer_session_availability.php" class="<?= ($currentPage == 'lecturer_session_availability.php') ? 'active' : '' ?>"><i class="fas fa-link me-2"></i>Lecturer Sessions</a>
     <a href="course_session_availability.php" class="<?= ($currentPage == 'course_session_availability.php') ? 'active' : '' ?>"><i class="fas fa-link me-2"></i>Course Sessions</a>
+    <a href="session_types.php" class="<?= ($currentPage == 'session_types.php') ? 'active' : '' ?>"><i class="fas fa-tags me-2"></i>Session Types</a>
+    <a href="days.php" class="<?= ($currentPage == 'days.php') ? 'active' : '' ?>"><i class="fas fa-calendar-day me-2"></i>Days</a>
   </div>
 </div>
 
