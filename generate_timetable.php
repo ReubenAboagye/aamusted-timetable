@@ -282,11 +282,69 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             }
         }
     }
+} elseif ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'quick_map_all') {
+    if ($selected_session <= 0) {
+        $error_message = 'Please select a valid session before mapping.';
+    } else {
+        // Map all active courses to all active classes for the selected session, skipping existing
+        $sql = "INSERT INTO class_courses (class_id, course_id, session_id)
+                SELECT c.id, co.id, ?
+                FROM classes c
+                CROSS JOIN courses co
+                LEFT JOIN class_courses cc ON cc.class_id = c.id AND cc.course_id = co.id AND cc.session_id = ?
+                WHERE c.is_active = 1 AND co.is_active = 1 AND cc.id IS NULL";
+        $stmt = $conn->prepare($sql);
+        if ($stmt) {
+            $stmt->bind_param('ii', $selected_session, $selected_session);
+            if ($stmt->execute()) {
+                $affected = $stmt->affected_rows;
+                $success_message = "Mapped $affected course-class pairs for the selected session.";
+            } else {
+                $error_message = 'Mapping failed: ' . $conn->error;
+            }
+            $stmt->close();
+        } else {
+            $error_message = 'Prepare failed: ' . $conn->error;
+        }
+    }
+} elseif ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'quick_map_department') {
+    if ($selected_session <= 0) {
+        $error_message = 'Please select a valid session before mapping.';
+    } else {
+        $department_id = isset($_POST['department_id']) ? intval($_POST['department_id']) : 0;
+        if ($department_id <= 0) {
+            $error_message = 'Please choose a department.';
+        } else {
+            // Map all active courses in department to all active classes in department for the selected session
+            $sql = "INSERT INTO class_courses (class_id, course_id, session_id)
+                    SELECT c.id, co.id, ?
+                    FROM classes c
+                    JOIN courses co ON co.department_id = c.department_id
+                    LEFT JOIN class_courses cc ON cc.class_id = c.id AND cc.course_id = co.id AND cc.session_id = ?
+                    WHERE c.is_active = 1 AND co.is_active = 1 AND c.department_id = ? AND cc.id IS NULL";
+            $stmt = $conn->prepare($sql);
+            if ($stmt) {
+                $stmt->bind_param('iii', $selected_session, $selected_session, $department_id);
+                if ($stmt->execute()) {
+                    $affected = $stmt->affected_rows;
+                    $success_message = "Mapped $affected pairs for the selected department.";
+                } else {
+                    $error_message = 'Mapping failed: ' . $conn->error;
+                }
+                $stmt->close();
+            } else {
+                $error_message = 'Prepare failed: ' . $conn->error;
+            }
+        }
+    }
 }
 
 // Fetch sessions for dropdown
 $sessions_sql = "SELECT id, semester_name, academic_year FROM sessions WHERE is_active = 1 ORDER BY academic_year DESC, semester_number";
 $sessions_result = $conn->query($sessions_sql);
+
+// Departments for optional mapping by department
+$departments_result = $conn->query("SELECT id, name FROM departments WHERE is_active = 1 ORDER BY name");
 
 ?>
 
@@ -391,12 +449,37 @@ $sessions_result = $conn->query($sessions_sql);
                             <span class="badge <?php echo ($readiness['unassigned_courses'] === 0) ? 'bg-success' : 'bg-danger'; ?>"><?php echo $readiness['unassigned_courses']; ?></span>
                         </li>
                     </ul>
-                    <div class="mt-3">
+                    <div class="mt-3 d-flex gap-2 flex-wrap">
                         <?php if ($readiness['ready']) : ?>
                             <span class="badge bg-success"><i class="fas fa-check-circle me-1"></i> Ready to generate</span>
                         <?php else: ?>
                             <span class="badge bg-danger"><i class="fas fa-times-circle me-1"></i> Not ready</span>
                         <?php endif; ?>
+                        <form method="POST" action="generate_timetable.php" class="d-inline">
+                            <input type="hidden" name="session_id" value="<?php echo $selected_session; ?>" />
+                            <input type="hidden" name="action" value="quick_map_all" />
+                            <button type="submit" class="btn btn-sm btn-outline-primary">
+                                <i class="fas fa-link me-1"></i>Quick Map All Courses to All Classes
+                            </button>
+                        </form>
+                        <form method="POST" action="generate_timetable.php" class="d-inline">
+                            <input type="hidden" name="session_id" value="<?php echo $selected_session; ?>" />
+                            <input type="hidden" name="action" value="quick_map_department" />
+                            <div class="input-group input-group-sm" style="max-width: 420px;">
+                                <label class="input-group-text" for="department_id">Dept</label>
+                                <select class="form-select" name="department_id" id="department_id">
+                                    <option value="">Choose...</option>
+                                    <?php if ($departments_result && $departments_result->num_rows > 0): ?>
+                                        <?php while ($dept = $departments_result->fetch_assoc()): ?>
+                                            <option value="<?php echo $dept['id']; ?>"><?php echo htmlspecialchars($dept['name']); ?></option>
+                                        <?php endwhile; ?>
+                                    <?php endif; ?>
+                                </select>
+                                <button class="btn btn-outline-secondary" type="submit">
+                                    <i class="fas fa-link me-1"></i>Quick Map by Dept
+                                </button>
+                            </div>
+                        </form>
                     </div>
                 </div>
             </div>
