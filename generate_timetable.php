@@ -6,24 +6,20 @@ include 'connect.php';
 include 'includes/header.php';
 include 'includes/sidebar.php';
 
-// Helper: ensure required 3-hour time slots exist
+// Helper: ensure standard 1-hour time slots exist from 07:00 to 20:00
 function ensure_time_slots($conn) {
-    $desired = [
-        ['07:00:00','10:00:00',180],
-        ['10:00:00','13:00:00',180],
-        ['14:00:00','17:00:00',180],
-        ['17:00:00','20:00:00',180]
-    ];
     $created = 0;
-    foreach ($desired as [$start, $end, $duration]) {
+    for ($h = 7; $h < 20; $h++) { // 07..19
+        $start = sprintf('%02d:00:00', $h);
+        $end = sprintf('%02d:00:00', $h + 1);
         $sql = "SELECT id FROM time_slots WHERE start_time = ? AND end_time = ? LIMIT 1";
         $stmt = $conn->prepare($sql);
         $stmt->bind_param('ss', $start, $end);
         $stmt->execute();
         $stmt->store_result();
         if ($stmt->num_rows === 0) {
-            $insert = $conn->prepare("INSERT INTO time_slots (start_time, end_time, duration, is_break, is_mandatory) VALUES (?, ?, ?, 0, 1)");
-            $insert->bind_param('ssi', $start, $end, $duration);
+            $insert = $conn->prepare("INSERT INTO time_slots (start_time, end_time, duration, is_break, is_mandatory) VALUES (?, ?, 60, 0, 1)");
+            $insert->bind_param('ss', $start, $end);
             $insert->execute();
             $insert->close();
             $created++;
@@ -81,15 +77,11 @@ function check_readiness($conn, $sessionId) {
     $res = $conn->query("SELECT COUNT(*) AS cnt FROM days");
     $status['days'] = (int)($res ? ($res->fetch_assoc()['cnt'] ?? 0) : 0);
 
-    // Time slots coverage (the 4 target slots)
-    $checkSlots = [
-        ['07:00:00','10:00:00'],
-        ['10:00:00','13:00:00'],
-        ['14:00:00','17:00:00'],
-        ['17:00:00','20:00:00']
-    ];
+    // Time slots coverage (1-hour slots from 07:00 to 20:00)
     $presentAll = true;
-    foreach ($checkSlots as [$s,$e]) {
+    for ($h = 7; $h < 20; $h++) {
+        $s = sprintf('%02d:00:00', $h);
+        $e = sprintf('%02d:00:00', $h + 1);
         $stmt = $conn->prepare("SELECT id FROM time_slots WHERE start_time = ? AND end_time = ? LIMIT 1");
         $stmt->bind_param('ss', $s, $e);
         $stmt->execute();

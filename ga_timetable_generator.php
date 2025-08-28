@@ -21,8 +21,11 @@ class GeneticAlgorithm {
         $this->rooms = $rooms;
         $this->lecturers = $lecturers;
         
-        // Define available time slots for teaching
-        $this->timeSlots = ['07:00-10:00', '10:00-13:00', '14:00-17:00', '17:00-20:00'];
+        // Define available time slots for teaching (1-hour slots 07:00..20:00)
+        $this->timeSlots = [];
+        for ($h = 7; $h < 20; $h++) {
+            $this->timeSlots[] = sprintf('%02d:00-%02d:00', $h, $h + 1);
+        }
         $this->days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
         
         $this->population = [];
