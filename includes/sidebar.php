@@ -49,6 +49,9 @@
           <a href="rooms.php" class="nav-link <?= ($currentPage == 'rooms.php') ? 'active' : '' ?>">
             <i class="fas fa-door-open me-2"></i>Rooms
           </a>
+          <a href="time_slots.php" class="nav-link <?= ($currentPage == 'time_slots.php') ? 'active' : '' ?>">
+            <i class="fas fa-clock me-2"></i>Time Slots
+          </a>
         </div>
       </div>
     </div>
