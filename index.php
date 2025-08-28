@@ -58,6 +58,59 @@ $conn->close();
 ?>
 <?php $pageTitle = 'Dashboard'; include 'includes/header.php'; include 'includes/sidebar.php'; ?>
 
+<style>
+  /* Dashboard Cards */
+  .dashboard-search { margin: 10px 0 20px; }
+  #dashboardGrid .col-md-3 { min-width: 260px; }
+  .grid-button {
+    position: relative;
+    display: block;
+    padding: 20px;
+    border-radius: 14px;
+    color: #fff;
+    text-decoration: none;
+    min-height: 120px;
+    box-shadow: 0 8px 18px rgba(0,0,0,0.15);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+  .grid-button:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 12px 24px rgba(0,0,0,0.2);
+    color: #fff;
+  }
+  .grid-button i {
+    font-size: 28px;
+    margin-bottom: 10px;
+    opacity: 0.95;
+  }
+  .grid-button > div { font-weight: 700; letter-spacing: 0.3px; }
+  .count-circle {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    background: rgba(255,255,255,0.15);
+    border: 1px solid rgba(255,255,255,0.3);
+    color: #fff;
+    font-weight: 700;
+    min-width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 8px;
+    backdrop-filter: blur(2px);
+  }
+  /* Color themes */
+  .gb-indigo { background: linear-gradient(135deg, #3949AB, #5C6BC0); }
+  .gb-brown { background: linear-gradient(135deg, #5D4037, #8D6E63); }
+  .gb-purple { background: linear-gradient(135deg, #6A1B9A, #8E24AA); }
+  .gb-teal { background: linear-gradient(135deg, #00897B, #26A69A); }
+  .gb-amber { background: linear-gradient(135deg, #FF8F00, #FFB300); }
+  .gb-blue { background: linear-gradient(135deg, #1565C0, #1E88E5); }
+  .gb-green { background: linear-gradient(135deg, #2E7D32, #43A047); }
+</style>
+
   <div class="main-content" id="mainContent">
     <h2>Dashboard</h2>
     <!-- Dashboard Search Bar -->
@@ -72,13 +125,13 @@ $conn->close();
       <!-- Main Dashboard Cards -->
       <div class="col-md-3">
         <?php if ($timetable_count > 0): ?>
-          <a href="view_timetable.php" class="grid-button">
+          <a href="view_timetable.php" class="grid-button gb-indigo">
             <i class="fas fa-table"></i>
             <div>View Timetable</div>
             <span class="count-circle"><?php echo $timetable_count; ?></span>
           </a>
         <?php else: ?>
-          <a href="generate_timetable.php" class="grid-button">
+          <a href="generate_timetable.php" class="grid-button gb-indigo">
             <i class="fas fa-calendar-plus"></i>
             <div>Generate Timetable</div>
             <span class="count-circle">0</span>
@@ -87,7 +140,7 @@ $conn->close();
       </div>
       
       <div class="col-md-3">
-        <a href="adddepartmentform.php" class="grid-button">
+        <a href="adddepartmentform.php" class="grid-button gb-brown">
           <i class="fas fa-building"></i>
           <div>Departments</div>
           <span class="count-circle"><?php echo $dept_count; ?></span>
@@ -95,7 +148,7 @@ $conn->close();
       </div>
       
       <div class="col-md-3">
-        <a href="lecturers.php" class="grid-button">
+        <a href="lecturers.php" class="grid-button gb-purple">
           <i class="fas fa-chalkboard-teacher"></i>
           <div>Lecturers</div>
           <span class="count-circle"><?php echo $lect_count; ?></span>
@@ -103,7 +156,7 @@ $conn->close();
       </div>
       
       <div class="col-md-3">
-        <a href="rooms.php" class="grid-button">
+        <a href="rooms.php" class="grid-button gb-teal">
           <i class="fas fa-door-open"></i>
           <div>Rooms</div>
           <span class="count-circle"><?php echo $room_count; ?></span>
