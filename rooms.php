@@ -124,7 +124,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 // Sanitize and trim inputs
                 $name = isset($row['name']) ? trim($conn->real_escape_string($row['name'])) : '';
                 $building = isset($row['building']) ? trim($conn->real_escape_string($row['building'])) : '';
-                $room_type = isset($row['room_type']) ? trim($conn->real_escape_string($row['room_type'])) : 'classroom';
+                $room_type = isset($row['room_type']) ? trim($row['room_type']) : 'classroom';
                 $capacity = isset($row['capacity']) ? (int)$row['capacity'] : 30;
 
                 // Debug: Log the raw CSV data
