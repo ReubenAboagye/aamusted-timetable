@@ -325,6 +325,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         error_log("Single Add - POST data received: " . json_encode($_POST));
         error_log("Single Add - Raw room_type value: '" . $_POST['room_type'] . "'");
         error_log("Single Add - Raw room_type length: " . strlen($_POST['room_type']));
+        error_log("Single Add - Raw room_type bytes: " . implode(',', array_map('ord', str_split($_POST['room_type']))));
         
         $name = trim($conn->real_escape_string($_POST['name']));
         $building = trim($conn->real_escape_string($_POST['building']));
@@ -332,6 +333,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $valid_form_room_types = ['Classroom', 'Lecture Hall', 'Laboratory', 'Computer Lab', 'Seminar Room', 'Auditorium'];
 
         error_log("Single Add - After trim room_type: '$room_type'");
+        error_log("Single Add - After trim room_type length: " . strlen($room_type));
+        error_log("Single Add - After trim room_type bytes: " . implode(',', array_map('ord', str_split($room_type))));
         error_log("Single Add - Valid form types: " . json_encode($valid_form_room_types));
 
         if (!in_array($room_type, $valid_form_room_types)) {
@@ -399,28 +402,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     error_log("  name: '$name'");
                     error_log("  building: '$building'");
                     error_log("  room_type: '$db_room_type'");
+                    error_log("  room_type length: " . strlen($db_room_type));
+                    error_log("  room_type bytes: " . implode(',', array_map('ord', str_split($db_room_type))));
                     error_log("  capacity: $capacity");
                     error_log("  stream_availability: '$stream_availability'");
                     error_log("  facilities: '$facilities'");
                     error_log("  accessibility_features: '$accessibility_features'");
                     error_log("  is_active: $is_active");
                     
-                    $sql = "INSERT INTO rooms (name, building, room_type, capacity, stream_availability, facilities, accessibility_features, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
-                    $stmt = $conn->prepare($sql);
-                    if ($stmt) {
-                        $stmt->bind_param("ssissssi", $name, $building, $db_room_type, $capacity, $stream_availability, $facilities, $accessibility_features, $is_active);
-                        error_log("Single Add - Binding: name='$name', building='$building', room_type='$db_room_type', capacity=$capacity, stream_availability='$stream_availability', facilities='$facilities', accessibility_features='$accessibility_features', is_active=$is_active");
-
-                        if ($stmt->execute()) {
-                            $success_message = "Room added successfully!";
-                        } else {
-                            error_log("ERROR: Single Add - Insert failed: " . $stmt->error);
-                            error_log("ERROR: Single Add - Failed values: name='$name', building='$building', room_type='$db_room_type', capacity=$capacity, stream_availability='$stream_availability', facilities='$facilities', accessibility_features='$accessibility_features', is_active=$is_active");
-                            $error_message = "Error adding room: " . $stmt->error;
-                        }
-                        $stmt->close();
+                    // Final validation - ensure room_type matches database ENUM exactly
+                    $valid_db_room_types = ['classroom', 'lecture_hall', 'laboratory', 'computer_lab', 'seminar_room', 'auditorium'];
+                    if (!in_array($db_room_type, $valid_db_room_types)) {
+                        error_log("ERROR: Single Add - Final validation failed: room_type '$db_room_type' not in valid list: " . json_encode($valid_db_room_types));
+                        $error_message = "Invalid room type value. Please try again.";
                     } else {
-                        $error_message = "Error preparing statement: " . $conn->error;
+                        error_log("SUCCESS: Single Add - Final validation passed for room_type: '$db_room_type'");
+                        
+                                                $sql = "INSERT INTO rooms (name, building, room_type, capacity, stream_availability, facilities, accessibility_features, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+                        $stmt = $conn->prepare($sql);
+                        if ($stmt) {
+                            $stmt->bind_param("ssissssi", $name, $building, $db_room_type, $capacity, $stream_availability, $facilities, $accessibility_features, $is_active);
+                            error_log("Single Add - Binding: name='$name', building='$building', room_type='$db_room_type', capacity=$capacity, stream_availability='$stream_availability', facilities='$facilities', accessibility_features='$accessibility_features', is_active=$is_active");
+
+                            if ($stmt->execute()) {
+                                $success_message = "Room added successfully!";
+                            } else {
+                                error_log("ERROR: Single Add - Insert failed: " . $stmt->error);
+                                error_log("ERROR: Single Add - Failed values: name='$name', building='$building', room_type='$db_room_type', capacity=$capacity, stream_availability='$stream_availability', facilities='$facilities', accessibility_features='$accessibility_features', is_active=$is_active");
+                                $error_message = "Error adding room: " . $stmt->error;
+                            }
+                            $stmt->close();
+                        } else {
+                            $error_message = "Error preparing statement: " . $conn->error;
+                        }
                     }
                 }
             }

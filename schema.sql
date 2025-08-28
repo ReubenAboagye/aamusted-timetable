@@ -177,7 +177,7 @@ CREATE TABLE rooms (
   id INT PRIMARY KEY AUTO_INCREMENT,
   name VARCHAR(50) NOT NULL,
   building VARCHAR(100) NOT NULL,
-  room_type ENUM('classroom','lecture_hall','laboratory','computer_lab','seminar_room','auditorium') NOT NULL,
+  room_type VARCHAR(50) NOT NULL COMMENT 'Expected values: classroom, lecture_hall, laboratory, computer_lab, seminar_room, auditorium',
   capacity INT NOT NULL,
   stream_availability JSON NOT NULL, -- e.g. ["regular","evening","weekend"]
   facilities JSON,                    -- e.g. ["projector","whiteboard"]
