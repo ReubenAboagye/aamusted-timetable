@@ -241,7 +241,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                     $sessionTypeId = (int)$conn->insert_id;
                 }
 
-                // Insert timetable entries
+                // Insert timetable entries with duplicate-safe handling
                 $inserted = 0;
                 foreach ($bestTimetable as $entry) {
                     $dayName = $entry['day'];
@@ -276,7 +276,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                     if (!$lc) { continue; }
                     $lecturerCourseId = (int)$lc['id'];
 
-                    // Insert, ignore duplicates on unique key
+                    // Check if a record already exists in this unique slot (session, day, slot, room)
+                    $check = $conn->prepare("SELECT id FROM timetable WHERE session_id = ? AND day_id = ? AND time_slot_id = ? AND room_id = ? LIMIT 1");
+                    $check->bind_param('iiii', $selected_session, $dayId, $timeSlotId, $roomId);
+                    $check->execute();
+                    $existsRes = $check->get_result();
+                    $existsRow = $existsRes ? $existsRes->fetch_assoc() : null;
+                    $check->close();
+
+                    if ($existsRow) {
+                        // Skip conflicting entry to satisfy uq_tt_slot
+                        continue;
+                    }
+
+                    // Insert
                     $stmt = $conn->prepare("INSERT INTO timetable (session_id, class_course_id, lecturer_course_id, day_id, time_slot_id, room_id, session_type_id)
                                               VALUES (?, ?, ?, ?, ?, ?, ?)");
                     $stmt->bind_param('iiiiiii', $selected_session, $classCourseId, $lecturerCourseId, $dayId, $timeSlotId, $roomId, $sessionTypeId);
