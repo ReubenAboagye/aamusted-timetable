@@ -19,6 +19,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $stmt->close();
             } else { $error_message = 'Prepare failed: ' . $conn->error; }
         }
+    } elseif ($_POST['action'] === 'bulk_add') {
+        $lecturer_id = (int)($_POST['lecturer_id'] ?? 0);
+        $course_ids = isset($_POST['course_ids']) && is_array($_POST['course_ids']) ? array_map('intval', $_POST['course_ids']) : [];
+        if ($lecturer_id > 0 && !empty($course_ids)) {
+            $stmt = $conn->prepare("INSERT IGNORE INTO lecturer_courses (lecturer_id, course_id) VALUES (?, ?)");
+            if ($stmt) {
+                foreach ($course_ids as $course_id) {
+                    $stmt->bind_param('ii', $lecturer_id, $course_id);
+                    $stmt->execute();
+                }
+                $stmt->close();
+                $success_message = 'Bulk mappings added.';
+            } else { $error_message = 'Prepare failed: ' . $conn->error; }
+        }
     } elseif ($_POST['action'] === 'delete') {
         $id = (int)($_POST['id'] ?? 0);
         if ($id > 0) {
@@ -33,8 +47,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 }
 
 // Data for UI
+$departments = $conn->query("SELECT id, name FROM departments WHERE is_active = 1 ORDER BY name");
+$selected_department = isset($_GET['department_id']) ? (int)$_GET['department_id'] : 0;
+
 $lecturers = $conn->query("SELECT id, name, department_id FROM lecturers WHERE is_active = 1 ORDER BY name");
-$courses = $conn->query("SELECT c.id, c.name, c.code, d.name AS department_name FROM courses c JOIN departments d ON d.id = c.department_id WHERE c.is_active = 1 ORDER BY c.name");
+
+$courses_query = "SELECT c.id, c.name, c.code, d.name AS department_name FROM courses c JOIN departments d ON d.id = c.department_id WHERE c.is_active = 1";
+if ($selected_department > 0) { $courses_query .= " AND c.department_id = " . $selected_department; }
+$courses_query .= " ORDER BY c.name";
+$courses = $conn->query($courses_query);
 $mappings = $conn->query("SELECT lc.id, l.name AS lecturer_name, c.name AS course_name, c.code
                           FROM lecturer_courses lc
                           JOIN lecturers l ON l.id = lc.lecturer_id
@@ -64,9 +85,20 @@ $mappings = $conn->query("SELECT lc.id, l.name AS lecturer_name, c.name AS cours
 
         <div class="card m-3">
             <div class="card-body">
-                <form method="POST" class="row g-3">
-                    <input type="hidden" name="action" value="add" />
-                    <div class="col-md-5">
+                <form method="GET" class="row g-3">
+                    <div class="col-md-4">
+                        <label class="form-label">Department (filter courses)</label>
+                        <select name="department_id" class="form-select" onchange="this.form.submit()">
+                            <option value="">All</option>
+                            <?php if ($departments) { while ($d = $departments->fetch_assoc()) { ?>
+                                <option value="<?php echo $d['id']; ?>" <?php echo ($selected_department == $d['id']) ? 'selected' : ''; ?>><?php echo htmlspecialchars($d['name']); ?></option>
+                            <?php } } ?>
+                        </select>
+                    </div>
+                </form>
+                <form method="POST" class="row g-3 mt-1">
+                    <input type="hidden" name="action" value="bulk_add" />
+                    <div class="col-md-4">
                         <label class="form-label">Lecturer</label>
                         <select name="lecturer_id" class="form-select" required>
                             <option value="">Choose lecturer...</option>
@@ -75,17 +107,16 @@ $mappings = $conn->query("SELECT lc.id, l.name AS lecturer_name, c.name AS cours
                             <?php } } ?>
                         </select>
                     </div>
-                    <div class="col-md-5">
-                        <label class="form-label">Course</label>
-                        <select name="course_id" class="form-select" required>
-                            <option value="">Choose course...</option>
+                    <div class="col-md-8">
+                        <label class="form-label">Courses (multi-select)</label>
+                        <select name="course_ids[]" class="form-select" multiple size="8" required>
                             <?php if ($courses) { while ($c = $courses->fetch_assoc()) { ?>
                                 <option value="<?php echo $c['id']; ?>"><?php echo htmlspecialchars($c['name'] . ' (' . $c['code'] . ') - ' . $c['department_name']); ?></option>
                             <?php } } ?>
                         </select>
                     </div>
-                    <div class="col-md-2 d-flex align-items-end">
-                        <button type="submit" class="btn btn-primary w-100"><i class="fas fa-plus me-2"></i>Add</button>
+                    <div class="col-12 d-flex justify-content-end">
+                        <button type="submit" class="btn btn-primary"><i class="fas fa-plus me-2"></i>Add Mappings</button>
                     </div>
                 </form>
             </div>
