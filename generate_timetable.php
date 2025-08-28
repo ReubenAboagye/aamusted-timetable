@@ -161,12 +161,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             while ($row = $res->fetch_assoc()) { $classes[] = $row; }
             $stmt->close();
 
-            // Courses for those classes in this session (pick one lecturer per course) with periods based on hours_per_week
+            // Courses for those classes in this session (pick one lecturer per course)
             $courses = [];
             $stmt = $conn->prepare("SELECT cc.class_id,
                                             c.id AS course_id,
                                             c.name AS course_name,
-                                            c.hours_per_week AS periods_required,
                                             l.id AS lecturer_id,
                                             l.name AS lecturer_name
                                      FROM class_courses cc
@@ -183,17 +182,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             while ($row = $res->fetch_assoc()) {
                 $key = $row['class_id'] . '-' . $row['course_id'];
                 if (!isset($seen[$key])) {
-                    $periods = max(1, (int)($row['periods_required'] ?? 1));
-                    // Duplicate entries according to hours_per_week to ensure multiple periods are scheduled
-                    for ($i = 0; $i < $periods; $i++) {
-                        $courses[] = [
-                            'class_id' => $row['class_id'],
-                            'course_id' => $row['course_id'],
-                            'course_name' => $row['course_name'],
-                            'lecturer_id' => $row['lecturer_id'],
-                            'lecturer_name' => $row['lecturer_name']
-                        ];
-                    }
+                    $courses[] = $row;
                     $seen[$key] = true;
                 }
             }
