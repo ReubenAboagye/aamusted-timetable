@@ -58,6 +58,53 @@ $conn->close();
 ?>
 <?php $pageTitle = 'Dashboard'; include 'includes/header.php'; include 'includes/sidebar.php'; ?>
 
+<style>
+  /* Dashboard Cards */
+  .dashboard-search { margin: 10px 0 20px; }
+  #dashboardGrid .col-md-3 { min-width: 260px; }
+  .grid-button {
+    position: relative;
+    display: block;
+    padding: 20px;
+    border-radius: 14px;
+    color: #fff;
+    text-decoration: none;
+    min-height: 120px;
+    box-shadow: 0 8px 18px rgba(0,0,0,0.15);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+    background-color: var(--primary-color);
+  }
+  .grid-button:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 12px 24px rgba(0,0,0,0.2);
+    color: #fff;
+    background-color: var(--hover-color);
+  }
+  .grid-button i {
+    font-size: 28px;
+    margin-bottom: 10px;
+    opacity: 0.95;
+  }
+  .grid-button > div { font-weight: 700; letter-spacing: 0.3px; }
+  .count-circle {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    background: rgba(255,255,255,0.15);
+    border: 1px solid rgba(255,255,255,0.3);
+    color: #fff;
+    font-weight: 700;
+    min-width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 8px;
+    backdrop-filter: blur(2px);
+  }
+</style>
+
   <div class="main-content" id="mainContent">
     <h2>Dashboard</h2>
     <!-- Dashboard Search Bar -->

@@ -169,4 +169,3 @@ $slots = $conn->query("SELECT * FROM time_slots ORDER BY start_time");
 
 <?php include 'includes/footer.php'; ?>
 
-
