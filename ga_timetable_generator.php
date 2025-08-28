@@ -16,8 +16,6 @@ class GeneticAlgorithm {
     private $timeBudgetSeconds; // Optional time budget to stop early
     private $classSizeById;     // Map class_id => class_size
     private $roomCapacityById;  // Map room_id => capacity
-    private $classSizeById;     // Map class_id => class_size
-    private $roomCapacityById;  // Map room_id => capacity
 
     public function __construct($classes, $courses, $rooms, $lecturers = []) {
         $this->classes = $classes;
