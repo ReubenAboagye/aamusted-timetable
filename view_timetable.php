@@ -100,11 +100,11 @@ if ($times_result) {
         <div class="table-header d-flex justify-content-between align-items-center">
             <h4><i class="fas fa-calendar-alt me-2"></i>Timetable Viewer</h4>
             <div class="d-flex gap-2">
-                <button class="btn btn-outline-primary" onclick="printTimetable()">
-                    <i class="fas fa-print me-2"></i>Print
+                <button class="btn btn-outline-primary" onclick="exportPDF()">
+                    <i class="fas fa-file-pdf me-2"></i>Export PDF
                 </button>
-                <button class="btn btn-outline-success" onclick="exportTimetable()">
-                    <i class="fas fa-download me-2"></i>Export
+                <button class="btn btn-outline-secondary" onclick="printTimetableContents()">
+                    <i class="fas fa-print me-2"></i>Print
                 </button>
             </div>
         </div>
@@ -166,15 +166,27 @@ if ($times_result) {
         </div>
 
         <?php if (!empty($timetable_data)): ?>
-            <!-- Timetable Grid -->
-            <div class="timetable-container m-3">
+            <!-- Timetable Grid: Rows = Time slots, Columns = Day/Venue -->
+            <div class="timetable-container m-3" id="printArea">
                 <div class="table-responsive">
                     <table class="table table-bordered timetable-grid" id="timetableTable">
                         <thead>
                             <tr>
                                 <th class="time-header">Time</th>
                                 <?php foreach ($days as $day): ?>
-                                    <th class="day-header"><?php echo htmlspecialchars($day['name']); ?></th>
+                                    <?php 
+                                    // Fetch rooms once for columns header
+                                    $rooms_cols = [];
+                                    if (!isset($__rooms_cache)) {
+                                        $__rooms_cache = [];
+                                        $__res = $conn->query("SELECT id, name, building FROM rooms WHERE is_active = 1 ORDER BY building, name");
+                                        if ($__res) { while ($__r = $__res->fetch_assoc()) { $__rooms_cache[] = $__r; } }
+                                    }
+                                    $rooms_cols = $__rooms_cache;
+                                    ?>
+                                    <?php foreach ($rooms_cols as $room): ?>
+                                        <th class="day-header"><?php echo htmlspecialchars($day['name']); ?><br><?php echo htmlspecialchars($room['name'] . ' (' . $room['building'] . ')'); ?></th>
+                                    <?php endforeach; ?>
                                 <?php endforeach; ?>
                             </tr>
                         </thead>
@@ -188,28 +200,27 @@ if ($times_result) {
                                         </div>
                                     </td>
                                     <?php foreach ($days as $day): ?>
-                                        <td class="timetable-cell">
-                                            <?php
-                                            // Find matching timetable entry
-                                            $entry = null;
-                                            foreach ($timetable_data as $data) {
-                                                if ($data['day_name'] === $day['name'] && 
-                                                    $data['start_time'] === $time_slot['start_time']) {
-                                                    $entry = $data;
-                                                    break;
+                                        <?php foreach ($rooms_cols as $room): ?>
+                                            <td class="timetable-cell">
+                                                <?php
+                                                $entry = null;
+                                                foreach ($timetable_data as $data) {
+                                                    if ($data['day_name'] === $day['name'] && 
+                                                        $data['start_time'] === $time_slot['start_time'] &&
+                                                        $data['room_name'] === $room['name'] && $data['room_building'] === $room['building']) {
+                                                        $entry = $data; break;
+                                                    }
                                                 }
-                                            }
-                                            
-                                            if ($entry): ?>
-                                                <div class="timetable-entry" data-bs-toggle="tooltip" title="Click for details">
-                                                    <div class="course-name"><?php echo htmlspecialchars($entry['course_name']); ?></div>
-                                                    <div class="course-code"><?php echo htmlspecialchars($entry['course_code']); ?></div>
-                                                    <div class="lecturer"><?php echo htmlspecialchars($entry['lecturer_name']); ?></div>
-                                                    <div class="room"><?php echo htmlspecialchars($entry['room_name'] . ' (' . $entry['room_building'] . ')'); ?></div>
-                                                    <div class="session-type"><?php echo htmlspecialchars($entry['session_type']); ?></div>
-                                                </div>
-                                            <?php endif; ?>
-                                        </td>
+                                                if ($entry): ?>
+                                                    <div class="timetable-entry" data-bs-toggle="tooltip" title="Click for details">
+                                                        <div class="course-name"><?php echo htmlspecialchars($entry['course_name']); ?></div>
+                                                        <div class="course-code"><?php echo htmlspecialchars($entry['course_code']); ?></div>
+                                                        <div class="lecturer"><?php echo htmlspecialchars($entry['lecturer_name']); ?></div>
+                                                        <div class="session-type"><?php echo htmlspecialchars($entry['session_type']); ?></div>
+                                                    </div>
+                                                <?php endif; ?>
+                                            </td>
+                                        <?php endforeach; ?>
                                     <?php endforeach; ?>
                                 </tr>
                             <?php endforeach; ?>
@@ -309,6 +320,7 @@ include 'includes/footer.php';
     min-height: 80px;
     vertical-align: top;
     padding: 4px;
+    border: 1px solid #dee2e6;
 }
 
 .timetable-entry {
@@ -383,12 +395,16 @@ include 'includes/footer.php';
 }
 
 @media print {
-    .table-header, .card, .btn, .search-container {
+    body * { visibility: hidden; }
+    #printArea, #printArea * { visibility: visible; }
+    #printArea { position: absolute; left: 0; top: 0; width: 100%; }
+    .table-header, .card, .btn, .search-container, .sidebar, .navbar, .footer {
         display: none !important;
     }
     
     .timetable-grid {
-        font-size: 0.7rem;
+        font-size: 0.75rem;
+        border: 1px solid #000 !important;
     }
     
     .timetable-entry {
@@ -400,13 +416,13 @@ include 'includes/footer.php';
 </style>
 
 <script>
-function printTimetable() {
+function printTimetableContents() {
     window.print();
 }
 
-function exportTimetable() {
-    // TODO: Implement export functionality (CSV, PDF, etc.)
-    alert('Export functionality will be implemented here');
+function exportPDF() {
+    // Uses browser print to PDF, but with print-only CSS to include only the timetable
+    window.print();
 }
 
 // Initialize tooltips
