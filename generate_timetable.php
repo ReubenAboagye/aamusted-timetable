@@ -337,6 +337,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             }
         }
     }
+} elseif ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'quick_map_course_lecturers_all') {
+    // Ensure each active course has at least one lecturer mapped
+    // Step 1: map by department using the lowest-id active lecturer per department
+    $sql = "INSERT INTO lecturer_courses (lecturer_id, course_id)
+            SELECT lmin.id AS lecturer_id, co.id AS course_id
+            FROM courses co
+            JOIN (
+                SELECT department_id, MIN(id) AS id
+                FROM lecturers
+                WHERE is_active = 1
+                GROUP BY department_id
+            ) lmin ON lmin.department_id = co.department_id
+            LEFT JOIN lecturer_courses lc ON lc.course_id = co.id
+            WHERE co.is_active = 1 AND lc.id IS NULL";
+    $affected1 = 0; $affected2 = 0;
+    if ($conn->query($sql) === TRUE) {
+        $affected1 = $conn->affected_rows;
+    }
+
+    // Step 2: fallback - map remaining unmapped courses to the first active lecturer
+    $fallbackLectId = null;
+    $res = $conn->query("SELECT id FROM lecturers WHERE is_active = 1 ORDER BY id LIMIT 1");
+    if ($res && $res->num_rows > 0) {
+        $fallbackLectId = (int)$res->fetch_assoc()['id'];
+    }
+    if ($fallbackLectId) {
+        $stmt = $conn->prepare("INSERT INTO lecturer_courses (lecturer_id, course_id)
+                                SELECT ?, co.id
+                                FROM courses co
+                                LEFT JOIN lecturer_courses lc ON lc.course_id = co.id
+                                WHERE co.is_active = 1 AND lc.id IS NULL");
+        if ($stmt) {
+            $stmt->bind_param('i', $fallbackLectId);
+            if ($stmt->execute()) { $affected2 = $stmt->affected_rows; }
+            $stmt->close();
+        }
+    }
+    $total = $affected1 + $affected2;
+    if ($total > 0) {
+        $success_message = "Created lecturer-course mappings for $total courses.";
+    } else {
+        $success_message = "All courses already have lecturer mappings.";
+    }
 }
 
 // Fetch sessions for dropdown
@@ -455,6 +498,13 @@ $departments_result = $conn->query("SELECT id, name FROM departments WHERE is_ac
                         <?php else: ?>
                             <span class="badge bg-danger"><i class="fas fa-times-circle me-1"></i> Not ready</span>
                         <?php endif; ?>
+                        <form method="POST" action="generate_timetable.php" class="d-inline">
+                            <input type="hidden" name="session_id" value="<?php echo $selected_session; ?>" />
+                            <input type="hidden" name="action" value="quick_map_course_lecturers_all" />
+                            <button type="submit" class="btn btn-sm btn-outline-success">
+                                <i class="fas fa-user-plus me-1"></i>Auto-map Lecturers to Courses
+                            </button>
+                        </form>
                         <form method="POST" action="generate_timetable.php" class="d-inline">
                             <input type="hidden" name="session_id" value="<?php echo $selected_session; ?>" />
                             <input type="hidden" name="action" value="quick_map_all" />
