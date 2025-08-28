@@ -261,7 +261,6 @@ $dept_result = $conn->query($dept_sql);
                             <tr>
                                 <td><strong><?php echo htmlspecialchars($row['name']); ?></strong></td>
                                 <td><?php echo htmlspecialchars($row['code'] ?? ''); ?></td>
-                                <td><?php echo htmlspecialchars($row['department_name'] ?? 'N/A'); ?></td>
                                 <td><?php echo htmlspecialchars($row['duration_years'] ?? $row['duration'] ?? ''); ?></td>
                                 <td>
                                     <button class="btn btn-sm btn-outline-primary me-1" onclick="editProgram(<?php echo $row['id']; ?>, '<?php echo htmlspecialchars(addslashes($row['name'])); ?>', <?php echo (int)$row['department_id']; ?>, <?php echo $row['is_active']; ?>, '<?php echo htmlspecialchars(addslashes($row['code'] ?? '')); ?>', <?php echo (int)($row['duration_years'] ?? $row['duration'] ?? 0); ?>)">
@@ -279,7 +278,7 @@ $dept_result = $conn->query($dept_sql);
                         <?php endwhile; ?>
                     <?php else: ?>
                         <tr>
-                            <td colspan="3" class="empty-state">
+                            <td colspan="4" class="empty-state">
                                 <i class="fas fa-graduation-cap"></i>
                                 <p>No programs found. Add your first program to get started!</p>
                             </td>

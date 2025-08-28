@@ -219,7 +219,6 @@ $dept_result = $conn->query($dept_sql);
                     <tr>
                         <th>Name</th>
                         <th>Department</th>
-                        <th>Status</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
@@ -229,13 +228,6 @@ $dept_result = $conn->query($dept_sql);
                             <tr>
                                 <td><strong><?php echo htmlspecialchars($row['name']); ?></strong></td>
                                 <td><?php echo htmlspecialchars($row['department_name'] ?? 'N/A'); ?></td>
-                                <td>
-                                    <?php if ($row['is_active']): ?>
-                                        <span class="badge bg-success">Active</span>
-                                    <?php else: ?>
-                                        <span class="badge bg-secondary">Inactive</span>
-                                    <?php endif; ?>
-                                </td>
                                 <td>
                                     <button class="btn btn-sm btn-outline-primary me-1" onclick="editLecturer(<?php echo $row['id']; ?>, '<?php echo htmlspecialchars(addslashes($row['name'])); ?>', <?php echo (int)$row['department_id']; ?>, <?php echo $row['is_active']; ?>)">
                                         <i class="fas fa-edit"></i>
@@ -252,7 +244,7 @@ $dept_result = $conn->query($dept_sql);
                         <?php endwhile; ?>
                     <?php else: ?>
                         <tr>
-                            <td colspan="7" class="empty-state">
+                            <td colspan="3" class="empty-state">
                                 <i class="fas fa-chalkboard-teacher"></i>
                                 <p>No lecturers found. Add your first lecturer to get started!</p>
                             </td>
