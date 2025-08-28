@@ -9,6 +9,9 @@
       <a href="view_timetable.php" class="nav-link <?= ($currentPage == 'view_timetable.php') ? 'active' : '' ?>">
         <i class="fas fa-calendar-alt me-2"></i>Timetable
       </a>
+      <a href="generate_timetable.php" class="nav-link <?= ($currentPage == 'generate_timetable.php') ? 'active' : '' ?>">
+        <i class="fas fa-calendar-plus me-2"></i>Generate Timetable
+      </a>
     </div>
 
     <!-- Management Section -->

@@ -78,7 +78,7 @@ $conn->close();
             <span class="count-circle"><?php echo $timetable_count; ?></span>
           </a>
         <?php else: ?>
-          <a href="timetable.php" class="grid-button">
+          <a href="generate_timetable.php" class="grid-button">
             <i class="fas fa-calendar-plus"></i>
             <div>Generate Timetable</div>
             <span class="count-circle">0</span>
