@@ -251,7 +251,6 @@ $dept_result = $conn->query($dept_sql);
                     <tr>
                         <th>Program Name</th>
                         <th>Code</th>
-                        <th>Department</th>
                         <th>Duration (yrs)</th>
                         <th>Actions</th>
                     </tr>
