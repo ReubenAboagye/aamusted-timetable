@@ -208,12 +208,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 include 'ga_timetable_generator.php';
                 $ga = new GeneticAlgorithm($classes, $courses, $rooms);
                 // Reduce workload to avoid timeouts on large data sets
-                $ga->initializePopulation(20);
+                $ga->initializePopulation(12);
                 $ga->setProgressReporter(function($gen, $total, $fitness) {
                     // No-op in sync mode; future: store progress in DB or session
                 });
-                // Lower generations to decrease execution time
-                $bestTimetable = $ga->evolve(40);
+                // Lower generations and add time budget to decrease execution time
+                $ga->setTimeBudgetSeconds(20);
+                $bestTimetable = $ga->evolve(25);
 
                 // Map names to IDs
                 // Days map

@@ -12,6 +12,8 @@ class GeneticAlgorithm {
     private $constraints;       // Constraint definitions
     private $fitnessCache;      // Cache for fitness calculations
     private $progressCallback;  // Optional progress reporter callable
+    private $currentFitnessScores; // Cached fitness scores per generation (aligned with $population)
+    private $timeBudgetSeconds; // Optional time budget to stop early
 
     public function __construct($classes, $courses, $rooms, $lecturers = []) {
         $this->classes = $classes;
@@ -26,6 +28,8 @@ class GeneticAlgorithm {
         $this->population = [];
         $this->fitnessCache = [];
         $this->progressCallback = null;
+        $this->currentFitnessScores = [];
+        $this->timeBudgetSeconds = 0;
         
         // Initialize constraint definitions
         $this->initializeConstraints();
@@ -40,6 +44,17 @@ class GeneticAlgorithm {
             $this->progressCallback = $callback;
         }
     }
+
+    /**
+     * Set an optional wall-clock time budget (in seconds) for evolve().
+     */
+    public function setTimeBudgetSeconds($seconds) {
+        $this->timeBudgetSeconds = max(0, (int)$seconds);
+    }
+
+    /** Allow external access for async chunking use-cases */
+    public function setPopulation(array $population) { $this->population = $population; }
+    public function getPopulation() { return $this->population; }
 
     /**
      * Initialize constraint definitions with weights
@@ -334,7 +349,9 @@ class GeneticAlgorithm {
         if (mt_rand() / mt_getrandmax() < 0.8) {
         $i = rand(0, $this->populationSize - 1);
         $j = rand(0, $this->populationSize - 1);
-        return ($this->fitness($this->population[$i]) > $this->fitness($this->population[$j]))
+        $scoreI = $this->currentFitnessScores[$i] ?? $this->fitness($this->population[$i]);
+        $scoreJ = $this->currentFitnessScores[$j] ?? $this->fitness($this->population[$j]);
+        return ($scoreI > $scoreJ)
             ? $this->population[$i]
             : $this->population[$j];
         } else {
@@ -504,15 +521,21 @@ class GeneticAlgorithm {
     public function evolve($generations = 100) {
         $bestFitness = 0;
         $bestTimetable = null;
+        $startTime = microtime(true);
         
         for ($generation = 0; $generation < $generations; $generation++) {
-            // Sort population by fitness (best first)
-            usort($this->population, function($a, $b) {
-                return $this->fitness($b) <=> $this->fitness($a);
-            });
+            // Evaluate once and sort by score descending
+            $scores = [];
+            $count = count($this->population);
+            for ($i = 0; $i < $count; $i++) {
+                $scores[$i] = $this->fitness($this->population[$i]);
+            }
+            // Sort scores and population together
+            array_multisort($scores, SORT_DESC, $this->population);
+            $this->currentFitnessScores = $scores;
             
             // Keep track of best solution
-            $currentBestFitness = $this->fitness($this->population[0]);
+            $currentBestFitness = $scores[0] ?? 0;
             if ($currentBestFitness > $bestFitness) {
                 $bestFitness = $currentBestFitness;
                 $bestTimetable = $this->population[0];
@@ -527,7 +550,7 @@ class GeneticAlgorithm {
                 $parent1 = $this->selection();
                 $parent2 = $this->selection();
                 $child = $this->crossover($parent1, $parent2);
-                $child = $this->mutation($child);
+                $child = $this->mutation($child, 0.05);
                 $newPopulation[] = $child;
             }
             
@@ -544,6 +567,13 @@ class GeneticAlgorithm {
                     call_user_func($this->progressCallback, $generation + 1, $generations, $bestFitness);
                 } catch (\Throwable $e) {
                     // Ignore progress callback errors
+                }
+            }
+
+            // Respect optional time budget to avoid timeouts
+            if ($this->timeBudgetSeconds > 0) {
+                if ((microtime(true) - $startTime) >= $this->timeBudgetSeconds) {
+                    break;
                 }
             }
         }
