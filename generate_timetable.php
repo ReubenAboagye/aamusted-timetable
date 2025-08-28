@@ -281,6 +281,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                         continue;
                     }
 
+                    // Enforce lecturer cannot teach two classes at the same time across rooms
+                    $lecturerConflict = $conn->prepare("SELECT t.id
+                                                        FROM timetable t
+                                                        JOIN lecturer_courses lc2 ON lc2.id = t.lecturer_course_id
+                                                        WHERE t.session_id = ? AND t.day_id = ? AND t.time_slot_id = ? AND lc2.lecturer_id = ?
+                                                        LIMIT 1");
+                    $lecturerConflict->bind_param('iiii', $selected_session, $dayId, $timeSlotId, $lecturerId);
+                    $lecturerConflict->execute();
+                    $confRes = $lecturerConflict->get_result();
+                    $hasLecturerConflict = $confRes && $confRes->num_rows > 0;
+                    $lecturerConflict->close();
+                    if ($hasLecturerConflict) {
+                        // Skip to avoid assigning lecturer to multiple rooms at the same time
+                        continue;
+                    }
+
                     // Insert
                     $stmt = $conn->prepare("INSERT INTO timetable (session_id, class_course_id, lecturer_course_id, day_id, time_slot_id, room_id, session_type_id)
                                               VALUES (?, ?, ?, ?, ?, ?, ?)");
