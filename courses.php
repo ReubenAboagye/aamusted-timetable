@@ -158,11 +158,7 @@ $dept_result = $conn->query($dept_sql);
                         <th>Course Name</th>
                         <th>Code</th>
                         <th>Department</th>
-                        <th>Credits</th>
                         <th>Hours/Week</th>
-                        <th>Level</th>
-                        <th>Room Type</th>
-                        <th>Status</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
@@ -173,17 +169,7 @@ $dept_result = $conn->query($dept_sql);
                                 <td><strong><?php echo htmlspecialchars($row['name']); ?></strong></td>
                                 <td><span class="badge bg-primary"><?php echo htmlspecialchars($row['code']); ?></span></td>
                                 <td><?php echo htmlspecialchars($row['department_name'] ?? 'N/A'); ?></td>
-                                <td><span class="badge bg-info"><?php echo htmlspecialchars($row['credits']); ?> credits</span></td>
                                 <td><span class="badge bg-warning"><?php echo htmlspecialchars($row['hours_per_week']); ?> hrs/week</span></td>
-                                <td><span class="badge bg-secondary">Level <?php echo htmlspecialchars($row['level']); ?></span></td>
-                                <td><span class="badge bg-dark"><?php echo htmlspecialchars(ucwords(str_replace('_', ' ', $row['preferred_room_type']))); ?></span></td>
-                                <td>
-                                    <?php if ($row['is_active']): ?>
-                                        <span class="badge bg-success">Active</span>
-                                    <?php else: ?>
-                                        <span class="badge bg-secondary">Inactive</span>
-                                    <?php endif; ?>
-                                </td>
                                 <td>
                                     <button class="btn btn-sm btn-outline-primary me-1" onclick="editCourse(<?php echo $row['id']; ?>)">
                                         <i class="fas fa-edit"></i>
@@ -200,7 +186,7 @@ $dept_result = $conn->query($dept_sql);
                         <?php endwhile; ?>
                     <?php else: ?>
                         <tr>
-                            <td colspan="9" class="empty-state">
+                            <td colspan="5" class="empty-state">
                                 <i class="fas fa-book"></i>
                                 <p>No courses found. Add your first course to get started!</p>
                             </td>

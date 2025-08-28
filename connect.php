@@ -1,7 +1,7 @@
 <?php
 $servername = "localhost";
 $username = "root";
-$password = "!Won2Encrypt?";
+$password = "!Won2Encript?";
 $dbname = "timetable_system";
 
 // Create connection
