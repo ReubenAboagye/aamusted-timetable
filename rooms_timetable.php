@@ -58,7 +58,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $selected_session > 0) {
             <h4><i class="fas fa-building me-2"></i>Rooms Timetable</h4>
             <?php if (!empty($entriesMap)): ?>
             <div>
-                <button class="btn btn-outline-primary" onclick="window.print()"><i class="fas fa-print me-2"></i>Print</button>
+                <button class="btn btn-outline-primary" onclick="window.print()"><i class="fas fa-file-pdf me-2"></i>Export PDF</button>
             </div>
             <?php endif; ?>
         </div>
@@ -89,20 +89,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $selected_session > 0) {
             <table class="table table-bordered timetable-grid">
                 <thead>
                     <tr>
-                        <th>Room</th>
+                        <th class="time-header">Time</th>
                         <?php foreach ($days as $day): ?>
-                            <?php foreach ($time_slots as $slot): ?>
-                                <th><?php echo htmlspecialchars($day['name']); ?><br><?php echo date('H:i', strtotime($slot['start_time'])); ?></th>
+                            <?php foreach ($rooms as $room): ?>
+                                <th class="day-header"><?php echo htmlspecialchars($day['name']); ?><br><?php echo htmlspecialchars($room['name'] . ' (' . $room['building'] . ')'); ?></th>
                             <?php endforeach; ?>
                         <?php endforeach; ?>
                     </tr>
                 </thead>
                 <tbody>
-                    <?php foreach ($rooms as $room): ?>
+                    <?php foreach ($time_slots as $slot): ?>
                         <tr>
-                            <td><strong><?php echo htmlspecialchars($room['name'] . ' (' . $room['building'] . ')'); ?></strong></td>
+                            <td class="time-cell">
+                                <div class="time-info">
+                                    <div class="start-time"><?php echo date('H:i', strtotime($slot['start_time'])); ?></div>
+                                    <div class="end-time"><?php echo date('H:i', strtotime($slot['end_time'])); ?></div>
+                                </div>
+                            </td>
                             <?php foreach ($days as $day): ?>
-                                <?php foreach ($time_slots as $slot): ?>
+                                <?php foreach ($rooms as $room): ?>
                                     <td class="timetable-cell">
                                         <?php
                                             $key = $room['id'] . '|' . $day['name'] . '|' . $slot['start_time'];
