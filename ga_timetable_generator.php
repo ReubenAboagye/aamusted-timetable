@@ -11,6 +11,7 @@ class GeneticAlgorithm {
     private $populationSize;    // Size of the population
     private $constraints;       // Constraint definitions
     private $fitnessCache;      // Cache for fitness calculations
+    private $progressCallback;  // Optional progress reporter callable
 
     public function __construct($classes, $courses, $rooms, $lecturers = []) {
         $this->classes = $classes;
@@ -24,9 +25,20 @@ class GeneticAlgorithm {
         
         $this->population = [];
         $this->fitnessCache = [];
+        $this->progressCallback = null;
         
         // Initialize constraint definitions
         $this->initializeConstraints();
+    }
+
+    /**
+     * Set a callback to report progress during evolution.
+     * Callback signature: function(int $generation, int $totalGenerations, float $bestFitness): void
+     */
+    public function setProgressReporter($callback) {
+        if (is_callable($callback)) {
+            $this->progressCallback = $callback;
+        }
     }
 
     /**
@@ -475,6 +487,10 @@ class GeneticAlgorithm {
                     $other['lecturer_id'] === $entry['lecturer_id'] ||
                     $other['room_id'] === $entry['room_id']) {
                     $conflicts++;
+                    // Early exit to save time on large populations
+                    if ($conflicts >= 10) {
+                        return $conflicts;
+                    }
                 }
             }
         }
@@ -520,6 +536,15 @@ class GeneticAlgorithm {
             // Clear fitness cache periodically to save memory
             if ($generation % 20 === 0) {
                 $this->fitnessCache = [];
+            }
+
+            // Report progress if callback is set
+            if ($this->progressCallback) {
+                try {
+                    call_user_func($this->progressCallback, $generation + 1, $generations, $bestFitness);
+                } catch (\Throwable $e) {
+                    // Ignore progress callback errors
+                }
             }
         }
         
