@@ -129,4 +129,34 @@ The following new tables from the schema need corresponding PHP management files
 3. `sessions.php` - Updated to new schema structure
 4. `addsessionform.php` - Created new file for session creation  
 5. `update_session.php` - Updated to handle new fields
-6. `SCHEMA_UPDATE_SUMMARY.md` - This summary document
+6. `rooms.php` - Updated to use hardcoded room type validation (VARCHAR instead of ENUM)
+7. `migrate_room_type_to_varchar.sql` - Created migration script
+8. `test_room_type_migration.php` - Created test script
+9. `SCHEMA_UPDATE_SUMMARY.md` - This summary document
+
+## Latest Update: Room Type Migration to VARCHAR (2024)
+
+### Change Summary
+- **Modified**: `rooms.room_type` column from ENUM to VARCHAR(50)
+- **Reason**: Eliminate ENUM constraint issues and provide more flexibility
+- **Approach**: Application-level validation with hardcoded room types
+
+### Hardcoded Room Types
+The application now enforces these room types at the code level:
+- `classroom`
+- `lecture_hall`
+- `laboratory`
+- `computer_lab`
+- `seminar_room`
+- `auditorium`
+
+### Benefits
+1. **No more ENUM constraint errors**
+2. **Flexible room type management**
+3. **Consistent validation across all operations**
+4. **Easy to add new room types in the future**
+
+### Migration Steps
+1. Run `migrate_room_type_to_varchar.sql`
+2. Test with `test_room_type_migration.php`
+3. Verify application functionality

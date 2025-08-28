@@ -1,447 +1,643 @@
 <?php
-// Connect to the database and fetch department data
+// Handle bulk import BEFORE any output
 include 'connect.php';
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'bulk_import') {
+    if (isset($_POST['import_data'])) {
+        $import_data = json_decode($_POST['import_data'], true);
+        if ($import_data) {
+            $success_count = 0;
+            $error_count = 0;
+            foreach ($import_data as $row) {
+                if (!empty($row['valid'])) {
+                    $name = $conn->real_escape_string($row['name']);
+                    $code = $conn->real_escape_string($row['code']);
+                    $short_name = $conn->real_escape_string($row['short_name']);
+                    $head_of_department = $conn->real_escape_string($row['head_of_department']);
+                    $is_active = $row['is_active'];
 
-$sql = "SELECT * FROM departments";
+                    $sql = "INSERT INTO departments (name, code, short_name, head_of_department, is_active) VALUES (?, ?, ?, ?, ?)";
+                    $stmt = $conn->prepare($sql);
+                    $stmt->bind_param("ssssi", $name, $code, $short_name, $head_of_department, $is_active);
+
+                    if ($stmt->execute()) {
+                        $success_count++;
+                    } else {
+                        $error_count++;
+                    }
+                    $stmt->close();
+                }
+            }
+            if ($success_count > 0) {
+                $success_message = "Successfully imported $success_count departments!";
+                if ($error_count > 0) {
+                    $success_message .= " $error_count records failed to import.";
+                }
+            } else {
+                $error_message = "No departments were imported. Please check your data.";
+            }
+        }
+    }
+}
+
+$pageTitle = 'Departments Management';
+include 'includes/header.php';
+include 'includes/sidebar.php';
+
+// Handle form submission for adding/editing department
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+    if ($_POST['action'] === 'add') {
+        $name = trim($_POST['name']);
+        $code = strtoupper(trim($_POST['code']));
+        $short_name = trim($_POST['short_name']);
+        $head_of_department = trim($_POST['head_of_department']);
+        $is_active = isset($_POST['is_active']) ? 1 : 0;
+
+        // Check if code already exists
+        $check_sql = "SELECT id FROM departments WHERE code = ?";
+        $check_stmt = $conn->prepare($check_sql);
+        $check_stmt->bind_param("s", $code);
+        $check_stmt->execute();
+        $check_result = $check_stmt->get_result();
+
+        if ($check_result && $check_result->num_rows > 0) {
+            $error_message = "Department code already exists. Please choose a different code.";
+            $check_stmt->close();
+        } else {
+            $check_stmt->close();
+
+            $sql = "INSERT INTO departments (name, code, short_name, head_of_department, is_active) VALUES (?, ?, ?, ?, ?)";
+            $stmt = $conn->prepare($sql);
+            $stmt->bind_param("ssssi", $name, $code, $short_name, $head_of_department, $is_active);
+
+            if ($stmt->execute()) {
+                $success_message = "Department added successfully!";
+            } else {
+                $error_message = "Error adding department: " . $conn->error;
+            }
+            $stmt->close();
+        }
+    } elseif ($_POST['action'] === 'edit' && isset($_POST['id'])) {
+        $id = $conn->real_escape_string($_POST['id']);
+        $name = $conn->real_escape_string($_POST['name']);
+        $code = $conn->real_escape_string($_POST['code']);
+        $short_name = $conn->real_escape_string($_POST['short_name']);
+        $head_of_department = $conn->real_escape_string($_POST['head_of_department']);
+        $is_active = isset($_POST['is_active']) ? 1 : 0;
+        
+        // Check if code already exists for other departments
+        $check_sql = "SELECT id FROM departments WHERE code = ? AND id != ? AND is_active = 1";
+        $check_stmt = $conn->prepare($check_sql);
+        $check_stmt->bind_param("si", $code, $id);
+        $check_stmt->execute();
+        $check_result = $check_stmt->get_result();
+        
+        if ($check_result->num_rows > 0) {
+            $error_message = "Department code already exists. Please choose a different code.";
+        } else {
+            $sql = "UPDATE departments SET name = ?, code = ?, short_name = ?, head_of_department = ?, is_active = ? WHERE id = ?";
+            $stmt = $conn->prepare($sql);
+            $stmt->bind_param("ssssii", $name, $code, $short_name, $head_of_department, $is_active, $id);
+            
+            if ($stmt->execute()) {
+                $success_message = "Department updated successfully!";
+            } else {
+                $error_message = "Error updating department: " . $conn->error;
+            }
+            $stmt->close();
+        }
+        $check_stmt->close();
+    } elseif ($_POST['action'] === 'delete' && isset($_POST['id'])) {
+        $id = $conn->real_escape_string($_POST['id']);
+        $sql = "UPDATE departments SET is_active = 0 WHERE id = ?";
+        $stmt = $conn->prepare($sql);
+        $stmt->bind_param("i", $id);
+        
+        if ($stmt->execute()) {
+            $success_message = "Department deleted successfully!";
+        } else {
+            $error_message = "Error deleting department: " . $conn->error;
+        }
+        $stmt->close();
+    }
+}
+
+// Fetch departments
+$sql = "SELECT * FROM departments WHERE is_active = 1 ORDER BY name";
 $result = $conn->query($sql);
 ?>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Departments Management - University Timetable Generator</title>
-  <!-- Bootstrap CSS -->
-  <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.2/css/bootstrap.min.css" rel="stylesheet" />
-  <!-- Font Awesome -->
-  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet" />
-  <!-- Google Font: Open Sans -->
-  <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600&display=swap" rel="stylesheet" />
-  <style>
-    :root {
-      --primary-color: #800020;   /* AAMUSTED maroon */
-      --hover-color: #600010;     /* Darker maroon */
-      --accent-color: #FFD700;    /* Accent goldenrod */
-      --bg-color: #ffffff;        /* White background */
-      --sidebar-bg: #f8f8f8;      /* Light gray sidebar */
-      --footer-bg: #800020;       /* Footer same as primary */
-    }
-    /* Global Styles */
-    body {
-      font-family: 'Open Sans', sans-serif;
-      background-color: var(--bg-color);
-      margin: 0;
-      padding-top: 70px; /* For fixed header */
-      overflow: auto;
-      font-size: 14px;
-    }
-    /* Header */
-    .navbar {
-      background-color: var(--primary-color);
-      position: fixed;
-      top: 0;
-      width: 100%;
-      z-index: 1050;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
-    .navbar-brand {
-      font-weight: 600;
-      font-size: 1.75rem;
-      display: flex;
-      align-items: center;
-    }
-    .navbar-brand img {
-      height: 40px;
-      margin-right: 10px;
-    }
-    #sidebarToggle {
-      border: none;
-      background: transparent;
-      color: #fff;
-      font-size: 1.5rem;
-      margin-right: 10px;
-    }
-    /* Sidebar */
-    .sidebar {
-      background-color: var(--sidebar-bg);
-      position: fixed;
-      top: 70px;
-      left: 0;
-      width: 250px;
-      height: calc(100vh - 70px);
-      padding: 20px;
-      box-shadow: 2px 0 5px rgba(0,0,0,0.1);
-      transition: transform 0.3s ease;
-      transform: translateX(-100%);
-      z-index: 1040; /* Higher than footer, lower than navbar */
-      overflow-y: auto; /* Scrollable if content is too long */
-    }
-    .sidebar.show {
-      transform: translateX(0);
-    }
-    .nav-links {
-      display: flex;
-      flex-direction: column;
-      gap: 5px;
-      padding-bottom: 20px; /* Add bottom padding to prevent overlap with footer */
-    }
-    .nav-links a {
-      display: block;
-      width: 100%;
-      padding: 5px 10px;
-      color: var(--primary-color);
-      text-decoration: none;
-      font-weight: 600;
-      font-size: 1rem;
-      transition: background-color 0.3s, color 0.3s;
-    }
-    .nav-links a:not(:last-child) {
-      border-bottom: 1px solid #ccc;
-      margin-bottom: 5px;
-      padding-bottom: 5px;
-    }
-    .nav-links a:hover,
-    .nav-links a.active {
-      background-color: var(--primary-color);
-      color: #fff;
-      border-radius: 4px;
-    }
-    /* Main Content */
-    .main-content {
-      transition: margin-left 0.3s ease;
-      margin-left: 0;
-      padding: 20px;
-      min-height: calc(100vh - 70px);
-      overflow: auto;
-    }
-    .main-content.shift {
-      margin-left: 250px;
-    }
-    /* Table Styles */
-    .table-custom {
-      background-color: var(--bg-color);
-      border-radius: 8px;
-      overflow: hidden;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-    }
-    .table-custom th {
-      background-color: var(--primary-color);
-      color: var(--accent-color);
-    }
-    /* Footer */
-    .footer {
-      background-color: var(--footer-bg);
-      color: #fff;
-      padding: 10px;
-      text-align: center;
-      position: fixed;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      transition: left 0.3s ease;
-      z-index: 1030; /* Lower than sidebar */
-    }
-    .footer.shift {
-      left: 250px;
-    }
-    /* Back to Top Button */
-    #backToTop {
-      position: fixed;
-      bottom: 30px;
-      right: 30px;
-      z-index: 9999;
-      display: none;
-      background: rgba(128, 0, 32, 0.7);
-      border: none;
-      outline: none;
-      width: 50px;
-      height: 50px;
-      border-radius: 50%;
-      cursor: pointer;
-      transition: background 0.3s ease, transform 0.3s ease;
-      padding: 0;
-      overflow: hidden;
-    }
-    #backToTop svg {
-      display: block;
-      width: 100%;
-      height: 100%;
-    }
-    #backToTop .arrow-icon {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      color: #FFD700;
-      font-size: 1.5rem;
-      pointer-events: none;
-    }
-    #backToTop:hover {
-      background: rgba(96, 0, 16, 0.9);
-      transform: scale(1.1);
-    }
-    /* Responsive Adjustments */
-    @media (max-width: 768px) {
-      .sidebar { width: 200px; }
-      .main-content.shift { margin-left: 200px; }
-      .footer.shift { left: 200px; }
-    }
-    @media (max-width: 576px) {
-      .sidebar { width: 250px; }
-      .main-content.shift { margin-left: 0; }
-      .footer.shift { left: 0; }
-    }
-  </style>
-</head>
-<?php $pageTitle = 'Departments Management'; include 'includes/header.php'; include 'includes/sidebar.php'; ?>
 
-  <div class="main-content" id="mainContent">
-    <h2>Departments Management</h2>
-    <!-- Search & Action Buttons -->
-    <div class="d-flex justify-content-between align-items-center mb-4">
-      <div class="input-group" style="width: 300px;">
-        <span class="input-group-text"><i class="fas fa-search"></i></span>
-        <input type="text" class="form-control" id="searchInput" placeholder="Search for departments...">
-      </div>
-      <div>
-        <button class="btn btn-primary me-2" data-bs-toggle="modal" data-bs-target="#importModal">Import</button>
-        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#dataEntryModal">Add</button>
-      </div>
-    </div>
-    
-    <!-- Departments Table -->
+<div class="main-content" id="mainContent">
     <div class="table-container">
-      <div class="table-header">
-        <h4><i class="fas fa-building me-2"></i>Existing Departments</h4>
-      </div>
-      <div class="search-container">
-        <input type="text" id="searchInput" class="search-input" placeholder="Search departments...">
-      </div>
-      <div class="table-responsive">
-        <table class="table" id="departmentsTable">
-        <thead>
-          <tr>
-            <th>Department ID</th>
-            <th>Department Name</th>
-            <th>Department Code</th>
-            <th>Department Short Name</th>
-            <th>Head of Department</th>
-            <th>Status</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          <?php
-          if ($result) {
-              while ($row = $result->fetch_assoc()) {
-                  $status = $row['is_active'] ? '<span class="badge bg-success">Active</span>' : '<span class="badge bg-danger">Inactive</span>';
-                  echo "<tr>
-                          <td>{$row['id']}</td>
-                          <td>{$row['name']}</td>
-                          <td>{$row['code']}</td>
-                          <td>{$row['short_name']}</td>
-                          <td>{$row['head_of_department']}</td>
-                          <td>{$status}</td>
-                          <td>
-                              <a href='delete_department.php?department_id={$row['id']}' class='btn btn-danger btn-sm' onclick='return confirm(\"Are you sure you want to delete this department?\")'>Delete</a>
-                          </td>
-                        </tr>";
-              }
-          } else {
-              echo "<tr><td colspan='7' class='text-center'>No departments found</td></tr>";
-          }
-          $conn->close();
-          ?>
-        </tbody>
-      </table>
-        </div>
-        <div class="mt-3">
-  
-        </div>
-      </div>
-    </div>
-    
-<?php include 'includes/footer.php'; ?>
-  
-  <!-- Import Modal (Excel Files Only) -->
-  <div class="modal fade" id="importModal" tabindex="-1" aria-labelledby="importModalLabel" aria-hidden="true">
-    <div class="modal-dialog">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h5 class="modal-title" id="importModalLabel">Import Departments</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-        </div>
-        <div class="modal-body">
-          <form action="import_department.php" method="POST" enctype="multipart/form-data">
-            <div class="mb-3">
-              <label for="file" class="form-label">Choose Excel File</label>
-              <input type="file" class="form-control" id="file" name="file" required accept=".xls, .xlsx">
+        <div class="table-header d-flex justify-content-between align-items-center">
+            <h4><i class="fas fa-building me-2"></i>Departments Management</h4>
+            <div class="d-flex gap-2">
+                <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#importModal">
+                    <i class="fas fa-upload me-2"></i>Import
+                </button>
+                <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addDepartmentModal">
+                    <i class="fas fa-plus me-2"></i>Add New Department
+                </button>
             </div>
-            <button type="submit" class="btn btn-primary">Upload</button>
-          </form>
         </div>
-      </div>
-    </div>
-  </div>
-  
-  <!-- Data Entry Modal -->
-  <div class="modal fade" id="dataEntryModal" tabindex="-1" aria-labelledby="dataEntryModalLabel" aria-hidden="true">
-    <div class="modal-dialog">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h5 class="modal-title" id="dataEntryModalLabel">Add New Department</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-        </div>
-        <div class="modal-body">
-          <form action="department.php" method="POST">
-            <div class="mb-3">
-              <label for="departmentName" class="form-label">Department Name *</label>
-              <input type="text" class="form-control" id="departmentName" name="departmentName" required>
-            </div>
-            <div class="mb-3">
-              <label for="departmentCode" class="form-label">Department Code *</label>
-              <input type="text" class="form-control" id="departmentCode" name="departmentCode" required maxlength="20">
-              <small class="form-text text-muted">Unique code for the department (max 20 characters)</small>
-            </div>
-            <div class="mb-3">
-              <label for="departmentShortName" class="form-label">Department Short Name</label>
-              <input type="text" class="form-control" id="departmentShortName" name="departmentShortName" maxlength="10">
-              <small class="form-text text-muted">Abbreviated name (max 10 characters)</small>
-            </div>
-            <div class="mb-3">
-              <label for="headOfDepartment" class="form-label">Head of Department</label>
-              <input type="text" class="form-control" id="headOfDepartment" name="headOfDepartment" maxlength="100">
-            </div>
-            <div class="mb-3">
-              <div class="form-check">
-                <input class="form-check-input" type="checkbox" id="isActive" name="isActive" checked>
-                <label class="form-check-label" for="isActive">
-                  Department is Active
-                </label>
-              </div>
-            </div>
-            <button type="submit" class="btn btn-primary">Add Department</button>
-          </form>
-        </div>
-      </div>
-    </div>
-  </div>
-  
-  <!-- Back to Top Button -->
-  <button id="backToTop">
-    <svg width="50" height="50" viewBox="0 0 50 50">
-      <circle id="progressCircle" cx="25" cy="25" r="20" fill="none" stroke="#FFD700" stroke-width="4" stroke-dasharray="126" stroke-dashoffset="126"/>
-    </svg>
-    <i class="fas fa-arrow-up arrow-icon"></i>
-  </button>
-  
-  <!-- Bootstrap Bundle with Popper -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.2/js/bootstrap.bundle.min.js"></script>
-  
-  <script>
-    // Update current time in header
-    function updateTime() {
-      const now = new Date();
-      const timeString = now.toLocaleTimeString('en-US', { 
-        hour12: true,
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit'
-      });
-      document.getElementById('currentTime').textContent = timeString;
-    }
-    setInterval(updateTime, 1000);
-    updateTime();
-    
-    // Toggle sidebar visibility
-    document.getElementById('sidebarToggle').addEventListener('click', function() {
-      const sidebar = document.getElementById('sidebar');
-      const mainContent = document.getElementById('mainContent');
-      const footer = document.getElementById('footer');
-      sidebar.classList.toggle('show');
-      if (sidebar.classList.contains('show')) {
-        mainContent.classList.add('shift');
-        footer.classList.add('shift');
-      } else {
-        mainContent.classList.remove('shift');
-        footer.classList.remove('shift');
-      }
-    });
-    
-    // Search functionality for departments table
-    document.getElementById('searchInput').addEventListener('keyup', function() {
-      let searchValue = this.value.toLowerCase();
-      let rows = document.querySelectorAll('#departmentsTable tbody tr');
-      rows.forEach(row => {
-          let cells = row.querySelectorAll('td');
-          let matchFound = false;
-          for (let i = 0; i < cells.length - 1; i++) {
-              if (cells[i].textContent.toLowerCase().includes(searchValue)) {
-                  matchFound = true;
-                  break;
-              }
-          }
-          row.style.display = matchFound ? '' : 'none';
-      });
-    });
-    
-    // Add form submission handler for the data entry modal
-    document.querySelector('#dataEntryModal form').addEventListener('submit', function(e) {
-      e.preventDefault();
-      
-      // Get form data
-      const formData = new FormData(this);
-      formData.append('action', 'add');
-      
-      // Handle checkbox value for isActive
-      const isActiveCheckbox = document.getElementById('isActive');
-      formData.set('isActive', isActiveCheckbox.checked ? '1' : '0');
-      
-      // Submit form data to adddepartmentform.php for processing
-      fetch('adddepartmentform.php', {
-        method: 'POST',
-        body: formData
-      })
-      .then(response => response.text())
-      .then(data => {
-        // Close modal
-        const modal = bootstrap.Modal.getInstance(document.getElementById('dataEntryModal'));
-        modal.hide();
         
-        // Show success message and reload page
-        alert('Department added successfully!');
-        window.location.reload();
-      })
-      .catch(error => {
-        console.error('Error:', error);
-        alert('Error adding department. Please try again.');
-      });
+        <?php if (isset($success_message)): ?>
+            <div class="alert alert-success alert-dismissible fade show m-3" role="alert">
+                <?php echo $success_message; ?>
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        <?php endif; ?>
+        
+        <?php if (isset($error_message)): ?>
+            <div class="alert alert-danger alert-dismissible fade show m-3" role="alert">
+                <?php echo $error_message; ?>
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        <?php endif; ?>
+
+        <div class="search-container m-3">
+            <input type="text" class="search-input" placeholder="Search departments...">
+        </div>
+
+        <div class="table-responsive">
+            <table class="table" id="departmentsTable">
+                <thead>
+                    <tr>
+                        <th>Department Name</th>
+                        <th>Code</th>
+                        <th>Short Name</th>
+                        <th>Head of Department</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php if ($result && $result->num_rows > 0): ?>
+                        <?php while ($row = $result->fetch_assoc()): ?>
+                            <tr>
+                                <td><strong><?php echo htmlspecialchars($row['name']); ?></strong></td>
+                                <td><span class="badge bg-primary"><?php echo htmlspecialchars($row['code']); ?></span></td>
+                                <td><?php echo htmlspecialchars($row['short_name'] ?? 'N/A'); ?></td>
+                                <td><?php echo htmlspecialchars($row['head_of_department'] ?? 'N/A'); ?></td>
+                                <td>
+                                    <?php if ($row['is_active']): ?>
+                                        <span class="badge bg-success">Active</span>
+                                    <?php else: ?>
+                                        <span class="badge bg-secondary">Inactive</span>
+                                    <?php endif; ?>
+                                </td>
+                                <td>
+                                    <button class="btn btn-sm btn-outline-primary me-1" onclick="editDepartment(<?php echo $row['id']; ?>, '<?php echo htmlspecialchars(addslashes($row['name'])); ?>', '<?php echo htmlspecialchars(addslashes($row['code'])); ?>', '<?php echo htmlspecialchars(addslashes($row['short_name'] ?? '')); ?>', '<?php echo htmlspecialchars(addslashes($row['head_of_department'] ?? '')); ?>', <?php echo $row['is_active']; ?>)">
+                                        <i class="fas fa-edit"></i>
+                                    </button>
+                                    <form method="POST" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this department?')">
+                                        <input type="hidden" name="action" value="delete">
+                                        <input type="hidden" name="id" value="<?php echo $row['id']; ?>">
+                                        <button type="submit" class="btn btn-sm btn-outline-danger">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </form>
+                                </td>
+                            </tr>
+                        <?php endwhile; ?>
+                    <?php else: ?>
+                        <tr>
+                            <td colspan="6" class="empty-state">
+                                <i class="fas fa-building"></i>
+                                <p>No departments found. Add your first department to get started!</p>
+                            </td>
+                        </tr>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Add Department Modal -->
+<div class="modal fade" id="addDepartmentModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Add New Department</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST">
+                <div class="modal-body">
+                    <input type="hidden" name="action" value="add">
+                    
+                    <div class="mb-3">
+                        <label for="name" class="form-label">Department Name *</label>
+                        <input type="text" class="form-control" id="name" name="name" required placeholder="e.g., Computer Science">
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="code" class="form-label">Department Code *</label>
+                                <input type="text" class="form-control" id="code" name="code" required placeholder="e.g., CS">
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="short_name" class="form-label">Short Name</label>
+                                <input type="text" class="form-control" id="short_name" name="short_name" placeholder="e.g., CompSci" maxlength="10">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="head_of_department" class="form-label">Head of Department</label>
+                        <input type="text" class="form-control" id="head_of_department" name="head_of_department" placeholder="e.g., Dr. John Smith">
+                    </div>
+                    
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="is_active" name="is_active" checked>
+                            <label class="form-check-label" for="is_active">
+                                Active Department
+                            </label>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Add Department</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Department Modal -->
+<div class="modal fade" id="editDepartmentModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Edit Department</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST">
+                <div class="modal-body">
+                    <input type="hidden" name="action" value="edit">
+                    <input type="hidden" name="id" id="edit_id">
+                    
+                    <div class="mb-3">
+                        <label for="edit_name" class="form-label">Department Name *</label>
+                        <input type="text" class="form-control" id="edit_name" name="name" required placeholder="e.g., Computer Science">
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="edit_code" class="form-label">Department Code *</label>
+                                <input type="text" class="form-control" id="edit_code" name="code" required placeholder="e.g., CS">
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="edit_short_name" class="form-label">Short Name</label>
+                                <input type="text" class="form-control" id="edit_short_name" name="short_name" placeholder="e.g., CompSci" maxlength="10">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="edit_head_of_department" class="form-label">Head of Department</label>
+                        <input type="text" class="form-control" id="edit_head_of_department" name="head_of_department" placeholder="e.g., Dr. John Smith">
+                    </div>
+                    
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="edit_is_active" name="is_active">
+                            <label class="form-check-label" for="edit_is_active">
+                                Active Department
+                            </label>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Update Department</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Import Modal -->
+<div class="modal fade" id="importModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Import Departments</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="text-center mb-4">
+                    <i class="fas fa-upload fa-3x text-primary mb-3"></i>
+                    <h6>Upload CSV File</h6>
+                    <p class="text-muted">Drop your CSV file here or click to browse</p>
+                </div>
+
+                <div class="mb-3">
+                    <div class="upload-area" id="uploadArea" style="border: 2px dashed #ccc; border-radius: 8px; padding: 40px; text-align: center; background: #f8f9fa; cursor: pointer;">
+                        <i class="fas fa-cloud-upload-alt fa-2x text-muted mb-3"></i>
+                        <p class="mb-2">Drop CSV file here or <strong>click to browse</strong></p>
+                        <small class="text-muted">Supported format: CSV</small>
+                    </div>
+                    <input type="file" class="form-control d-none" id="csvFile" accept=",.csv">
+                </div>
+
+                <div class="mb-3">
+                    <h6>Preview (first 10 rows)</h6>
+                    <div class="table-responsive">
+                        <table class="table table-sm" id="previewTable">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Name</th>
+                                    <th>Code</th>
+                                    <th>Short Name</th>
+                                    <th>Head of Department</th>
+                                    <th>Status</th>
+                                    <th>Validation</th>
+                                </tr>
+                            </thead>
+                            <tbody id="previewBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="d-flex justify-content-between">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="processBtn">Process File</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Import Confirmation Modal -->
+<div class="modal fade" id="confirmImportModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Confirm Import</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>Are you sure you want to import <strong id="importCount">0</strong> departments?</p>
+                <div class="alert alert-warning">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    This action cannot be undone. Duplicate department codes will be skipped.
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-success" onclick="executeImport()">Import Now</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<?php 
+$conn->close();
+include 'includes/footer.php'; 
+?>
+
+<script>
+let importData = [];
+let currentStep = 1;
+
+function editDepartment(id, name, code, shortName, headOfDepartment, isActive) {
+    // Populate the edit modal with current values
+    document.getElementById('edit_id').value = id;
+    document.getElementById('edit_name').value = name;
+    document.getElementById('edit_code').value = code;
+    document.getElementById('edit_short_name').value = shortName;
+    document.getElementById('edit_head_of_department').value = headOfDepartment;
+    document.getElementById('edit_is_active').checked = isActive == 1;
+    
+    // Show the edit modal
+    var editModal = new bootstrap.Modal(document.getElementById('editDepartmentModal'));
+    editModal.show();
+}
+
+function showStep(step) {
+    currentStep = step;
+    document.getElementById('step1').style.display = step === 1 ? 'block' : 'none';
+    document.getElementById('step2').style.display = step === 2 ? 'block' : 'none';
+    document.getElementById('step3').style.display = step === 3 ? 'block' : 'none';
+}
+
+function processFile() {
+    const fileInput = document.getElementById('csvFile');
+    const file = fileInput.files[0];
+    
+    if (!file) {
+        alert('Please select a file first.');
+        return;
+    }
+    
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            const data = parseCSV(e.target.result);
+            
+            if (data.length > 0) {
+                importData = validateData(data);
+                showPreview();
+                // Show confirmation modal directly
+                var confirmModal = new bootstrap.Modal(document.getElementById('confirmImportModal'));
+                confirmModal.show();
+            } else {
+                alert('No data found in the file.');
+            }
+        } catch (error) {
+            alert('Error processing file: ' + error.message);
+        }
+    };
+    
+    reader.readAsText(file);
+}
+
+function parseCSV(csvText) {
+    const lines = csvText.split('\n');
+    const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+    const data = [];
+    
+    for (let i = 1; i < lines.length; i++) {
+        if (lines[i].trim()) {
+            const values = lines[i].split(',').map(v => v.trim().replace(/"/g, ''));
+            const row = {};
+            headers.forEach((header, index) => {
+                row[header] = values[index] || '';
+            });
+            data.push(row);
+        }
+    }
+    
+    return data;
+}
+
+function validateData(data) {
+    return data.map((row, index) => {
+        const validated = {
+            name: row.name || row.Name || '',
+            code: row.code || row.Code || '',
+            short_name: row.short_name || row['short_name'] || row.ShortName || '',
+            head_of_department: row.head_of_department || row['head_of_department'] || row.HeadOfDepartment || '',
+            is_active: (row.is_active || row['is_active'] || row.IsActive || '1') === '1' ? '1' : '0'
+        };
+        
+        // Validation
+        validated.valid = true;
+        validated.errors = [];
+        
+        if (!validated.name.trim()) {
+            validated.valid = false;
+            validated.errors.push('Name is required');
+        }
+        
+        if (!validated.code.trim()) {
+            validated.valid = false;
+            validated.errors.push('Code is required');
+        }
+        
+        if (validated.short_name.length > 10) {
+            validated.valid = false;
+            validated.errors.push('Short name too long');
+        }
+        
+        return validated;
+    });
+}
+
+function showPreview() {
+    const tbody = document.getElementById('previewBody');
+    tbody.innerHTML = '';
+    
+    // Show only first 10 rows in the preview to give user a quick snapshot
+    const previewRows = importData.slice(0, 10);
+    
+    previewRows.forEach((row, index) => {
+        const tr = document.createElement('tr');
+        tr.className = row.valid ? '' : 'table-danger';
+        
+        tr.innerHTML = `
+            <td>${index + 1}</td>
+            <td>${row.name}</td>
+            <td>${row.code}</td>
+            <td>${row.short_name}</td>
+            <td>${row.head_of_department}</td>
+            <td><span class="badge ${row.is_active === '1' ? 'bg-success' : 'bg-secondary'}">${row.is_active === '1' ? 'Active' : 'Inactive'}</span></td>
+            <td>${row.valid ? '<span class="text-success">✓ Valid</span>' : '<span class="text-danger">✗ ' + row.errors.join(', ') + '</span>'}</td>
+        `;
+        
+        tbody.appendChild(tr);
+    });
+}
+
+function confirmImport() {
+    const validCount = importData.filter(row => row.valid).length;
+    if (validCount === 0) {
+        alert('No valid data to import. Please fix the errors first.');
+        return;
+    }
+    
+    document.getElementById('importCount').textContent = validCount;
+    var confirmModal = new bootstrap.Modal(document.getElementById('confirmImportModal'));
+    confirmModal.show();
+}
+
+function executeImport() {
+    const validData = importData.filter(row => row.valid);
+    
+    // Create form and submit
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.style.display = 'none';
+    
+    const actionInput = document.createElement('input');
+    actionInput.type = 'hidden';
+    actionInput.name = 'action';
+    actionInput.value = 'bulk_import';
+    
+    const dataInput = document.createElement('input');
+    dataInput.type = 'hidden';
+    dataInput.name = 'import_data';
+    dataInput.value = JSON.stringify(validData);
+    
+    form.appendChild(actionInput);
+    form.appendChild(dataInput);
+    document.body.appendChild(form);
+    form.submit();
+}
+
+// Clear form when modals are closed
+document.addEventListener('DOMContentLoaded', function() {
+    // Clear add form when modal is closed
+    var addModal = document.getElementById('addDepartmentModal');
+    addModal.addEventListener('hidden.bs.modal', function () {
+        this.querySelector('form').reset();
     });
     
-    // Back to Top Button Setup
-    const backToTopButton = document.getElementById("backToTop");
-    const progressCircle = document.getElementById("progressCircle");
-    const circumference = 2 * Math.PI * 20;
-    progressCircle.style.strokeDasharray = circumference;
-    progressCircle.style.strokeDashoffset = circumference;
-    
-    window.addEventListener("scroll", function() {
-      const scrollTop = document.documentElement.scrollTop || document.body.scrollTop;
-      if (scrollTop > 100) {
-        backToTopButton.style.display = "block";
-      } else {
-        backToTopButton.style.display = "none";
-      }
-      
-      const scrollHeight = document.documentElement.scrollHeight - document.documentElement.clientHeight;
-      const scrollPercentage = scrollTop / scrollHeight;
-      const offset = circumference - (scrollPercentage * circumference);
-      progressCircle.style.strokeDashoffset = offset;
+    // Clear edit form when modal is closed
+    var editModal = document.getElementById('editDepartmentModal');
+    editModal.addEventListener('hidden.bs.modal', function () {
+        this.querySelector('form').reset();
+        document.getElementById('edit_id').value = '';
     });
     
-    backToTopButton.addEventListener("click", function() {
-      window.scrollTo({ top: 0, behavior: "smooth" });
+    // Reset import modal when closed
+    var importModal = document.getElementById('importModal');
+    importModal.addEventListener('hidden.bs.modal', function () {
+        importData = [];
+        document.getElementById('csvFile').value = '';
+        document.getElementById('previewBody').innerHTML = '';
     });
-  </script>
-</body>
-</html>
+    
+    // Setup drag and drop functionality
+    const uploadArea = document.getElementById('uploadArea');
+    const fileInput = document.getElementById('csvFile');
+    
+    // Click to browse
+    uploadArea.addEventListener('click', function() {
+        fileInput.click();
+    });
+    
+    // Drag and drop events
+    uploadArea.addEventListener('dragover', function(e) {
+        e.preventDefault();
+        this.style.borderColor = '#007bff';
+        this.style.background = '#e3f2fd';
+    });
+    
+    uploadArea.addEventListener('dragleave', function(e) {
+        e.preventDefault();
+        this.style.borderColor = '#ccc';
+        this.style.background = '#f8f9fa';
+    });
+    
+    uploadArea.addEventListener('drop', function(e) {
+        e.preventDefault();
+        this.style.borderColor = '#ccc';
+        this.style.background = '#f8f9fa';
+        
+        const files = e.dataTransfer.files;
+        if (files.length > 0) {
+            fileInput.files = files;
+            // Auto-process the file
+            processFile();
+        }
+    });
+    
+    // File input change event
+    fileInput.addEventListener('change', function() {
+        if (this.files.length > 0) {
+            // Auto-process the file
+            processFile();
+        }
+    });
+});
+</script>

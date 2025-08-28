@@ -1,0 +1,87 @@
+name,building,room_type,capacity,stream_availability,facilities,accessibility_features,is_active
+ROB ROOM 1,ROB Building,classroom,70,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+ROB ROOM 2,ROB Building,classroom,70,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+ROB ROOM 3,ROB Building,classroom,70,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+ROB ROOM 4,ROB Building,classroom,70,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+ROB ROOM 5,ROB Building,classroom,70,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+ROB ROOM 6,ROB Building,classroom,70,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+ROB ROOM 7,ROB Building,classroom,70,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+ROB ROOM 8,ROB Building,classroom,70,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+ROB ROOM 9,ROB Building,classroom,70,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+ROB ROOM 10,ROB Building,classroom,50,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+ROB ROOM 11,ROB Building,classroom,50,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+ROB ROOM 12,ROB Building,classroom,50,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+ROB ROOM 13,ROB Building,classroom,50,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+ROB ROOM 14,ROB Building,classroom,70,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+ROB ROOM 15,ROB Building,classroom,70,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+ROB ROOM 17,ROB Building,classroom,70,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+ROB ROOM 18,ROB Building,classroom,70,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+ROB ROOM 19,ROB Building,classroom,70,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+ROB ROOM 20,ROB Building,classroom,70,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+ROB ROOM 21,ROB Building,classroom,70,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+ROB ROOM 22,ROB Building,classroom,70,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+ROB ROOM 23,ROB Building,classroom,70,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+ROB ROOM 24,ROB Building,classroom,70,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+ROB ROOM 25,ROB Building,classroom,40,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+ROB L\W,ROB Building,classroom,40,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+ROB R\W,ROB Building,classroom,40,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+CBT CAT MAIN LOUNGE,CBT Building,classroom,30,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+CBT FASHION UPSTAIRS ROOM 22,CBT Building,classroom,30,"regular, evening, weekend","projector, whiteboard",,1
+CBT FASHION UPSTAIRS ROOM 2,CBT Building,classroom,30,"regular, evening, weekend","projector, whiteboard",,1
+CBT MECHANICAL LAB,CBT Building,laboratory,30,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+CBT AUTO LAB 1,CBT Building,laboratory,30,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+CBT AUTO LAB 2,CBT Building,laboratory,30,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+CBT CONSTRUCTION LAB,CBT Building,laboratory,30,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+CBT WOOD LAB,CBT Building,laboratory,50,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+NEW LIBRARY GF,New Library,lecture_hall,120,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+NEW LIBRARY FF,New Library,classroom,60,"regular, evening, weekend","projector, whiteboard",,1
+T.L 1,Teaching Lab,classroom,70,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+T.L 2,Teaching Lab,classroom,40,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+T.L 3,Teaching Lab,classroom,40,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+T.L 4,Teaching Lab,classroom,40,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+GLRM 1,General Lecture Room,classroom,30,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+GLRM 2,General Lecture Room,classroom,30,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+GLRM 3,General Lecture Room,classroom,30,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+NEW AUDITORIUM,New Auditorium,lecture_hall,120,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+NEW BUILDING ROOM 1,New Building,lecture_hall,120,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+UBS GF 1,UBS Building,classroom,30,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+UBS GF 3,UBS Building,classroom,30,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+UBS GF 4,UBS Building,classroom,30,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+UBS GF 5,UBS Building,classroom,30,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+UBS GF 6,UBS Building,classroom,30,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+UBS GF 7,UBS Building,classroom,30,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+UBS GF 8,UBS Building,classroom,30,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+UBS GF 9,UBS Building,classroom,30,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+UBS GF 10,UBS Building,classroom,30,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+UBS GF 11,UBS Building,classroom,30,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+UBS GF 12,UBS Building,classroom,30,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+UBS FF 1,UBS Building,classroom,30,"regular, evening, weekend","projector, whiteboard",,1
+UBS FF 2,UBS Building,classroom,30,"regular, evening, weekend","projector, whiteboard",,1
+UBS FF 3,UBS Building,classroom,30,"regular, evening, weekend","projector, whiteboard",,1
+UBS FF 4,UBS Building,classroom,30,"regular, evening, weekend","projector, whiteboard",,1
+UBS FF 5,UBS Building,classroom,30,"regular, evening, weekend","projector, whiteboard",,1
+UBS FF 6,UBS Building,classroom,30,"regular, evening, weekend","projector, whiteboard",,1
+UBS FF 7,UBS Building,classroom,30,"regular, evening, weekend","projector, whiteboard",,1
+UBS FF 8,UBS Building,classroom,30,"regular, evening, weekend","projector, whiteboard",,1
+UBS FF 9,UBS Building,classroom,30,"regular, evening, weekend","projector, whiteboard",,1
+UBS FF 10,UBS Building,classroom,30,"regular, evening, weekend","projector, whiteboard",,1
+UBS FF 11,UBS Building,classroom,70,"regular, evening, weekend","projector, whiteboard",,1
+UBS SF 1,UBS Building,classroom,30,"regular, evening, weekend","projector, whiteboard",,1
+UBS SF 2,UBS Building,classroom,30,"regular, evening, weekend","projector, whiteboard",,1
+UBS SF 3,UBS Building,classroom,30,"regular, evening, weekend","projector, whiteboard",,1
+UBS SF 4,UBS Building,classroom,40,"regular, evening, weekend","projector, whiteboard",,1
+UBS SF 5,UBS Building,classroom,40,"regular, evening, weekend","projector, whiteboard",,1
+UBS SF 6,UBS Building,classroom,40,"regular, evening, weekend","projector, whiteboard",,1
+UBS SF 7,UBS Building,classroom,40,"regular, evening, weekend","projector, whiteboard",,1
+UBS SF 8,UBS Building,classroom,40,"regular, evening, weekend","projector, whiteboard",,1
+NFB GF,NFB Building,lecture_hall,200,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+NFB FF,NFB Building,lecture_hall,250,"regular, evening, weekend","projector, whiteboard",,1
+AUTONOMY HALL ROOM 1,Autonomy Hall,classroom,70,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+AUTONOMY HALL ROOM 2,Autonomy Hall,classroom,70,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+AUTONOMY HALL ROOM 3,Autonomy Hall,classroom,70,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+NEW LECTURE BLOCK GF ROOM 1,New Lecture Block,lecture_hall,150,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+NEW LECTURE BLOCK GF ROOM 2,New Lecture Block,lecture_hall,150,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1
+NEW LECTURE BLOCK FF ROOM 1,New Lecture Block,lecture_hall,150,"regular, evening, weekend","projector, whiteboard",,1
+NEW LECTURE BLOCK FF ROOM 2,New Lecture Block,lecture_hall,150,"regular, evening, weekend","projector, whiteboard",,1
+NEW LECTURE BLOCK SF,New Lecture Block,lecture_hall,300,"regular, evening, weekend","projector, whiteboard",,1
+CONSTRUCTION DRAWING STUDIO,Construction Building,lecture_hall,70,"regular, evening, weekend","projector, whiteboard","wheelchair_access",1

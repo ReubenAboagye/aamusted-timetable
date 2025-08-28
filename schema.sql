@@ -24,6 +24,7 @@ DROP TABLE IF EXISTS semesters;
 DROP TABLE IF EXISTS levels;
 DROP TABLE IF EXISTS programs;
 DROP TABLE IF EXISTS departments;
+DROP TABLE IF EXISTS streams;
 SET FOREIGN_KEY_CHECKS=0;
 
 -- =========================================
@@ -82,7 +83,21 @@ CREATE TABLE lecturers (
 );
 
 -- =========================================
--- 5) SESSIONS (CONSOLIDATED - combines academic sessions + calendar semesters)
+-- 5) STREAMS
+--    Time-based streams for classes (regular, weekend, evening, etc.)
+-- =========================================
+CREATE TABLE streams (
+  id INT PRIMARY KEY AUTO_INCREMENT,
+  name VARCHAR(50) NOT NULL UNIQUE, -- e.g., "Regular", "Weekend", "Evening"
+  code VARCHAR(20) NOT NULL UNIQUE, -- e.g., "REG", "WKD", "EVE"
+  description TEXT,
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+-- =========================================
+-- 6) SESSIONS (Academic periods)
 --    Each academic session with semester information and dates
 -- =========================================
 CREATE TABLE sessions (
@@ -101,30 +116,30 @@ CREATE TABLE sessions (
 );
 
 -- =========================================
--- 6) CLASSES (student groups) – each class belongs to a session
+-- 7) CLASSES (student groups) – each class belongs to a stream
 -- =========================================
 CREATE TABLE classes (
   id INT PRIMARY KEY AUTO_INCREMENT,
-  name VARCHAR(100) NOT NULL,         -- e.g. "L100 A"
+  name VARCHAR(100) NOT NULL,         -- e.g. "ITE 100A"
   department_id INT NOT NULL,
-  level VARCHAR(50) NOT NULL,         -- e.g. "Year 1"
-  session_id INT NOT NULL,
+  level VARCHAR(50) NOT NULL,         -- e.g. "Level 100"
+  stream_id INT NOT NULL,             -- Reference to streams table
   capacity INT NOT NULL DEFAULT 30,
   current_enrollment INT DEFAULT 0,
-  max_daily_courses INT DEFAULT 3,
-  max_weekly_hours INT DEFAULT 25,
+  max_daily_courses INT NOT NULL DEFAULT 3,
+  max_weekly_hours INT NOT NULL DEFAULT 25,
   preferred_start_time TIME DEFAULT '08:00:00',
   preferred_end_time TIME DEFAULT '17:00:00',
   is_active BOOLEAN DEFAULT TRUE,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE CASCADE,
-  FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
-  UNIQUE KEY uq_class_session (id, session_id)           -- enables composite FKs from timetable
+  FOREIGN KEY (stream_id) REFERENCES streams(id) ON DELETE CASCADE,
+  UNIQUE KEY uq_class_stream (name, stream_id)
 );
 
 -- =========================================
--- 7) COURSES
+-- 8) COURSES
 --   (No fixed "semester" column; use mappings below per semester/session)
 -- =========================================
 CREATE TABLE courses (
@@ -142,7 +157,7 @@ CREATE TABLE courses (
 );
 
 -- =========================================
--- 8) LECTURER_COURSES (who is allowed to teach what)
+-- 9) LECTURER_COURSES (who is allowed to teach what)
 -- =========================================
 CREATE TABLE lecturer_courses (
   id INT PRIMARY KEY AUTO_INCREMENT,
@@ -156,7 +171,7 @@ CREATE TABLE lecturer_courses (
 );
 
 -- =========================================
--- 9) ROOMS
+-- 10) ROOMS
 -- =========================================
 CREATE TABLE rooms (
   id INT PRIMARY KEY AUTO_INCREMENT,
@@ -164,7 +179,7 @@ CREATE TABLE rooms (
   building VARCHAR(100) NOT NULL,
   room_type ENUM('classroom','lecture_hall','laboratory','computer_lab','seminar_room','auditorium') NOT NULL,
   capacity INT NOT NULL,
-  session_availability JSON NOT NULL, -- e.g. ["regular","evening","weekend"]
+  stream_availability JSON NOT NULL, -- e.g. ["regular","evening","weekend"]
   facilities JSON,                    -- e.g. ["projector","whiteboard"]
   accessibility_features JSON,        -- e.g. ["wheelchair_access"]
   is_active BOOLEAN DEFAULT TRUE,
@@ -174,7 +189,7 @@ CREATE TABLE rooms (
 );
 
 -- =========================================
--- 10) TIME_SLOTS (reusable across all days)
+-- 11) TIME_SLOTS (reusable across all days)
 --    No day-of-week here -> reuse the same slots Mon..Sun
 -- =========================================
 CREATE TABLE time_slots (
@@ -188,7 +203,7 @@ CREATE TABLE time_slots (
 );
 
 -- =========================================
--- 11) CLASS_COURSES (which courses a class takes per semester)
+-- 12) CLASS_COURSES (which courses a class takes per semester)
 --    Updated to reference sessions table instead of semesters
 -- =========================================
 CREATE TABLE class_courses (
@@ -205,7 +220,7 @@ CREATE TABLE class_courses (
 );
 
 -- =========================================
--- 12) AVAILABILITY GUARDS (hard validation for sessions)
+-- 13) AVAILABILITY GUARDS (hard validation for sessions)
 --     a) Lecturer available in session?
 --     b) Course offered in session?
 -- =========================================
@@ -226,7 +241,7 @@ CREATE TABLE course_session_availability (
 );
 
 -- =========================================
--- 13) SESSION TYPES and DAYS
+-- 14) SESSION TYPES and DAYS
 -- =========================================
 CREATE TABLE session_types (
   id INT PRIMARY KEY AUTO_INCREMENT,
@@ -239,7 +254,7 @@ CREATE TABLE days (
 );
 
 -- =========================================
--- 14) TIMETABLE (core schedule)
+-- 15) TIMETABLE (core schedule)
 -- =========================================
 CREATE TABLE timetable (
   id INT PRIMARY KEY AUTO_INCREMENT,
@@ -273,7 +288,17 @@ CREATE TABLE timetable_lecturers (
 );
 
 -- =========================================
--- 15) SAMPLE DATA FOR SESSIONS
+-- 16) SAMPLE DATA FOR STREAMS
+-- =========================================
+INSERT INTO streams (name, code, description, is_active) VALUES
+('Regular', 'REG', 'Standard weekday classes (Monday to Friday)', 1),
+('Weekend', 'WKD', 'Saturday and Sunday classes', 1),
+('Evening', 'EVE', 'After-hours classes (6 PM onwards)', 1),
+('Online', 'ONL', 'Virtual/remote classes', 1),
+('Hybrid', 'HYB', 'Combination of in-person and online classes', 1);
+
+-- =========================================
+-- 17) SAMPLE DATA FOR SESSIONS
 -- =========================================
 INSERT INTO sessions (academic_year, semester_number, semester_name, start_date, end_date, is_active) VALUES
 ('2024/2025', '1', 'First Semester 2024/2025', '2024-09-01', '2024-12-20', 1),
@@ -284,19 +309,19 @@ INSERT INTO sessions (academic_year, semester_number, semester_name, start_date,
 ('2025/2026', '3', 'Third Semester 2025/2026', '2026-06-01', '2026-08-31', 1);
 
 -- =========================================
--- 16) SAMPLE DATA FOR DAYS
+-- 18) SAMPLE DATA FOR DAYS
 -- =========================================
 INSERT INTO days (name) VALUES 
 ('Monday'), ('Tuesday'), ('Wednesday'), ('Thursday'), ('Friday'), ('Saturday'), ('Sunday');
 
 -- =========================================
--- 17) SAMPLE DATA FOR SESSION TYPES
+-- 19) SAMPLE DATA FOR SESSION TYPES
 -- =========================================
 INSERT INTO session_types (name) VALUES 
 ('Lecture'), ('Tutorial'), ('Laboratory'), ('Seminar'), ('Exam'), ('Break');
 
 -- =========================================
--- 18) SAMPLE DATA FOR TIME SLOTS
+-- 20) SAMPLE DATA FOR TIME SLOTS
 -- =========================================
 INSERT INTO time_slots (start_time, end_time, duration, is_break, is_mandatory) VALUES
 ('08:00:00', '09:00:00', 60, FALSE, TRUE),
