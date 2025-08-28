@@ -197,16 +197,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 $error_message = 'Insufficient data to generate timetable.';
             } else {
                 // Run GA v1 with requested time slots (already defined in GA class)
-                include 'ga_timetable_generator.php';
+                require_once 'ga_timetable_generator.php';
+                // Shorten PHP max execution for this section to avoid global 120s hit
+                if (function_exists('set_time_limit')) { @set_time_limit(60); }
                 $ga = new GeneticAlgorithm($classes, $courses, $rooms);
                 // Reduce workload to avoid timeouts on large data sets
-                $ga->initializePopulation(12);
+                $ga->initializePopulation(8);
                 $ga->setProgressReporter(function($gen, $total, $fitness) {
                     // No-op in sync mode; future: store progress in DB or session
                 });
                 // Lower generations and add time budget to decrease execution time
-                $ga->setTimeBudgetSeconds(20);
-                $bestTimetable = $ga->evolve(25);
+                $ga->setTimeBudgetSeconds(10);
+                $bestTimetable = $ga->evolve(12);
 
                 // Map names to IDs
                 // Days map
