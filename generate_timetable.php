@@ -207,8 +207,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 // Run GA v1 with requested time slots (already defined in GA class)
                 include 'ga_timetable_generator.php';
                 $ga = new GeneticAlgorithm($classes, $courses, $rooms);
-                $ga->initializePopulation(50);
-                $bestTimetable = $ga->evolve(100);
+                // Reduce workload to avoid timeouts on large data sets
+                $ga->initializePopulation(20);
+                $ga->setProgressReporter(function($gen, $total, $fitness) {
+                    // No-op in sync mode; future: store progress in DB or session
+                });
+                // Lower generations to decrease execution time
+                $bestTimetable = $ga->evolve(40);
 
                 // Map names to IDs
                 // Days map
@@ -418,7 +423,7 @@ $departments_result = $conn->query("SELECT id, name FROM departments WHERE is_ac
 
         <div class="card m-3">
             <div class="card-body">
-                <form method="POST" action="generate_timetable.php" class="row g-3">
+                <form method="POST" action="generate_timetable.php" class="row g-3" id="generateForm">
                     <input type="hidden" name="action" value="generate" />
                     <div class="col-md-6">
                         <label for="session_id" class="form-label">Select Session *</label>
@@ -442,7 +447,7 @@ $departments_result = $conn->query("SELECT id, name FROM departments WHERE is_ac
                         </div>
                     </div>
                     <div class="col-md-2 d-flex align-items-end">
-                        <button type="submit" class="btn btn-primary w-100">
+                        <button type="submit" class="btn btn-primary w-100" id="generateBtn">
                             <i class="fas fa-cogs me-2"></i>Generate
                         </button>
                     </div>
@@ -538,4 +543,19 @@ $departments_result = $conn->query("SELECT id, name FROM departments WHERE is_ac
 </div>
 
 <?php include 'includes/footer.php'; ?>
+
+<script>
+// Basic progress animation while request is running
+document.addEventListener('DOMContentLoaded', function() {
+  const form = document.getElementById('generateForm');
+  const btn = document.getElementById('generateBtn');
+  if (!form || !btn) return;
+  form.addEventListener('submit', function() {
+    btn.disabled = true;
+    const original = btn.innerHTML;
+    btn.dataset.original = original;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Generating...';
+  });
+});
+</script>
 
