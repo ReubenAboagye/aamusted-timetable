@@ -6,24 +6,20 @@ include 'connect.php';
 include 'includes/header.php';
 include 'includes/sidebar.php';
 
-// Helper: ensure required 3-hour time slots exist
+// Helper: ensure standard 1-hour time slots exist from 07:00 to 20:00
 function ensure_time_slots($conn) {
-    $desired = [
-        ['07:00:00','10:00:00',180],
-        ['10:00:00','13:00:00',180],
-        ['14:00:00','17:00:00',180],
-        ['17:00:00','20:00:00',180]
-    ];
     $created = 0;
-    foreach ($desired as [$start, $end, $duration]) {
+    for ($h = 7; $h < 20; $h++) { // 07..19
+        $start = sprintf('%02d:00:00', $h);
+        $end = sprintf('%02d:00:00', $h + 1);
         $sql = "SELECT id FROM time_slots WHERE start_time = ? AND end_time = ? LIMIT 1";
         $stmt = $conn->prepare($sql);
         $stmt->bind_param('ss', $start, $end);
         $stmt->execute();
         $stmt->store_result();
         if ($stmt->num_rows === 0) {
-            $insert = $conn->prepare("INSERT INTO time_slots (start_time, end_time, duration, is_break, is_mandatory) VALUES (?, ?, ?, 0, 1)");
-            $insert->bind_param('ssi', $start, $end, $duration);
+            $insert = $conn->prepare("INSERT INTO time_slots (start_time, end_time, duration, is_break, is_mandatory) VALUES (?, ?, 60, 0, 1)");
+            $insert->bind_param('ss', $start, $end);
             $insert->execute();
             $insert->close();
             $created++;
@@ -81,15 +77,11 @@ function check_readiness($conn, $sessionId) {
     $res = $conn->query("SELECT COUNT(*) AS cnt FROM days");
     $status['days'] = (int)($res ? ($res->fetch_assoc()['cnt'] ?? 0) : 0);
 
-    // Time slots coverage (the 4 target slots)
-    $checkSlots = [
-        ['07:00:00','10:00:00'],
-        ['10:00:00','13:00:00'],
-        ['14:00:00','17:00:00'],
-        ['17:00:00','20:00:00']
-    ];
+    // Time slots coverage (1-hour slots from 07:00 to 20:00)
     $presentAll = true;
-    foreach ($checkSlots as [$s,$e]) {
+    for ($h = 7; $h < 20; $h++) {
+        $s = sprintf('%02d:00:00', $h);
+        $e = sprintf('%02d:00:00', $h + 1);
         $stmt = $conn->prepare("SELECT id FROM time_slots WHERE start_time = ? AND end_time = ? LIMIT 1");
         $stmt->bind_param('ss', $s, $e);
         $stmt->execute();
@@ -208,12 +200,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 include 'ga_timetable_generator.php';
                 $ga = new GeneticAlgorithm($classes, $courses, $rooms);
                 // Reduce workload to avoid timeouts on large data sets
-                $ga->initializePopulation(20);
+                $ga->initializePopulation(12);
                 $ga->setProgressReporter(function($gen, $total, $fitness) {
                     // No-op in sync mode; future: store progress in DB or session
                 });
-                // Lower generations to decrease execution time
-                $bestTimetable = $ga->evolve(40);
+                // Lower generations and add time budget to decrease execution time
+                $ga->setTimeBudgetSeconds(20);
+                $bestTimetable = $ga->evolve(25);
 
                 // Map names to IDs
                 // Days map
@@ -240,7 +233,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                     $sessionTypeId = (int)$conn->insert_id;
                 }
 
-                // Insert timetable entries
+                // Insert timetable entries with duplicate-safe handling
                 $inserted = 0;
                 foreach ($bestTimetable as $entry) {
                     $dayName = $entry['day'];
@@ -275,7 +268,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                     if (!$lc) { continue; }
                     $lecturerCourseId = (int)$lc['id'];
 
-                    // Insert, ignore duplicates on unique key
+                    // Check if a record already exists in this unique slot (session, day, slot, room)
+                    $check = $conn->prepare("SELECT id FROM timetable WHERE session_id = ? AND day_id = ? AND time_slot_id = ? AND room_id = ? LIMIT 1");
+                    $check->bind_param('iiii', $selected_session, $dayId, $timeSlotId, $roomId);
+                    $check->execute();
+                    $existsRes = $check->get_result();
+                    $existsRow = $existsRes ? $existsRes->fetch_assoc() : null;
+                    $check->close();
+
+                    if ($existsRow) {
+                        // Skip conflicting entry to satisfy uq_tt_slot
+                        continue;
+                    }
+
+                    // Insert
                     $stmt = $conn->prepare("INSERT INTO timetable (session_id, class_course_id, lecturer_course_id, day_id, time_slot_id, room_id, session_type_id)
                                               VALUES (?, ?, ?, ?, ?, ?, ?)");
                     $stmt->bind_param('iiiiiii', $selected_session, $classCourseId, $lecturerCourseId, $dayId, $timeSlotId, $roomId, $sessionTypeId);

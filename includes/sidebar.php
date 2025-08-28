@@ -49,6 +49,9 @@
           <a href="rooms.php" class="nav-link <?= ($currentPage == 'rooms.php') ? 'active' : '' ?>">
             <i class="fas fa-door-open me-2"></i>Rooms
           </a>
+          <a href="time_slots.php" class="nav-link <?= ($currentPage == 'time_slots.php') ? 'active' : '' ?>">
+            <i class="fas fa-clock me-2"></i>Time Slots
+          </a>
         </div>
       </div>
     </div>
@@ -66,6 +69,12 @@
           </a>
           <a href="course_session_availability.php" class="nav-link <?= ($currentPage == 'course_session_availability.php') ? 'active' : '' ?>">
             <i class="fas fa-book-clock me-2"></i>Course Session
+          </a>
+          <a href="lecturer_courses.php" class="nav-link <?= ($currentPage == 'lecturer_courses.php') ? 'active' : '' ?>">
+            <i class="fas fa-user-plus me-2"></i>Course → Lecturer
+          </a>
+          <a href="class_courses.php" class="nav-link <?= ($currentPage == 'class_courses.php') ? 'active' : '' ?>">
+            <i class="fas fa-sitemap me-2"></i>Course → Class (per Session)
           </a>
         </div>
       </div>
