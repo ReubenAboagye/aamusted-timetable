@@ -14,6 +14,10 @@ class GeneticAlgorithm {
     private $progressCallback;  // Optional progress reporter callable
     private $currentFitnessScores; // Cached fitness scores per generation (aligned with $population)
     private $timeBudgetSeconds; // Optional time budget to stop early
+    private $classSizeById;     // Map class_id => class_size
+    private $roomCapacityById;  // Map room_id => capacity
+    private $classSizeById;     // Map class_id => class_size
+    private $roomCapacityById;  // Map room_id => capacity
 
     public function __construct($classes, $courses, $rooms, $lecturers = []) {
         $this->classes = $classes;
@@ -33,7 +37,21 @@ class GeneticAlgorithm {
         $this->progressCallback = null;
         $this->currentFitnessScores = [];
         $this->timeBudgetSeconds = 0;
+        $this->classSizeById = [];
+        $this->roomCapacityById = [];
         
+        // Build quick lookup maps to reduce per-entry memory footprint
+        foreach ($this->classes as $c) {
+            if (isset($c['class_id'])) {
+                $this->classSizeById[$c['class_id']] = isset($c['class_size']) ? (int)$c['class_size'] : 25;
+            }
+        }
+        foreach ($this->rooms as $r) {
+            if (isset($r['room_id'])) {
+                $this->roomCapacityById[$r['room_id']] = isset($r['capacity']) ? (int)$r['capacity'] : 30;
+            }
+        }
+
         // Initialize constraint definitions
         $this->initializeConstraints();
     }
@@ -129,17 +147,11 @@ class GeneticAlgorithm {
             if (!$this->hasImmediateConflicts($course, $class, $day, $timeSlot, $room, $usedSlots)) {
                 return [
                     'class_id' => $class['class_id'],
-                    'class_name' => $class['class_name'],
                     'course_id' => $course['course_id'],
-                    'course_name' => $course['course_name'],
                     'lecturer_id' => $course['lecturer_id'],
-                    'lecturer_name' => $course['lecturer_name'],
                     'time_slot' => $timeSlot,
                     'day' => $day,
-                    'room_id' => $room['room_id'],
-                    'room_name' => $room['room_name'],
-                    'room_capacity' => $room['capacity'] ?? 30,
-                    'class_size' => $class['class_size'] ?? 25
+                    'room_id' => $room['room_id']
                 ];
             }
             $attempts++;
@@ -152,17 +164,11 @@ class GeneticAlgorithm {
         
         return [
             'class_id' => $class['class_id'],
-            'class_name' => $class['class_name'],
             'course_id' => $course['course_id'],
-            'course_name' => $course['course_name'],
             'lecturer_id' => $course['lecturer_id'],
-            'lecturer_name' => $course['lecturer_name'],
             'time_slot' => $timeSlot,
             'day' => $day,
-            'room_id' => $room['room_id'],
-            'room_name' => $room['room_name'],
-            'room_capacity' => $room['capacity'] ?? 30,
-            'class_size' => $class['class_size'] ?? 25
+            'room_id' => $room['room_id']
         ];
     }
 
@@ -289,12 +295,12 @@ class GeneticAlgorithm {
                 $roomSchedule[$roomKey] = $entry;
             }
         
-        // Room capacity check
-        if (isset($entry['room_capacity']) && isset($entry['class_size'])) {
-            if ($entry['room_capacity'] < $entry['class_size']) {
-                $totalPenalty += $this->constraints['hard']['room_capacity']['weight'];
-                $constraintViolations[] = $this->constraints['hard']['room_capacity']['description'];
-            }
+        // Room capacity check via maps
+        $roomCapacity = $this->roomCapacityById[$roomId] ?? 30;
+        $classSize = $this->classSizeById[$classId] ?? 25;
+        if ($roomCapacity < $classSize) {
+            $totalPenalty += $this->constraints['hard']['room_capacity']['weight'];
+            $constraintViolations[] = $this->constraints['hard']['room_capacity']['description'];
         }
     }
 
