@@ -1,41 +1,74 @@
 <?php
 include 'connect.php';
 
+// Page title and layout includes
+$pageTitle = 'View Timetable';
+include 'includes/header.php';
+include 'includes/sidebar.php';
+
 // Get filter parameters
 $class_filter = isset($_GET['class_id']) ? (int)$_GET['class_id'] : 0;
 $day_filter = isset($_GET['day_id']) ? (int)$_GET['day_id'] : 0;
 $room_filter = isset($_GET['room_id']) ? (int)$_GET['room_id'] : 0;
 $stream_filter = isset($_GET['stream_id']) ? (int)$_GET['stream_id'] : 0;
 
-// Build the main query for timetable data
-$main_query = "
-    SELECT 
-        t.id,
-        t.day_id,
-        t.time_slot_id,
-        c.name as class_name,
-        co.course_code,
-        co.course_name,
-        d.name as day_name,
-        ts.start_time,
-        ts.end_time,
-        r.name as room_name,
-        r.capacity,
-        l.name as lecturer_name,
-        l.id as lecturer_id,
-        cc.id as class_course_id,
-        lc.id as lecturer_course_id
-    FROM timetable t
-    JOIN class_courses cc ON t.class_course_id = cc.id
-    JOIN classes c ON cc.class_id = c.id
-    JOIN courses co ON cc.course_id = co.id
-    JOIN days d ON t.day_id = d.id
-    JOIN time_slots ts ON t.time_slot_id = ts.id
-    JOIN rooms r ON t.room_id = r.id
-    LEFT JOIN lecturer_courses lc ON t.lecturer_course_id = lc.id
-    LEFT JOIN lecturers l ON lc.lecturer_id = l.id
-    WHERE 1=1
-";
+// Build the main query for timetable data. Support both schema variants:
+// - New schema: timetable.class_course_id, timetable.lecturer_course_id
+// - Old schema: timetable.class_id, timetable.course_id, timetable.lecturer_id
+
+$has_class_course = false;
+$has_lecturer_course = false;
+$col = $conn->query("SHOW COLUMNS FROM timetable LIKE 'class_course_id'");
+if ($col && $col->num_rows > 0) { $has_class_course = true; }
+$col = $conn->query("SHOW COLUMNS FROM timetable LIKE 'lecturer_course_id'");
+if ($col && $col->num_rows > 0) { $has_lecturer_course = true; }
+
+// Build select and join clauses depending on schema
+$select_parts = [
+    "t.id",
+    "t.day_id",
+    "t.time_slot_id",
+    "d.name as day_name",
+    "ts.start_time",
+    "ts.end_time",
+    "r.name as room_name",
+    "r.capacity"
+];
+$join_parts = [];
+
+if ($has_class_course) {
+    // timetable stores class_course_id
+    $select_parts[] = "c.name as class_name";
+    $select_parts[] = "co.`code` AS course_code";
+    $select_parts[] = "co.`name` AS course_name";
+    $select_parts[] = "cc.id as class_course_id";
+    $join_parts[] = "JOIN class_courses cc ON t.class_course_id = cc.id";
+    $join_parts[] = "JOIN classes c ON cc.class_id = c.id";
+    $join_parts[] = "JOIN courses co ON cc.course_id = co.id";
+} else {
+    // timetable stores class_id and course_id directly
+    $select_parts[] = "c.name as class_name";
+    $select_parts[] = "co.`code` AS course_code";
+    $select_parts[] = "co.`name` AS course_name";
+    $select_parts[] = "NULL as class_course_id";
+    $join_parts[] = "JOIN classes c ON t.class_id = c.id";
+    $join_parts[] = "JOIN courses co ON t.course_id = co.id";
+}
+
+if ($has_lecturer_course) {
+    $select_parts[] = "l.name as lecturer_name";
+    $select_parts[] = "l.id as lecturer_id";
+    $select_parts[] = "lc.id as lecturer_course_id";
+    $join_parts[] = "LEFT JOIN lecturer_courses lc ON t.lecturer_course_id = lc.id";
+    $join_parts[] = "LEFT JOIN lecturers l ON lc.lecturer_id = l.id";
+} else {
+    $select_parts[] = "l.name as lecturer_name";
+    $select_parts[] = "l.id as lecturer_id";
+    $select_parts[] = "NULL as lecturer_course_id";
+    $join_parts[] = "LEFT JOIN lecturers l ON t.lecturer_id = l.id";
+}
+
+$main_query = "SELECT " . implode(",\n        ", $select_parts) . "\n    FROM timetable t\n        " . implode("\n        ", $join_parts) . "\n        JOIN days d ON t.day_id = d.id\n        JOIN time_slots ts ON t.time_slot_id = ts.id\n        JOIN rooms r ON t.room_id = r.id\n    WHERE 1=1";
 
 $params = [];
 $types = "";
@@ -79,22 +112,40 @@ $time_slots_result = $conn->query("SELECT id, start_time, end_time FROM time_slo
 
 // Get statistics
 $total_entries = $conn->query("SELECT COUNT(*) as count FROM timetable")->fetch_assoc()['count'];
-$total_classes = $conn->query("SELECT COUNT(DISTINCT c.id) as count FROM timetable t JOIN class_courses cc ON t.class_course_id = cc.id JOIN classes c ON cc.class_id = c.id")->fetch_assoc()['count'];
-$total_courses = $conn->query("SELECT COUNT(DISTINCT co.id) as count FROM timetable t JOIN class_courses cc ON t.class_course_id = cc.id JOIN courses co ON cc.course_id = co.id")->fetch_assoc()['count'];
+
+if (!isset($has_class_course)) {
+    $col = $conn->query("SHOW COLUMNS FROM timetable LIKE 'class_course_id'");
+    $has_class_course = ($col && $col->num_rows > 0);
+}
+
+if ($has_class_course) {
+    $total_classes = $conn->query("SELECT COUNT(DISTINCT c.id) as count FROM timetable t JOIN class_courses cc ON t.class_course_id = cc.id JOIN classes c ON cc.class_id = c.id")->fetch_assoc()['count'];
+    $total_courses = $conn->query("SELECT COUNT(DISTINCT co.id) as count FROM timetable t JOIN class_courses cc ON t.class_course_id = cc.id JOIN courses co ON cc.course_id = co.id")->fetch_assoc()['count'];
+} else {
+    $total_classes = $conn->query("SELECT COUNT(DISTINCT c.id) as count FROM timetable t JOIN classes c ON t.class_id = c.id")->fetch_assoc()['count'];
+    $total_courses = $conn->query("SELECT COUNT(DISTINCT co.id) as count FROM timetable t JOIN courses co ON t.course_id = co.id")->fetch_assoc()['count'];
+}
 
 // Get statistics about multiple classes and overlapping courses
 $multiple_classes_count = 0;
 $overlapping_courses_count = 0;
 
-foreach ($timetable_grid as $day_id => $day_slots) {
-    foreach ($day_slots as $time_slot_id => $entries) {
-        if (count($entries) > 1) {
-            $multiple_classes_count++;
-            
-            // Check for overlapping courses
-            $course_codes = array_column($entries, 'course_code');
-            if (count(array_unique($course_codes)) < count($course_codes)) {
-                $overlapping_courses_count++;
+// Ensure timetable_grid is defined (may be built later) to avoid warnings
+if (!isset($timetable_grid) || !is_array($timetable_grid)) {
+    $timetable_grid = [];
+}
+
+if (!empty($timetable_grid)) {
+    foreach ($timetable_grid as $day_id => $day_slots) {
+        foreach ($day_slots as $time_slot_id => $entries) {
+            if (count($entries) > 1) {
+                $multiple_classes_count++;
+                
+                // Check for overlapping courses
+                $course_codes = array_column($entries, 'course_code');
+                if (count(array_unique($course_codes)) < count($course_codes)) {
+                    $overlapping_courses_count++;
+                }
             }
         }
     }

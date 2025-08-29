@@ -4,63 +4,84 @@ include 'connect.php';
 $success_message = '';
 $error_message = '';
 
-// Handle single course availability
-if ($_POST['action'] === 'add_single') {
-    $course_id = $conn->real_escape_string($_POST['course_id']);
-    $room_type = $conn->real_escape_string($_POST['room_type']);
-    
-    // Check if course is already available
-    $check_sql = "SELECT COUNT(*) as count FROM course_room_types WHERE course_id = ?";
-    $check_stmt = $conn->prepare($check_sql);
-    $check_stmt->bind_param("i", $course_id);
-    $check_stmt->execute();
-    $check_result = $check_stmt->get_result();
-    $check_row = $check_result->fetch_assoc();
-    
-    if ($check_row['count'] > 0) {
-        $error_message = "This course already has room type preferences set.";
-    } else {
-        $sql = "INSERT INTO course_room_types (course_id, preferred_room_type) VALUES (?, ?)";
-        $stmt = $conn->prepare($sql);
-        $stmt->bind_param("is", $course_id, $room_type);
-        
-        if ($stmt->execute()) {
-            $success_message = "Course room type preference added successfully!";
-        } else {
-            $error_message = "Error adding course room type preference.";
-        }
+// Helper: resolve room type id from either numeric id or name
+function resolveRoomTypeId($conn, $roomType) {
+    if (is_numeric($roomType)) return (int)$roomType;
+    $stmt = $conn->prepare("SELECT id FROM room_types WHERE name = ? LIMIT 1");
+    if ($stmt) {
+        $stmt->bind_param('s', $roomType);
+        $stmt->execute();
+        $res = $stmt->get_result();
+        $row = $res->fetch_assoc();
         $stmt->close();
+        return $row ? (int)$row['id'] : null;
     }
-    $check_stmt->close();
+    return null;
+}
+
+// Handle single course availability
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'add_single') {
+    $course_id = (int)($_POST['course_id'] ?? 0);
+    $room_type = $_POST['room_type'] ?? '';
+    $room_type_id = resolveRoomTypeId($conn, $room_type);
+
+    if ($course_id <= 0 || !$room_type_id) {
+        $error_message = 'Please select a valid course and room type.';
+    } else {
+        // Check if course is already available
+        $check_sql = "SELECT COUNT(*) as count FROM course_room_types WHERE course_id = ?";
+        $check_stmt = $conn->prepare($check_sql);
+        $check_stmt->bind_param("i", $course_id);
+        $check_stmt->execute();
+        $check_result = $check_stmt->get_result();
+        $check_row = $check_result->fetch_assoc();
+
+        if ($check_row['count'] > 0) {
+            $error_message = "This course already has room type preferences set.";
+        } else {
+            $sql = "INSERT INTO course_room_types (course_id, room_type_id) VALUES (?, ?)";
+            $stmt = $conn->prepare($sql);
+            $stmt->bind_param("ii", $course_id, $room_type_id);
+
+            if ($stmt->execute()) {
+                $success_message = "Course room type preference added successfully!";
+            } else {
+                $error_message = "Error adding course room type preference.";
+            }
+            $stmt->close();
+        }
+        $check_stmt->close();
+    }
 }
 
 // Handle bulk course availability
-if ($_POST['action'] === 'add_bulk') {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'add_bulk') {
     $course_ids = $_POST['course_ids'] ?? [];
-    $room_type = $conn->real_escape_string($_POST['room_type']);
-    
-    if (!empty($course_ids) && !empty($room_type)) {
-        $stmt = $conn->prepare("INSERT IGNORE INTO course_room_types (course_id, preferred_room_type) VALUES (?, ?)");
-        
+    $room_type = $_POST['room_type'] ?? '';
+    $room_type_id = resolveRoomTypeId($conn, $room_type);
+
+    if (empty($course_ids) || !$room_type_id) {
+        $error_message = "Please select courses and specify a valid room type.";
+    } else {
+        $stmt = $conn->prepare("INSERT IGNORE INTO course_room_types (course_id, room_type_id) VALUES (?, ?)");
+
         foreach ($course_ids as $course_id) {
-            $stmt->bind_param("is", $course_id, $room_type);
+            $cid = (int)$course_id;
+            $stmt->bind_param("ii", $cid, $room_type_id);
             $stmt->execute();
         }
         $stmt->close();
         $success_message = "All selected courses have been assigned room type preferences!";
-    } else {
-        $error_message = "Please select courses and specify a room type.";
     }
 }
 
 // Handle deletion
-if ($_POST['action'] === 'delete' && isset($_POST['course_id'])) {
-    $course_id = $conn->real_escape_string($_POST['course_id']);
-    
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'delete' && isset($_POST['course_id'])) {
+    $course_id = (int)$_POST['course_id'];
     $sql = "DELETE FROM course_room_types WHERE course_id = ?";
     $stmt = $conn->prepare($sql);
     $stmt->bind_param("i", $course_id);
-    
+
     if ($stmt->execute()) {
         $success_message = "Course room type preference deleted successfully!";
     } else {
@@ -70,36 +91,51 @@ if ($_POST['action'] === 'delete' && isset($_POST['course_id'])) {
 }
 
 // Handle editing room type
-if ($_POST['action'] === 'edit_room_type' && isset($_POST['edit_course_id']) && isset($_POST['room_type'])) {
-    $course_id = $conn->real_escape_string($_POST['edit_course_id']);
-    $room_type = $conn->real_escape_string($_POST['room_type']);
-    
-    $sql = "UPDATE course_room_types SET preferred_room_type = ? WHERE course_id = ?";
-    $stmt = $conn->prepare($sql);
-    $stmt->bind_param("si", $room_type, $course_id);
-    
-    if ($stmt->execute()) {
-        $success_message = "Course room type preference updated successfully!";
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'edit_room_type' && isset($_POST['edit_course_id']) && isset($_POST['room_type'])) {
+    $course_id = (int)$_POST['edit_course_id'];
+    $room_type = $_POST['room_type'] ?? '';
+    $room_type_id = resolveRoomTypeId($conn, $room_type);
+
+    if ($course_id <= 0 || !$room_type_id) {
+        $error_message = 'Invalid input for update.';
     } else {
-        $error_message = "Error updating course room type preference.";
+        $sql = "UPDATE course_room_types SET room_type_id = ? WHERE course_id = ?";
+        $stmt = $conn->prepare($sql);
+        $stmt->bind_param("ii", $room_type_id, $course_id);
+
+        if ($stmt->execute()) {
+            $success_message = "Course room type preference updated successfully!";
+        } else {
+            $error_message = "Error updating course room type preference.";
+        }
+        $stmt->close();
     }
-    $stmt->close();
 }
 
 // Get existing course room type preferences
-$sql = "SELECT crt.course_id, crt.preferred_room_type,
-        co.course_code, co.course_name
+$sql = "SELECT crt.course_id, rt.id AS room_type_id, rt.name AS preferred_room_type,
+        co.`code` AS course_code, co.`name` AS course_name
         FROM course_room_types crt
+        LEFT JOIN room_types rt ON crt.room_type_id = rt.id
         LEFT JOIN courses co ON crt.course_id = co.id
-        ORDER BY co.course_code";
+        ORDER BY co.`code`";
 $result = $conn->query($sql);
 
 // Get all courses for dropdowns
-$courses_sql = "SELECT id, course_code, course_name FROM courses WHERE is_active = 1 ORDER BY course_code";
+$courses_sql = "SELECT id, `code` AS course_code, `name` AS course_name FROM courses WHERE is_active = 1 ORDER BY `code`";
 $courses_result = $conn->query($courses_sql);
 
 // Get room types
-$room_types = ['Lecture Hall', 'Laboratory', 'Computer Lab', 'Seminar Room', 'Conference Room', 'Studio', 'Workshop'];
+$room_types = [];
+$rt_res = $conn->query("SELECT id, name FROM room_types ORDER BY name");
+if ($rt_res) {
+    while ($r = $rt_res->fetch_assoc()) {
+        $room_types[] = $r;
+    }
+} else {
+    // Fallback list
+    $room_types = [['id'=>1,'name'=>'Lecture Hall'], ['id'=>2,'name'=>'Laboratory'], ['id'=>3,'name'=>'Computer Lab']];
+}
 ?>
 
 <!DOCTYPE html>
@@ -112,12 +148,51 @@ $room_types = ['Lecture Hall', 'Laboratory', 'Computer Lab', 'Seminar Room', 'Co
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet">
     <style>
+        :root {
+            --brand-maroon: #7a0b1c;
+            --brand-maroon-dark: #5a0713;
+            --muted-border: rgba(0,0,0,0.08);
+        }
         .select2-container {
             width: 100% !important;
         }
         .card {
             box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
-            border: 1px solid rgba(0, 0, 0, 0.125);
+            border: 1px solid var(--muted-border);
+        }
+
+        /* Brand header styling to match project theme */
+        .card-header.bg-primary {
+            background: var(--brand-maroon) !important;
+            border-bottom: 1px solid var(--brand-maroon-dark);
+        }
+        .card-header.bg-primary h5, .card-header.bg-primary .btn {
+            color: #fff !important;
+        }
+
+        /* Buttons in header */
+        .card-header .btn-outline-light {
+            color: #fff;
+            border-color: rgba(255,255,255,0.15);
+        }
+        .card-header .btn-light {
+            background: #fff;
+            color: var(--brand-maroon);
+        }
+
+        /* Action icons styling to match brand */
+        .table .btn-danger {
+            border-color: var(--brand-maroon);
+            color: var(--brand-maroon);
+            background: transparent;
+        }
+        .table .btn-danger:hover {
+            background: rgba(122,11,28,0.05);
+        }
+        .table .btn-warning {
+            border-color: var(--brand-maroon);
+            color: var(--brand-maroon);
+            background: transparent;
         }
     </style>
 </head>
@@ -126,15 +201,15 @@ $room_types = ['Lecture Hall', 'Laboratory', 'Computer Lab', 'Seminar Room', 'Co
         <div class="row">
             <div class="col-12">
                 <div class="card">
-                    <div class="card-header d-flex justify-content-between align-items-center">
+                    <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
                         <h5 class="mb-0">
                             <i class="fas fa-building me-2"></i>Course Room Type Management
                         </h5>
                         <div>
-                            <button class="btn btn-success me-2" data-bs-toggle="modal" data-bs-target="#bulkCourseModal">
+                            <button class="btn btn-outline-light me-2" data-bs-toggle="modal" data-bs-target="#bulkCourseModal">
                                 <i class="fas fa-layer-group me-1"></i>Bulk Add
                             </button>
-                            <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addCourseModal">
+                            <button class="btn btn-light" data-bs-toggle="modal" data-bs-target="#addCourseModal">
                                 <i class="fas fa-plus me-1"></i>Add Single
                             </button>
                         </div>

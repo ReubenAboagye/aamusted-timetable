@@ -24,16 +24,19 @@ $params = [];
 $param_types = "";
 
 // Stream filtering for saved timetables is optional; keep ability but do not force stream on other tables
+$join_programs = '';
 if ($selected_stream > 0) {
     $where_conditions[] = "c.stream_id = ?";
     $params[] = $selected_stream;
     $param_types .= "i";
 }
 
+// Department filter: classes belong to programs which belong to departments in this schema
 if ($selected_department > 0) {
-    $where_conditions[] = "c.department_id = ?";
+    $where_conditions[] = "p.department_id = ?";
     $params[] = $selected_department;
     $param_types .= "i";
+    $join_programs = "\n    JOIN programs p ON c.program_id = p.id";
 }
 
 $where_clause = implode(" AND ", $where_conditions);
@@ -57,7 +60,7 @@ $main_query = "
     JOIN courses co ON cc.course_id = co.id
     JOIN lecturer_courses lc ON t.lecturer_course_id = lc.id
     JOIN lecturers l ON lc.lecturer_id = l.id
-    JOIN rooms r ON t.room_id = r.id
+    JOIN rooms r ON t.room_id = r.id" . $join_programs . "
     WHERE $where_clause
     GROUP BY t.session_id, s.semester_name, s.academic_year, s.semester_number
     ORDER BY s.academic_year DESC, s.semester_number DESC
@@ -95,6 +98,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
 }
 
+// Handle edit/update session action
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'update_session') {
+    $session_id = isset($_POST['session_id']) ? intval($_POST['session_id']) : 0;
+    $semester_name = isset($_POST['semester_name']) ? $conn->real_escape_string($_POST['semester_name']) : '';
+    $academic_year = isset($_POST['academic_year']) ? $conn->real_escape_string($_POST['academic_year']) : '';
+    $semester_number = isset($_POST['semester_number']) ? intval($_POST['semester_number']) : 0;
+
+    if ($session_id > 0 && $semester_name !== '' && $academic_year !== '' && $semester_number > 0) {
+        $update_stmt = $conn->prepare("UPDATE sessions SET semester_name = ?, academic_year = ?, semester_number = ? WHERE id = ?");
+        if ($update_stmt) {
+            $update_stmt->bind_param('ssii', $semester_name, $academic_year, $semester_number, $session_id);
+            if ($update_stmt->execute()) {
+                $success_message = 'Session updated successfully.';
+            } else {
+                $error_message = 'Error updating session: ' . $conn->error;
+            }
+            $update_stmt->close();
+        } else {
+            $error_message = 'Prepare failed: ' . $conn->error;
+        }
+    } else {
+        $error_message = 'Invalid session data provided.';
+    }
+
+    // Refresh timetables result after update
+    header('Location: saved_timetable.php');
+    exit();
+}
+
 // Get success/error messages from session or URL
 $success_message = $_GET['success'] ?? '';
 $error_message = $_GET['error'] ?? '';
@@ -111,6 +143,9 @@ $error_message = $_GET['error'] ?? '';
                 <a class="btn btn-outline-secondary" href="view_timetable.php">
                     <i class="fas fa-eye me-2"></i>View Timetable
                 </a>
+                <button class="btn btn-outline-info" data-bs-toggle="modal" data-bs-target="#editSessionModal">
+                    <i class="fas fa-edit me-2"></i>Edit Session
+                </button>
             </div>
         </div>
 
@@ -232,20 +267,20 @@ $error_message = $_GET['error'] ?? '';
                                         </td>
                                         <td>
                                             <div class="btn-group btn-group-sm" role="group">
-                                                <a href="view_timetable.php?session_id=<?php echo $timetable['session_id']; ?>" 
-                                                   class="btn btn-outline-primary" title="View Timetable">
-                                                    <i class="fas fa-eye"></i>
-                                                </a>
-                                                                <a href="export_timetable.php?session_id=<?php echo $timetable['session_id']; ?>" 
-                   class="btn btn-outline-success" title="Export" target="_blank">
-                    <i class="fas fa-download"></i>
-                </a>
-                                                <button type="button" 
-                                                        class="btn btn-outline-danger" 
-                                                        title="Delete Timetable"
-                                                        onclick="confirmDelete(<?php echo $timetable['session_id']; ?>, '<?php echo htmlspecialchars($timetable['semester_name'] . ' (' . $timetable['academic_year'] . ')'); ?>')">
-                                                    <i class="fas fa-trash"></i>
-                                                </button>
+                                                <div class="btn-group" role="group" aria-label="Actions">
+                                                    <a href="view_timetable.php?session_id=<?php echo $timetable['session_id']; ?>" class="btn btn-sm btn-outline-primary" title="View Timetable">
+                                                        <i class="fas fa-eye"></i>
+                                                    </a>
+                                                    <a href="export_timetable.php?session_id=<?php echo $timetable['session_id']; ?>" class="btn btn-sm btn-outline-success" title="Export" target="_blank">
+                                                        <i class="fas fa-download"></i>
+                                                    </a>
+                                                    <button type="button" class="btn btn-sm btn-outline-info" title="Edit Session" onclick="openEditSessionModal(<?php echo $timetable['session_id']; ?>, '<?php echo addslashes($timetable['semester_name']); ?>', '<?php echo addslashes($timetable['academic_year']); ?>', <?php echo (int)$timetable['semester_number']; ?>)">
+                                                        <i class="fas fa-edit"></i>
+                                                    </button>
+                                                    <button type="button" class="btn btn-sm btn-outline-danger" title="Delete Timetable" onclick="confirmDelete(<?php echo $timetable['session_id']; ?>, '<?php echo htmlspecialchars($timetable['semester_name'] . ' (' . $timetable['academic_year'] . ')'); ?>')">
+                                                        <i class="fas fa-trash"></i>
+                                                    </button>
+                                                </div>
                                             </div>
                                         </td>
                                     </tr>
@@ -296,6 +331,47 @@ $error_message = $_GET['error'] ?? '';
             </div>
         </div>
     </div>
+
+<!-- Edit Session Modal -->
+<div class="modal fade" id="editSessionModal" tabindex="-1" aria-labelledby="editSessionModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form method="POST">
+        <div class="modal-header">
+          <h5 class="modal-title" id="editSessionModalLabel">Edit Session</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" name="action" value="update_session">
+          <div class="mb-3">
+            <label for="session_id">Session ID</label>
+            <input type="number" class="form-control" id="session_id" name="session_id" required>
+          </div>
+          <div class="mb-3">
+            <label for="semester_name">Semester Name</label>
+            <input type="text" class="form-control" id="semester_name" name="semester_name" required>
+          </div>
+          <div class="mb-3">
+            <label for="academic_year">Academic Year</label>
+            <input type="text" class="form-control" id="academic_year" name="academic_year" placeholder="2024/2025" required>
+          </div>
+          <div class="mb-3">
+            <label for="semester_number">Semester Number</label>
+            <select class="form-select" id="semester_number" name="semester_number" required>
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="3">3</option>
+            </select>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
 </div>
 
 <script>
@@ -318,6 +394,15 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 });
+// Open edit session modal prefilled
+function openEditSessionModal(id, semesterName, academicYear, semesterNumber) {
+    document.getElementById('session_id').value = id;
+    document.getElementById('semester_name').value = semesterName;
+    document.getElementById('academic_year').value = academicYear;
+    document.getElementById('semester_number').value = semesterNumber;
+    var modal = new bootstrap.Modal(document.getElementById('editSessionModal'));
+    modal.show();
+}
 </script>
 
 <?php include 'includes/footer.php'; ?>

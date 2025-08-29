@@ -2,7 +2,7 @@
 include 'connect.php';
 
 // Handle single assignment
-if ($_POST['action'] === 'assign_single') {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'assign_single') {
     $class_id = (int)($_POST['class_id'] ?? 0);
     $course_id = (int)($_POST['course_id'] ?? 0);
     
@@ -22,7 +22,7 @@ if ($_POST['action'] === 'assign_single') {
 }
 
 // Handle bulk assignment
-if ($_POST['action'] === 'assign_bulk') {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'assign_bulk') {
     $class_ids = $_POST['class_ids'] ?? [];
     $course_ids = $_POST['course_ids'] ?? [];
     
@@ -43,7 +43,7 @@ if ($_POST['action'] === 'assign_bulk') {
 }
 
 // Handle deletion
-if ($_POST['action'] === 'delete' && isset($_POST['class_course_id'])) {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'delete' && isset($_POST['class_course_id'])) {
     $class_course_id = (int)$_POST['class_course_id'];
     $stmt = $conn->prepare("DELETE FROM class_courses WHERE id = ?");
     $stmt->bind_param('i', $class_course_id);
@@ -56,21 +56,22 @@ if ($_POST['action'] === 'delete' && isset($_POST['class_course_id'])) {
     $stmt->close();
 }
 
-// Get all classes
-$classes_sql = "SELECT id, name, level FROM classes WHERE is_active = 1 ORDER BY name";
+// Get all classes (include human-readable level name)
+$classes_sql = "SELECT c.id, c.name, l.name AS level FROM classes c JOIN levels l ON c.level_id = l.id WHERE c.is_active = 1 ORDER BY c.name";
 $classes_result = $conn->query($classes_sql);
 
-// Get all courses
-$courses_sql = "SELECT id, course_code, course_name FROM courses WHERE is_active = 1 ORDER BY course_code";
+// Get all courses (DB uses `code` and `name` columns)
+$courses_sql = "SELECT id, `code` AS course_code, `name` AS course_name FROM courses WHERE is_active = 1 ORDER BY `code`";
 $courses_result = $conn->query($courses_sql);
 
 // Get existing assignments
-$assignments_sql = "SELECT cc.id, c.name as class_name, c.level, co.course_code, co.course_name
+$assignments_sql = "SELECT cc.id, c.name as class_name, lvl.name AS level, co.`code` AS course_code, co.`name` AS course_name
                     FROM class_courses cc
                     JOIN classes c ON cc.class_id = c.id
+                    LEFT JOIN levels lvl ON c.level_id = lvl.id
                     JOIN courses co ON cc.course_id = co.id
                     WHERE cc.is_active = 1
-                    ORDER BY c.name, co.course_code";
+                    ORDER BY c.name, co.`code`";
 $assignments_result = $conn->query($assignments_sql);
 
 // Get existing assignments for bulk operations
@@ -97,16 +98,57 @@ if ($existing_assignments_result) {
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet">
     <style>
+        :root {
+            --brand-maroon: #7a0b1c;
+            --brand-maroon-dark: #5a0713;
+            --muted-border: rgba(0,0,0,0.08);
+        }
         .select2-container {
             width: 100% !important;
         }
         .card {
             box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
-            border: 1px solid rgba(0, 0, 0, 0.125);
+            border: 1px solid var(--muted-border);
         }
+
+        /* Brand header styling to match project theme */
+        .card-header.bg-primary {
+            background: var(--brand-maroon) !important;
+            border-bottom: 1px solid var(--brand-maroon-dark);
+        }
+        .card-header.bg-primary h5, .card-header.bg-primary .btn {
+            color: #fff !important;
+        }
+
+        /* Buttons in header */
+        .card-header .btn-outline-light {
+            color: #fff;
+            border-color: rgba(255,255,255,0.15);
+        }
+        .card-header .btn-light {
+            background: #fff;
+            color: var(--brand-maroon);
+        }
+
+        /* Smaller buttons used across tables */
         .btn-group-sm > .btn, .btn-sm {
             padding: 0.25rem 0.5rem;
             font-size: 0.875rem;
+        }
+
+        /* Action icons styling to match brand */
+        .table .btn-danger {
+            border-color: var(--brand-maroon);
+            color: var(--brand-maroon);
+            background: transparent;
+        }
+        .table .btn-danger:hover {
+            background: rgba(122,11,28,0.05);
+        }
+        .table .btn-warning {
+            border-color: var(--brand-maroon);
+            color: var(--brand-maroon);
+            background: transparent;
         }
     </style>
 </head>
@@ -115,15 +157,15 @@ if ($existing_assignments_result) {
         <div class="row">
             <div class="col-12">
                 <div class="card">
-                    <div class="card-header d-flex justify-content-between align-items-center">
+                    <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
                         <h5 class="mb-0">
                             <i class="fas fa-link me-2"></i>Class Course Management
                         </h5>
                         <div>
-                            <button class="btn btn-success me-2" data-bs-toggle="modal" data-bs-target="#bulkAssignmentModal">
+                            <button class="btn btn-outline-light me-2" data-bs-toggle="modal" data-bs-target="#bulkAssignmentModal">
                                 <i class="fas fa-layer-group me-1"></i>Bulk Assignment
                             </button>
-                            <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#singleAssignmentModal">
+                            <button class="btn btn-light" data-bs-toggle="modal" data-bs-target="#singleAssignmentModal">
                                 <i class="fas fa-plus me-1"></i>Single Assignment
                             </button>
                         </div>

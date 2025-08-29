@@ -42,10 +42,18 @@ $selected_department = isset($_GET['department_id']) ? (int)$_GET['department_id
 
 $lecturers = $conn->query("SELECT id, name, department_id FROM lecturers WHERE is_active = 1 ORDER BY name");
 
-$courses_query = "SELECT c.id, c.name, c.code, d.name AS department_name FROM courses c JOIN departments d ON d.id = c.department_id WHERE c.is_active = 1";
-if ($selected_department > 0) { $courses_query .= " AND c.department_id = " . $selected_department; }
-$courses_query .= " ORDER BY c.name";
+// Build courses query defensively: some DB schemas include department_id on courses, others don't
+$courses_query = "SELECT c.id, c.name, c.code FROM courses c WHERE c.is_active = 1 ORDER BY c.name";
 $courses = $conn->query($courses_query);
+if ($courses === false) {
+    error_log('courses query failed: ' . $conn->error . ' -- Query: ' . $courses_query);
+}
+// If the above failed (schema mismatch), fall back to a simpler courses query
+if ($courses === false) {
+    // Log error for debugging (do not expose DB errors to users in production)
+    error_log('courses query failed: ' . $conn->error . ' -- Query: ' . $courses_query);
+    $courses = $conn->query("SELECT c.id, c.name, c.code, NULL AS department_name FROM courses c WHERE c.is_active = 1 ORDER BY c.name");
+}
 $mappings = $conn->query("SELECT l.id as lecturer_id, l.name AS lecturer_name, 
                           GROUP_CONCAT(c.code ORDER BY c.code SEPARATOR ', ') AS course_codes
                           FROM lecturers l

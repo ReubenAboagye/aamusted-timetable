@@ -19,9 +19,27 @@ $active_stream = $active_stream ?? $_SESSION['active_stream'] ?? $_SESSION['stre
 // --- Fetch streams dynamically if not already provided by caller ---
 if (!isset($streams) || !is_array($streams) || empty($streams)) {
     $streams = [];
-    $result = $conn->query("SELECT id, name FROM streams WHERE is_active = 1 ORDER BY id ASC");
-    while ($row = $result->fetch_assoc()) {
-        $streams[] = $row;
+
+    // Ensure $conn is available; try to include the central connection if not
+    if (!isset($conn) || !$conn) {
+        $connFile = __DIR__ . '/../connect.php';
+        if (file_exists($connFile)) {
+            include_once $connFile;
+        }
+    }
+
+    if (isset($conn) && $conn) {
+        $result = $conn->query("SELECT id, name FROM streams WHERE is_active = 1 ORDER BY id ASC");
+        if ($result) {
+            while ($row = $result->fetch_assoc()) {
+                $streams[] = $row;
+            }
+        }
+    }
+
+    // Fallback: ensure at least one default stream exists in the UI
+    if (empty($streams)) {
+        $streams[] = ['id' => 1, 'name' => 'Regular'];
     }
 }
 
@@ -75,7 +93,7 @@ if (!function_exists('getCount')) {
       background-color: var(--bg-color);
       margin: 0;
       padding-top: 70px; /* For fixed header */
-      overflow: hidden;
+      overflow: auto;
       font-size: 14px;
     }
     .navbar { background-color: var(--primary-color); position: fixed; top: 0; width: 100%; z-index: 1050; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
