@@ -10,23 +10,7 @@ USE `timetable_system`;
 -- =====================================================
 -- BUILDINGS TABLE
 -- =====================================================
-DROP TABLE IF EXISTS `timetable_lecturers`;
-DROP TABLE IF EXISTS `timetable`;
-DROP TABLE IF EXISTS `course_room_types`;
-DROP TABLE IF EXISTS `class_courses`;
-DROP TABLE IF EXISTS `lecturer_courses`;
-DROP TABLE IF EXISTS `rooms`;
-DROP TABLE IF EXISTS `classes`;
-DROP TABLE IF EXISTS `programs`;
-DROP TABLE IF EXISTS `lecturers`;
-DROP TABLE IF EXISTS `courses`;
-DROP TABLE IF EXISTS `levels`;
-DROP TABLE IF EXISTS `departments`;
-DROP TABLE IF EXISTS `time_slots`;
-DROP TABLE IF EXISTS `days`;
-DROP TABLE IF EXISTS `room_types`;
-DROP TABLE IF EXISTS `streams`;
-DROP TABLE IF EXISTS `buildings`;
+
 
 CREATE TABLE `buildings` (
   `id` int NOT NULL AUTO_INCREMENT,
