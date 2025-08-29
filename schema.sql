@@ -11,7 +11,7 @@ DROP TABLE IF EXISTS course_session_availability;
 DROP TABLE IF EXISTS lecturer_session_availability;
 DROP TABLE IF EXISTS lecturer_courses;
 DROP TABLE IF EXISTS class_courses;
-DROP TABLE IF EXISTS time_slots;
+
 DROP TABLE IF EXISTS rooms;
 DROP TABLE IF EXISTS buildings;
 DROP TABLE IF EXISTS days;
@@ -188,19 +188,7 @@ CREATE TABLE rooms (
   UNIQUE KEY uq_room_name_building (name, building)
 );
 
--- =========================================
--- 11) TIME_SLOTS (reusable across all days)
---    No day-of-week here -> reuse the same slots Mon..Sun
--- =========================================
-CREATE TABLE time_slots (
-  id INT PRIMARY KEY AUTO_INCREMENT,
-  start_time TIME NOT NULL,
-  end_time TIME NOT NULL,
-  duration INT NOT NULL,              -- minutes
-  is_break BOOLEAN DEFAULT FALSE,
-  is_mandatory BOOLEAN DEFAULT FALSE,
-  UNIQUE KEY uq_times (start_time, end_time)
-);
+
 
 -- =========================================
 -- 12) CLASS_COURSES (which courses a class takes per semester)
@@ -262,7 +250,6 @@ CREATE TABLE timetable (
   class_course_id INT NOT NULL,
   lecturer_course_id INT NOT NULL,
   day_id INT NOT NULL,
-  time_slot_id INT NOT NULL,
   room_id INT NOT NULL,
   session_type_id INT NOT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -271,10 +258,9 @@ CREATE TABLE timetable (
   FOREIGN KEY (class_course_id) REFERENCES class_courses(id) ON DELETE CASCADE,
   FOREIGN KEY (lecturer_course_id) REFERENCES lecturer_courses(id) ON DELETE CASCADE,
   FOREIGN KEY (day_id) REFERENCES days(id),
-  FOREIGN KEY (time_slot_id) REFERENCES time_slots(id),
   FOREIGN KEY (room_id) REFERENCES rooms(id),
   FOREIGN KEY (session_type_id) REFERENCES session_types(id),
-  UNIQUE KEY uq_tt_slot (session_id, day_id, time_slot_id, room_id)
+  UNIQUE KEY uq_tt_slot (session_id, day_id, room_id)
 );
 
 CREATE TABLE timetable_lecturers (
@@ -320,20 +306,6 @@ INSERT INTO days (name) VALUES
 INSERT INTO session_types (name) VALUES 
 ('Lecture'), ('Tutorial'), ('Laboratory'), ('Seminar'), ('Exam'), ('Break');
 
--- =========================================
--- 20) SAMPLE DATA FOR TIME SLOTS
--- =========================================
-INSERT INTO time_slots (start_time, end_time, duration, is_break, is_mandatory) VALUES
-('08:00:00', '09:00:00', 60, FALSE, TRUE),
-('09:00:00', '10:00:00', 60, FALSE, TRUE),
-('10:00:00', '10:15:00', 15, TRUE, FALSE),
-('10:15:00', '11:15:00', 60, FALSE, TRUE),
-('11:15:00', '12:15:00', 60, FALSE, TRUE),
-('12:15:00', '13:15:00', 60, TRUE, FALSE),
-('13:15:00', '14:15:00', 60, FALSE, TRUE),
-('14:15:00', '15:15:00', 60, FALSE, TRUE),
-('15:15:00', '15:30:00', 15, TRUE, FALSE),
-('15:30:00', '16:30:00', 60, FALSE, TRUE),
-('16:30:00', '17:30:00', 60, FALSE, TRUE);
+
 
 SET FOREIGN_KEY_CHECKS=1;

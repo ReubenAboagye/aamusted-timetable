@@ -76,7 +76,7 @@ $result = $conn->query($sql);
 <div class="main-content" id="mainContent">
     <div class="table-container">
         <div class="table-header d-flex justify-content-between align-items-center">
-            <h4><i class="fas fa-clock me-2"></i>Streams Management</h4>
+            <h4><i class="fas fa-stream me-2"></i>Streams Management</h4>
             <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addStreamModal">
                 <i class="fas fa-plus me-2"></i>Add New Stream
             </button>
@@ -158,7 +158,7 @@ $result = $conn->query($sql);
                     <?php else: ?>
                         <tr>
                             <td colspan="5" class="empty-state">
-                                <i class="fas fa-clock"></i>
+                                <i class="fas fa-stream"></i>
                                 <p>No streams found. Add your first stream to get started!</p>
                             </td>
                         </tr>

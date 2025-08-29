@@ -1,7 +1,14 @@
 <?php
 include 'connect.php';
 $days = ['Monday','Tuesday','Wednesday','Thursday','Friday'];
-$timeSlots = ['07:00-10:00','10:00-13:00','14:00-17:00','17:00-20:00'];
+
+// Generate time slots programmatically (8 AM to 6 PM)
+$timeSlots = [];
+for ($hour = 8; $hour <= 18; $hour++) {
+    $start_time = sprintf('%02d:00', $hour);
+    $end_time = sprintf('%02d:00', $hour + 1);
+    $timeSlots[] = $start_time . '-' . $end_time;
+}
 
 // If the form is submitted, process the update.
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {

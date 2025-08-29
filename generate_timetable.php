@@ -6,27 +6,22 @@ include 'connect.php';
 include 'includes/header.php';
 include 'includes/sidebar.php';
 
-// Helper: ensure standard 1-hour time slots exist from 07:00 to 20:00
-function ensure_time_slots($conn) {
-    $created = 0;
-    for ($h = 7; $h < 20; $h++) { // 07..19
-        $start = sprintf('%02d:00:00', $h);
-        $end = sprintf('%02d:00:00', $h + 1);
-        $sql = "SELECT id FROM time_slots WHERE start_time = ? AND end_time = ? LIMIT 1";
-        $stmt = $conn->prepare($sql);
-        $stmt->bind_param('ss', $start, $end);
-        $stmt->execute();
-        $stmt->store_result();
-        if ($stmt->num_rows === 0) {
-            $insert = $conn->prepare("INSERT INTO time_slots (start_time, end_time, duration, is_break, is_mandatory) VALUES (?, ?, 60, 0, 1)");
-            $insert->bind_param('ss', $start, $end);
-            $insert->execute();
-            $insert->close();
-            $created++;
-        }
-        $stmt->close();
+// Helper: generate time slots programmatically (8 AM to 6 PM)
+function generate_time_slots() {
+    $time_slots = [];
+    
+    for ($hour = 8; $hour <= 18; $hour++) {
+        $start_time = sprintf('%02d:00:00', $hour);
+        $end_time = sprintf('%02d:00:00', $hour + 1);
+        $time_slots[] = [
+            'id' => $hour,
+            'start_time' => $start_time,
+            'end_time' => $end_time,
+            'key' => substr($start_time, 0, 5) . '-' . substr($end_time, 0, 5)
+        ];
     }
-    return $created;
+    
+    return $time_slots;
 }
 
 // Helper: readiness checks for selected session
@@ -77,19 +72,8 @@ function check_readiness($conn, $sessionId) {
     $res = $conn->query("SELECT COUNT(*) AS cnt FROM days");
     $status['days'] = (int)($res ? ($res->fetch_assoc()['cnt'] ?? 0) : 0);
 
-    // Time slots coverage (1-hour slots from 07:00 to 20:00)
-    $presentAll = true;
-    for ($h = 7; $h < 20; $h++) {
-        $s = sprintf('%02d:00:00', $h);
-        $e = sprintf('%02d:00:00', $h + 1);
-        $stmt = $conn->prepare("SELECT id FROM time_slots WHERE start_time = ? AND end_time = ? LIMIT 1");
-        $stmt->bind_param('ss', $s, $e);
-        $stmt->execute();
-        $stmt->store_result();
-        if ($stmt->num_rows === 0) { $presentAll = false; }
-        $stmt->close();
-    }
-    $status['time_slots_present'] = $presentAll;
+    // Time slots are now generated programmatically (8 AM to 6 PM, hourly)
+    $status['time_slots_present'] = true;
 
     // Courses in this session without any lecturer mapping
     $sql = "SELECT COUNT(*) AS cnt FROM (
@@ -132,8 +116,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     if ($selected_session <= 0) {
         $error_message = 'Please select a valid session.';
     } else {
-        // Ensure target time slots are present
-        ensure_time_slots($conn);
+
 
         // Check readiness
         $readiness = check_readiness($conn, $selected_session);
@@ -214,12 +197,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 $res = $conn->query("SELECT id, name FROM days");
                 while ($row = $res->fetch_assoc()) { $daysMap[$row['name']] = (int)$row['id']; }
 
-                // Time slots map
+                // Time slots map (generated programmatically)
                 $slotsMap = [];
-                $res = $conn->query("SELECT id, start_time, end_time FROM time_slots");
-                while ($row = $res->fetch_assoc()) {
-                    $key = substr($row['start_time'],0,5) . '-' . substr($row['end_time'],0,5);
-                    $slotsMap[$key] = (int)$row['id'];
+                $time_slots = generate_time_slots();
+                foreach ($time_slots as $slot) {
+                    $slotsMap[$slot['key']] = (int)$slot['id'];
                 }
 
                 // Session type: default to Lecture
@@ -480,8 +462,6 @@ $departments_result = $conn->query("SELECT id, name FROM departments WHERE is_ac
         <?php
         // Show readiness if session selected (either from POST or default selection)
         if ($selected_session) {
-            // Ensure slots before showing status so user sees slots are present next time
-            ensure_time_slots($conn);
             $readiness = $readiness ?: check_readiness($conn, $selected_session);
         ?>
             <div class="card m-3">
@@ -511,8 +491,8 @@ $departments_result = $conn->query("SELECT id, name FROM departments WHERE is_ac
                             <span class="badge <?php echo ($readiness['days'] >= 5) ? 'bg-success' : 'bg-danger'; ?>"><?php echo $readiness['days']; ?></span>
                         </li>
                         <li class="list-group-item d-flex justify-content-between align-items-center">
-                            Required time slots present (07-10, 10-13, 14-17, 17-20)
-                            <span class="badge <?php echo ($readiness['time_slots_present']) ? 'bg-success' : 'bg-warning'; ?>"><?php echo $readiness['time_slots_present'] ? 'Yes' : 'Will be created'; ?></span>
+                            Time slots (8 AM to 6 PM, hourly)
+                            <span class="badge bg-success">Generated programmatically</span>
                         </li>
                         <li class="list-group-item d-flex justify-content-between align-items-center">
                             Courses without lecturer mapping

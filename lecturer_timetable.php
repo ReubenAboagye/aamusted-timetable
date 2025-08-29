@@ -18,16 +18,22 @@ $days = [];
 $res = $conn->query("SELECT id, name FROM days ORDER BY id");
 if ($res) { while ($r = $res->fetch_assoc()) { $days[] = $r; } }
 
+// Generate time slots programmatically (8 AM to 6 PM)
 $time_slots = [];
-$res = $conn->query("SELECT id, start_time, end_time FROM time_slots WHERE is_break = 0 ORDER BY start_time");
-if ($res) { while ($r = $res->fetch_assoc()) { $time_slots[] = $r; } }
+for ($hour = 8; $hour <= 18; $hour++) {
+    $start_time = sprintf('%02d:00:00', $hour);
+    $end_time = sprintf('%02d:00:00', $hour + 1);
+    $time_slots[] = [
+        'id' => $hour,
+        'start_time' => $start_time,
+        'end_time' => $end_time
+    ];
+}
 
 $entries = [];
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $selected_session > 0 && $selected_lecturer > 0) {
     $sql = "SELECT 
                 d.name AS day_name,
-                ts.start_time,
-                ts.end_time,
                 c.name AS course_name,
                 c.code AS course_code,
                 cl.name AS class_name,
@@ -35,14 +41,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $selected_session > 0 && $selected_
                 r.building AS room_building
             FROM timetable t
             JOIN days d ON d.id = t.day_id
-            JOIN time_slots ts ON ts.id = t.time_slot_id
             JOIN lecturer_courses lc ON lc.id = t.lecturer_course_id
             JOIN courses c ON c.id = lc.course_id
             JOIN class_courses cc ON cc.id = t.class_course_id
             JOIN classes cl ON cl.id = cc.class_id
             JOIN rooms r ON r.id = t.room_id
             WHERE t.session_id = ? AND lc.lecturer_id = ?
-            ORDER BY d.id, ts.start_time";
+            ORDER BY d.id";
     $stmt = $conn->prepare($sql);
     $stmt->bind_param('ii', $selected_session, $selected_lecturer);
     $stmt->execute();

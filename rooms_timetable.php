@@ -15,9 +15,17 @@ $days = [];
 $res = $conn->query("SELECT id, name FROM days ORDER BY id");
 if ($res) { while ($r = $res->fetch_assoc()) { $days[] = $r; } }
 
+// Generate time slots programmatically (8 AM to 6 PM)
 $time_slots = [];
-$res = $conn->query("SELECT id, start_time, end_time FROM time_slots WHERE is_break = 0 ORDER BY start_time");
-if ($res) { while ($r = $res->fetch_assoc()) { $time_slots[] = $r; } }
+for ($hour = 8; $hour <= 18; $hour++) {
+    $start_time = sprintf('%02d:00:00', $hour);
+    $end_time = sprintf('%02d:00:00', $hour + 1);
+    $time_slots[] = [
+        'id' => $hour,
+        'start_time' => $start_time,
+        'end_time' => $end_time
+    ];
+}
 
 // Rooms
 $rooms = [];
@@ -28,12 +36,11 @@ if ($res) { while ($r = $res->fetch_assoc()) { $rooms[] = $r; } }
 $entriesMap = [];
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $selected_session > 0) {
     $sql = "SELECT 
-                t.room_id, d.name AS day_name, ts.start_time,
+                t.room_id, d.name AS day_name,
                 c.name AS course_name, c.code AS course_code,
                 l.name AS lecturer_name, cl.name AS class_name
             FROM timetable t
             JOIN days d ON d.id = t.day_id
-            JOIN time_slots ts ON ts.id = t.time_slot_id
             JOIN class_courses cc ON cc.id = t.class_course_id
             JOIN courses c ON c.id = cc.course_id
             JOIN lecturer_courses lc ON lc.id = t.lecturer_course_id
@@ -45,7 +52,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $selected_session > 0) {
     $stmt->execute();
     $res = $stmt->get_result();
     while ($row = $res->fetch_assoc()) {
-        $key = $row['room_id'] . '|' . $row['day_name'] . '|' . $row['start_time'];
+        $key = $row['room_id'] . '|' . $row['day_name'];
         $entriesMap[$key] = $row;
     }
     $stmt->close();
@@ -110,7 +117,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $selected_session > 0) {
                                 <?php foreach ($rooms as $room): ?>
                                     <td class="timetable-cell">
                                         <?php
-                                            $key = $room['id'] . '|' . $day['name'] . '|' . $slot['start_time'];
+                                            $key = $room['id'] . '|' . $day['name'];
                                             if (isset($entriesMap[$key])) {
                                                 $e = $entriesMap[$key];
                                         ?>

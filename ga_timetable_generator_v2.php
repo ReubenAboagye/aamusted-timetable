@@ -13,14 +13,31 @@ class GeneticAlgorithmV2 {
     private $fitnessCache;      // Cache for fitness calculations
     private $sessionId;         // Current session ID for time slots
 
-    public function __construct($classes, $courses, $rooms, $lecturers, $timeSlots, $workingDays, $sessionId) {
+    public function __construct($classes, $courses, $rooms, $lecturers = null, $timeSlots = null, $workingDays = null, $sessionId = null) {
         $this->classes = $classes;
         $this->courses = $courses;
         $this->rooms = $rooms;
-        $this->lecturers = $lecturers;
-        $this->timeSlots = $timeSlots;
-        $this->workingDays = $workingDays;
-        $this->sessionId = $sessionId;
+        $this->lecturers = $lecturers ?: [];
+        
+        // Generate time slots programmatically (8 AM to 6 PM)
+        if ($timeSlots === null) {
+            $this->timeSlots = [];
+            for ($hour = 8; $hour <= 18; $hour++) {
+                $start_time = sprintf('%02d:00', $hour);
+                $end_time = sprintf('%02d:00', $hour + 1);
+                $this->timeSlots[] = [
+                    'id' => $hour,
+                    'start_time' => $start_time,
+                    'end_time' => $end_time,
+                    'key' => $start_time . '-' . $end_time
+                ];
+            }
+        } else {
+            $this->timeSlots = $timeSlots;
+        }
+        
+        $this->workingDays = $workingDays ?: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'];
+        $this->sessionId = $sessionId ?: 1;
         
         $this->population = [];
         $this->fitnessCache = [];

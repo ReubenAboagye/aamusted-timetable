@@ -23,8 +23,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         $query = "SELECT 
                     t.id,
                     d.name as day_name,
-                    ts.start_time,
-                    ts.end_time,
                     c.name as course_name,
                     c.code as course_code,
                     l.name as lecturer_name,
@@ -33,7 +31,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     st.name as session_type
                   FROM timetable t
                   JOIN days d ON t.day_id = d.id
-                  JOIN time_slots ts ON t.time_slot_id = ts.id
                   JOIN class_courses cc ON t.class_course_id = cc.id
                   JOIN courses c ON cc.course_id = c.id
                   JOIN lecturer_courses lc ON t.lecturer_course_id = lc.id
@@ -41,7 +38,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                   JOIN rooms r ON t.room_id = r.id
                   JOIN session_types st ON t.session_type_id = st.id
                   WHERE cc.class_id = ? AND cc.session_id = ?
-                  ORDER BY d.id, ts.start_time";
+                  ORDER BY d.id";
         
         if ($stmt = $conn->prepare($query)) {
             $stmt->bind_param("ii", $selected_class, $selected_session);
@@ -85,13 +82,16 @@ if ($days_result) {
     }
 }
 
-$times_sql = "SELECT id, start_time, end_time FROM time_slots WHERE is_break = 0 ORDER BY start_time";
-$times_result = $conn->query($times_sql);
+// Generate time slots programmatically (8 AM to 6 PM)
 $time_slots = [];
-if ($times_result) {
-    while ($time = $times_result->fetch_assoc()) {
-        $time_slots[] = $time;
-    }
+for ($hour = 8; $hour <= 18; $hour++) {
+    $start_time = sprintf('%02d:00:00', $hour);
+    $end_time = sprintf('%02d:00:00', $hour + 1);
+    $time_slots[] = [
+        'id' => $hour,
+        'start_time' => $start_time,
+        'end_time' => $end_time
+    ];
 }
 ?>
 

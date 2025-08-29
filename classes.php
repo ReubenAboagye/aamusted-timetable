@@ -152,12 +152,8 @@ $level_result = $conn->query($level_sql);
                 <thead>
                     <tr>
                         <th>Class Name</th>
-                        <th>Department</th>
                         <th>Level</th>
-                        <th>Stream</th>
-                        <th>Capacity</th>
-                        <th>Enrollment</th>
-                        <th>Status</th>
+                        <th>Program</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
@@ -166,20 +162,10 @@ $level_result = $conn->query($level_sql);
                         <?php while ($row = $result->fetch_assoc()): ?>
                             <tr>
                                 <td><strong><?php echo htmlspecialchars($row['name']); ?></strong></td>
-                                <td><?php echo htmlspecialchars($row['department_name'] ?? 'N/A'); ?></td>
                                 <td><span class="badge bg-warning"><?php echo htmlspecialchars($row['level']); ?></span></td>
                                 <td>
-                                    <span class="badge bg-info"><?php echo htmlspecialchars($row['stream_name'] ?? 'N/A'); ?></span>
-                                    <br><small class="text-muted"><?php echo htmlspecialchars($row['stream_code'] ?? ''); ?></small>
-                                </td>
-                                <td><span class="badge bg-dark"><?php echo htmlspecialchars($row['capacity']); ?> students</span></td>
-                                <td><span class="badge bg-secondary"><?php echo htmlspecialchars($row['current_enrollment']); ?> enrolled</span></td>
-                                <td>
-                                    <?php if ($row['is_active']): ?>
-                                        <span class="badge bg-success">Active</span>
-                                    <?php else: ?>
-                                        <span class="badge bg-secondary">Inactive</span>
-                                    <?php endif; ?>
+                                    <span class="badge bg-info"><?php echo htmlspecialchars($row['program_name'] ?? 'N/A'); ?></span>
+                                    <br><small class="text-muted"><?php echo htmlspecialchars($row['program_code'] ?? ''); ?></small>
                                 </td>
                                 <td>
                                     <button class="btn btn-sm btn-outline-primary me-1" onclick="editClass(<?php echo $row['id']; ?>)">
@@ -197,7 +183,7 @@ $level_result = $conn->query($level_sql);
                         <?php endwhile; ?>
                     <?php else: ?>
                         <tr>
-                            <td colspan="8" class="empty-state">
+                            <td colspan="4" class="empty-state">
                                 <i class="fas fa-users"></i>
                                 <p>No classes found. Add your first classes to get started!</p>
                             </td>
