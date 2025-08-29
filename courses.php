@@ -9,8 +9,8 @@ include 'connect.php';
 // Handle form submission for adding new course
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     if ($_POST['action'] === 'add') {
-        $name = $conn->real_escape_string($_POST['name']);
-        $code = $conn->real_escape_string($_POST['code']);
+        $course_name = $conn->real_escape_string($_POST['course_name']);
+        $course_code = $conn->real_escape_string($_POST['course_code']);
         $department_id = $conn->real_escape_string($_POST['department_id']);
         $credits = $conn->real_escape_string($_POST['credits']);
         $hours_per_week = $conn->real_escape_string($_POST['hours_per_week']);
@@ -19,9 +19,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $is_active = isset($_POST['is_active']) ? 1 : 0;
         
         $stream_id = $streamManager->getCurrentStreamId();
-        $sql = "INSERT INTO courses (name, code, department_id, stream_id, credits, hours_per_week, level, preferred_room_type, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
+        $sql = "INSERT INTO courses (course_name, course_code, department_id, stream_id, credits, hours_per_week, level, preferred_room_type, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
         $stmt = $conn->prepare($sql);
-        $stmt->bind_param("ssiissi", $name, $code, $department_id, $stream_id, $credits, $hours_per_week, $level, $preferred_room_type, $is_active);
+        $stmt->bind_param("ssiissi", $course_name, $course_code, $department_id, $stream_id, $credits, $hours_per_week, $level, $preferred_room_type, $is_active);
         
         if ($stmt->execute()) {
             $success_message = "Course added successfully!";
@@ -41,8 +41,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $check_stmt = $conn->prepare($check_sql);
 
             foreach ($import_data as $row) {
-                $name = isset($row['name']) ? $conn->real_escape_string($row['name']) : '';
-                $code = isset($row['code']) ? $conn->real_escape_string($row['code']) : '';
+                $course_name = isset($row['course_name']) ? $conn->real_escape_string($row['course_name']) : '';
+                $course_code = isset($row['course_code']) ? $conn->real_escape_string($row['course_code']) : '';
                 $department_id = isset($row['department_id']) ? (int)$row['department_id'] : 0;
                 $credits = isset($row['credits']) ? (int)$row['credits'] : 3;
                 $hours_per_week = isset($row['hours_per_week']) ? (int)$row['hours_per_week'] : 3;
@@ -50,14 +50,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $preferred_room_type = isset($row['preferred_room_type']) ? $conn->real_escape_string($row['preferred_room_type']) : 'classroom';
                 $is_active = isset($row['is_active']) ? (int)$row['is_active'] : 1;
 
-                if ($name === '' || $code === '' || $department_id === 0) {
+                if ($course_name === '' || $course_code === '' || $department_id === 0) {
                     $error_count++;
                     continue;
                 }
 
                 // Skip if course with same code exists
                 if ($check_stmt) {
-                    $check_stmt->bind_param("s", $code);
+                    $check_stmt->bind_param("s", $course_code);
                     $check_stmt->execute();
                     $existing = $check_stmt->get_result();
                     if ($existing && $existing->num_rows > 0) {
@@ -67,10 +67,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 }
 
                 $stream_id = $streamManager->getCurrentStreamId();
-                $sql = "INSERT INTO courses (name, code, department_id, stream_id, credits, hours_per_week, level, preferred_room_type, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                $sql = "INSERT INTO courses (course_name, course_code, department_id, stream_id, credits, hours_per_week, level, preferred_room_type, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
                 $stmt = $conn->prepare($sql);
                 if (!$stmt) { $error_count++; continue; }
-                $stmt->bind_param("ssiissi", $name, $code, $department_id, $stream_id, $credits, $hours_per_week, $level, $preferred_room_type, $is_active);
+                $stmt->bind_param("ssiissi", $course_name, $course_code, $department_id, $stream_id, $credits, $hours_per_week, $level, $preferred_room_type, $is_active);
                 if ($stmt->execute()) {
                     $success_count++;
                 } else {
@@ -217,14 +217,14 @@ $dept_result = $conn->query($dept_sql);
                     <div class="row">
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label for="name" class="form-label">Course Name *</label>
-                                <input type="text" class="form-control" id="name" name="name" required>
+                                <label for="course_name" class="form-label">Course Name *</label>
+                                <input type="text" class="form-control" id="course_name" name="course_name" required>
                             </div>
                         </div>
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label for="code" class="form-label">Course Code *</label>
-                                <input type="text" class="form-control" id="code" name="code" required>
+                                <label for="course_code" class="form-label">Course Code *</label>
+                                <input type="text" class="form-control" id="course_code" name="course_code" required>
                             </div>
                         </div>
                     </div>
@@ -424,8 +424,8 @@ function parseCSVCourses(csvText) {
 function validateCoursesData(data) {
     return data.map(row => {
         const validated = {
-            name: row.name || row.Name || '',
-            code: row.code || row.Code || '',
+            course_name: row.course_name || row.courseName || row.name || row.Name || '',
+            course_code: row.course_code || row.courseCode || row.code || row.Code || '',
             department_id: row.department_id || row.departmentId || row.department_id || '',
             credits: row.credits || row.Credits || '3',
             hours_per_week: row.hours_per_week || row.hoursPerWeek || row.hours_per_week || '3',
@@ -435,8 +435,8 @@ function validateCoursesData(data) {
         };
         validated.valid = true;
         validated.errors = [];
-        if (!validated.name.trim()) { validated.valid = false; validated.errors.push('Name required'); }
-        if (!validated.code.trim()) { validated.valid = false; validated.errors.push('Code required'); }
+        if (!validated.course_name.trim()) { validated.valid = false; validated.errors.push('Course name required'); }
+        if (!validated.course_code.trim()) { validated.valid = false; validated.errors.push('Course code required'); }
         if (!validated.department_id.toString().trim()) { validated.valid = false; validated.errors.push('Department ID required'); }
 
         // Check for duplicate code
@@ -474,8 +474,8 @@ function showPreviewCourses() {
 
         tr.innerHTML = `
             <td>${idx+1}</td>
-            <td>${row.name}</td>
-            <td>${row.code}</td>
+            <td>${row.course_name}</td>
+            <td>${row.course_code}</td>
             <td>${row.department_id}</td>
             <td>${row.credits}</td>
             <td>${row.hours_per_week}</td>

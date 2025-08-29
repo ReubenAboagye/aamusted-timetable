@@ -30,7 +30,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $time_slots[] = $slot;
             }
             
-            $days_sql = "SELECT id, name FROM working_days WHERE is_active = 1 ORDER BY id";
+            $days_sql = "SELECT id, name FROM days WHERE is_active = 1 ORDER BY id";
             $days_result = $conn->query($days_sql);
             $days = [];
             while ($day = $days_result->fetch_assoc()) {
@@ -62,10 +62,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $check_stmt->close();
                 
                 if (!$occupied) {
-                    // Insert timetable entry
-                    $insert_sql = "INSERT INTO timetable (class_course_id, day_id, time_slot_id, room_id) VALUES (?, ?, ?, ?)";
+                                    // Get a default lecturer_course_id for this course
+                $lecturer_course_sql = "SELECT lc.id FROM lecturer_courses lc WHERE lc.course_id = ? LIMIT 1";
+                $lecturer_course_stmt = $conn->prepare($lecturer_course_sql);
+                $lecturer_course_stmt->bind_param("i", $assignment['course_id']);
+                $lecturer_course_stmt->execute();
+                $lecturer_course_result = $lecturer_course_stmt->get_result();
+                $lecturer_course = $lecturer_course_result->fetch_assoc();
+                $lecturer_course_stmt->close();
+                
+                if ($lecturer_course) {
+                    // Insert timetable entry with lecturer_course_id
+                    $insert_sql = "INSERT INTO timetable (class_course_id, lecturer_course_id, day_id, time_slot_id, room_id) VALUES (?, ?, ?, ?, ?)";
                     $insert_stmt = $conn->prepare($insert_sql);
-                    $insert_stmt->bind_param("iiii", $assignment['id'], $day['id'], $time_slot['id'], $room['id']);
+                    $insert_stmt->bind_param("iiiii", $assignment['id'], $lecturer_course['id'], $day['id'], $time_slot['id'], $room['id']);
+                } else {
+                    // Skip if no lecturer is assigned to this course
+                    $error_count++;
+                    continue;
+                }
                     
                     if ($insert_stmt->execute()) {
                         $success_count++;
