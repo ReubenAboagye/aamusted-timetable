@@ -20,63 +20,49 @@ $streams_result = $conn->query($streams_sql);
 // Handle form submission for adding new class
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     if ($_POST['action'] === 'add') {
-        $department_id = $conn->real_escape_string($_POST['department_id']);
-        $level_id = $conn->real_escape_string($_POST['level_id']);
-        $stream_id = $conn->real_escape_string($_POST['stream_id']);
-        $total_capacity = $conn->real_escape_string($_POST['total_capacity']);
-        $current_enrollment = $conn->real_escape_string($_POST['current_enrollment']);
-        $max_daily_courses = $conn->real_escape_string($_POST['max_daily_courses']);
-        $max_weekly_hours = $conn->real_escape_string($_POST['max_weekly_hours']);
-        $preferred_start_time = $conn->real_escape_string($_POST['preferred_start_time']);
-        $preferred_end_time = $conn->real_escape_string($_POST['preferred_end_time']);
-        $is_active = isset($_POST['is_active']) ? 1 : 0;
-        
-        // Get department short name and level name
-        if ($dept_short_exists) {
-            $dept_query = "SELECT short_name, name FROM departments WHERE id = ?";
-        } else {
-            $dept_query = "SELECT name FROM departments WHERE id = ?";
-        }
-        $dept_stmt = $conn->prepare($dept_query);
-        $dept_stmt->bind_param("i", $department_id);
-        $dept_stmt->execute();
-        $dept_result = $dept_stmt->get_result();
-        $department = $dept_result->fetch_assoc();
-        $dept_stmt->close();
-        
-        $level_query = "SELECT name FROM levels WHERE id = ?";
-        $level_stmt = $conn->prepare($level_query);
-        $level_stmt->bind_param("i", $level_id);
-        $level_stmt->execute();
-        $level_result = $level_stmt->get_result();
-        $level = $level_result->fetch_assoc();
-        $level_stmt->close();
-        
-        if ($department && $level) {
-            // Use short_name when available, otherwise derive from department name
-            $dept_short = ($department['short_name'] ?? '') ?: substr($department['name'], 0, 3);
-            $level_name = $level['name'];
-            
-            // Calculate number of classes needed (max 100 students per class)
-            $num_classes = ceil($total_capacity / 100);
-            $students_per_class = ceil($total_capacity / $num_classes);
-            
+        // Current schema: classes has program_id and level_id
+        $program_id = $conn->real_escape_string($_POST['program_code'] ?? '');
+        $level_id = $conn->real_escape_string($_POST['level_id'] ?? '');
+        $total_capacity = intval($_POST['total_capacity'] ?? 0);
+        $stream_id = isset($_POST['stream_id']) ? $conn->real_escape_string($_POST['stream_id']) : 1;
+        $is_active = 1;
+
+        // Fetch program and level
+        $prog_stmt = $conn->prepare("SELECT id, name, code FROM programs WHERE id = ?");
+        $prog_stmt->bind_param("i", $program_id);
+        $prog_stmt->execute();
+        $prog_res = $prog_stmt->get_result();
+        $program = $prog_res->fetch_assoc();
+        $prog_stmt->close();
+
+        $lvl_stmt = $conn->prepare("SELECT id, name FROM levels WHERE id = ?");
+        $lvl_stmt->bind_param("i", $level_id);
+        $lvl_stmt->execute();
+        $lvl_res = $lvl_stmt->get_result();
+        $level = $lvl_res->fetch_assoc();
+        $lvl_stmt->close();
+
+        if ($program && $level) {
+            $num_classes = max(1, ceil($total_capacity / 100));
             $success_count = 0;
             $error_count = 0;
-            
-            // Generate multiple classes with alphabetic naming
+
+            // Extract level numeric part for code (e.g., 'Level 100' -> '100')
+            preg_match('/(\d+)/', $level['name'], $m);
+            $level_num = $m[1] ?? '1';
+            $year_suffix = date('Y');
+
             for ($i = 0; $i < $num_classes; $i++) {
-                $class_letter = chr(65 + $i); // A, B, C, D, E...
-                $class_name = $dept_short . " " . $level_name . $class_letter;
-                
-                // Calculate capacity for this specific class
-                $remaining_students = $total_capacity - ($i * $students_per_class);
-                $class_capacity = min($students_per_class, $remaining_students);
-                
-                $sql = "INSERT INTO classes (name, department_id, level, stream_id, capacity, current_enrollment, max_daily_courses, max_weekly_hours, preferred_start_time, preferred_end_time, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                $letter = chr(65 + $i);
+                $class_name = $program['name'] . ' ' . $level['name'] . ($num_classes > 1 ? $letter : '');
+                $class_code = ($program['code'] ?? 'PRG') . '-Y' . $level_num . '-' . $year_suffix . ($num_classes > 1 ? $letter : '');
+                $academic_year = date('Y') . '/' . (date('Y') + 1);
+                $semester = 'first';
+
+                $sql = "INSERT INTO classes (program_id, level_id, name, code, academic_year, semester, stream_id, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
                 $stmt = $conn->prepare($sql);
-                $stmt->bind_param("sisiiiiissi", $class_name, $department_id, $level_name, $stream_id, $class_capacity, $current_enrollment, $max_daily_courses, $max_weekly_hours, $preferred_start_time, $preferred_end_time, $is_active);
-                
+                $stmt->bind_param("iissssii", $program_id, $level_id, $class_name, $class_code, $academic_year, $semester, $stream_id, $is_active);
+
                 if ($stmt->execute()) {
                     $success_count++;
                 } else {
@@ -84,7 +70,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 }
                 $stmt->close();
             }
-            
+
             if ($success_count > 0) {
                 $success_message = "Successfully created $success_count classes!";
                 if ($error_count > 0) {
@@ -94,7 +80,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $error_message = "Failed to create any classes. Please check your input.";
             }
         } else {
-            $error_message = "Invalid department or level selected.";
+            $error_message = "Invalid program or level selected.";
         }
     } elseif ($_POST['action'] === 'delete' && isset($_POST['id'])) {
         $id = $conn->real_escape_string($_POST['id']);
@@ -238,7 +224,6 @@ $level_result = $conn->query($level_sql);
                                 <td><span class="badge bg-warning"><?php echo htmlspecialchars($row['level'] ?? ($row['level_name'] ?? 'N/A')); ?></span></td>
                                 <td>
                                     <span class="badge bg-info"><?php echo htmlspecialchars($row['program_name'] ?? 'N/A'); ?></span>
-                                    <br><small class="text-muted"><?php echo htmlspecialchars($row['program_code'] ?? ''); ?></small>
                                 </td>
                                 <td>
                                     <button class="btn btn-sm btn-outline-primary me-1" onclick="editClass(<?php echo $row['id']; ?>)">
