@@ -10,13 +10,14 @@ include 'connect.php';
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     if ($_POST['action'] === 'add') {
         $name = $conn->real_escape_string($_POST['name']);
+        $email = $conn->real_escape_string($_POST['email']);
+        $phone = $conn->real_escape_string($_POST['phone'] ?? '');
         $department_id = (int)$_POST['department_id'];
         $is_active = isset($_POST['is_active']) ? 1 : 0;
 
-        $stream_id = $streamManager->getCurrentStreamId();
-        $sql = "INSERT INTO lecturers (name, department_id, stream_id, is_active) VALUES (?, ?, ?, ?)";
+        $sql = "INSERT INTO lecturers (name, email, phone, department_id, is_active) VALUES (?, ?, ?, ?, ?)";
         $stmt = $conn->prepare($sql);
-        $stmt->bind_param("siii", $name, $department_id, $stream_id, $is_active);
+        $stmt->bind_param("sssii", $name, $email, $phone, $department_id, $is_active);
 
         if ($stmt->execute()) {
             $success_message = "Lecturer added successfully!";
@@ -28,12 +29,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     } elseif ($_POST['action'] === 'edit' && isset($_POST['id'])) {
         $id = (int)$_POST['id'];
         $name = $conn->real_escape_string($_POST['name']);
+        $email = $conn->real_escape_string($_POST['email']);
+        $phone = $conn->real_escape_string($_POST['phone'] ?? '');
         $department_id = (int)$_POST['department_id'];
         $is_active = isset($_POST['is_active']) ? 1 : 0;
 
-        $sql = "UPDATE lecturers SET name = ?, department_id = ?, is_active = ? WHERE id = ?";
+        $sql = "UPDATE lecturers SET name = ?, email = ?, phone = ?, department_id = ?, is_active = ? WHERE id = ?";
         $stmt = $conn->prepare($sql);
-        $stmt->bind_param("siii", $name, $department_id, $is_active, $id);
+        $stmt->bind_param("sssiii", $name, $email, $phone, $department_id, $is_active, $id);
 
         if ($stmt->execute()) {
             $success_message = "Lecturer updated successfully!";
@@ -67,23 +70,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $ignored_count = 0;
             $error_count = 0;
 
-            // Prepare a check statement to detect existing (name + department_id)
-            $check_sql = "SELECT id FROM lecturers WHERE name = ? AND department_id = ?";
+            // Prepare a check statement to detect existing (email)
+            $check_sql = "SELECT id FROM lecturers WHERE email = ?";
             $check_stmt = $conn->prepare($check_sql);
 
             foreach ($import_data as $row) {
                 $name = isset($row['name']) ? $conn->real_escape_string($row['name']) : '';
+                $email = isset($row['email']) ? $conn->real_escape_string($row['email']) : '';
+                $phone = isset($row['phone']) ? $conn->real_escape_string($row['phone']) : '';
                 $department_id = isset($row['department_id']) ? (int)$row['department_id'] : 0;
                 $is_active = isset($row['is_active']) ? (int)$row['is_active'] : 1;
 
-                if ($name === '' || $department_id === 0) {
+                if ($name === '' || $email === '' || $department_id === 0) {
                     $error_count++;
                     continue;
                 }
 
-                // Skip if lecturer with same name and department exists
+                // Skip if lecturer with same email exists
                 if ($check_stmt) {
-                    $check_stmt->bind_param("si", $name, $department_id);
+                    $check_stmt->bind_param("s", $email);
                     $check_stmt->execute();
                     $existing = $check_stmt->get_result();
                     if ($existing && $existing->num_rows > 0) {
@@ -92,11 +97,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     }
                 }
 
-                $stream_id = $streamManager->getCurrentStreamId();
-                $sql = "INSERT INTO lecturers (name, department_id, stream_id, is_active) VALUES (?, ?, ?, ?)";
+                $sql = "INSERT INTO lecturers (name, email, phone, department_id, is_active) VALUES (?, ?, ?, ?, ?)";
                 $stmt = $conn->prepare($sql);
                 if (!$stmt) { $error_count++; continue; }
-                $stmt->bind_param("siii", $name, $department_id, $stream_id, $is_active);
+                $stmt->bind_param("sssii", $name, $email, $phone, $department_id, $is_active);
                 if ($stmt->execute()) {
                     $success_count++;
                 } else {
@@ -119,54 +123,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 }
             }
         }
-
-    // Single add
-    } elseif ($_POST['action'] === 'add') {
-        $name = $conn->real_escape_string($_POST['name']);
-        $department_id = (int)$_POST['department_id'];
-        $is_active = isset($_POST['is_active']) ? 1 : 0;
-
-        $sql = "INSERT INTO lecturers (name, department_id, is_active) VALUES (?, ?, ?)";
-        $stmt = $conn->prepare($sql);
-        $stmt->bind_param("sii", $name, $department_id, $is_active);
-
-        if ($stmt->execute()) {
-            $success_message = "Lecturer added successfully!";
-        } else {
-            $error_message = "Error adding lecturer: " . $conn->error;
-        }
-        $stmt->close();
-
-    // Edit
-    } elseif ($_POST['action'] === 'edit' && isset($_POST['id'])) {
-        $id = (int)$_POST['id'];
-        $name = $conn->real_escape_string($_POST['name']);
-        $department_id = (int)$_POST['department_id'];
-        $is_active = isset($_POST['is_active']) ? 1 : 0;
-
-        $sql = "UPDATE lecturers SET name = ?, department_id = ?, is_active = ? WHERE id = ?";
-        $stmt = $conn->prepare($sql);
-        $stmt->bind_param("siii", $name, $department_id, $is_active, $id);
-
-        if ($stmt->execute()) {
-            $success_message = "Lecturer updated successfully!";
-        } else {
-            $error_message = "Error updating lecturer: " . $conn->error;
-        }
-        $stmt->close();
-
-    // Delete (soft delete: set is_active = 0)
-    } elseif ($_POST['action'] === 'delete' && isset($_POST['id'])) {
-        $id = (int)$_POST['id'];
-        $sql = "UPDATE lecturers SET is_active = 0 WHERE id = ?";
-        $stmt = $conn->prepare($sql);
-        $stmt->bind_param("i", $id);
-        if ($stmt->execute()) {
-            $success_message = "Lecturer deleted.";
-        } else {
-            $error_message = "Error deleting lecturer: " . $conn->error;
-        }
-        $stmt->close();
     }
 }
 
@@ -279,6 +235,15 @@ $dept_result = $conn->query($dept_sql);
                         <input type="text" class="form-control" id="name" name="name" required>
                     </div>
                     
+                    <div class="mb-3">
+                        <label for="email" class="form-label">Email (Optional)</label>
+                        <input type="email" class="form-control" id="email" name="email">
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="phone" class="form-label">Phone (Optional)</label>
+                        <input type="tel" class="form-control" id="phone" name="phone">
+                    </div>
                     
                     <div class="mb-3">
                         <label for="department_id" class="form-label">Department *</label>
@@ -328,6 +293,15 @@ $dept_result = $conn->query($dept_sql);
                         <input type="text" class="form-control" id="edit_name" name="name" required>
                     </div>
                     
+                    <div class="mb-3">
+                        <label for="edit_email" class="form-label">Email (Optional)</label>
+                        <input type="email" class="form-control" id="edit_email" name="email">
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="edit_phone" class="form-label">Phone (Optional)</label>
+                        <input type="tel" class="form-control" id="edit_phone" name="phone">
+                    </div>
                     
                     <div class="mb-3">
                         <label for="edit_department_id" class="form-label">Department *</label>
@@ -403,7 +377,7 @@ include 'includes/footer.php';
                     <div class="upload-area" id="uploadArea" style="border: 2px dashed #ccc; border-radius: 8px; padding: 40px; text-align: center; background: #f8f9fa; cursor: pointer;">
                         <i class="fas fa-cloud-upload-alt fa-2x text-muted mb-3"></i>
                         <p class="mb-2">Drop CSV file here or <strong>click to browse</strong></p>
-                        <small class="text-muted">Supported format: CSV (headers: name,department_id,is_active)</small>
+                        <small class="text-muted">Supported format: CSV (headers: name,email,phone,department_id,is_active)</small>
                     </div>
                     <input type="file" class="form-control d-none" id="csvFile" accept=",.csv">
                 </div>
@@ -416,6 +390,8 @@ include 'includes/footer.php';
                                 <tr>
                                     <th>#</th>
                                     <th>Name</th>
+                                    <th>Email</th>
+                                    <th>Phone</th>
                                     <th>Department ID</th>
                                     <th>Status</th>
                                     <th>Validation</th>
@@ -475,12 +451,15 @@ function validateLecturersData(data) {
     return data.map(row => {
         const validated = {
             name: row.name || row.Name || '',
+            email: row.email || row.Email || '',
+            phone: row.phone || row.Phone || '',
             department_id: row.department_id || row.departmentId || row.department_id || '',
             is_active: (row.is_active || row.isActive || '1') === '1' ? '1' : '0'
         };
         validated.valid = true;
         validated.errors = [];
         if (!validated.name.trim()) { validated.valid = false; validated.errors.push('Name required'); }
+        if (!validated.email.trim() && !validated.phone.trim()) { validated.valid = false; validated.errors.push('Email or Phone required'); }
         if (!validated.department_id.toString().trim()) { validated.valid = false; validated.errors.push('Department ID required'); }
 
         // Check for duplicate name+department
@@ -519,6 +498,8 @@ function showPreviewLecturers() {
         tr.innerHTML = `
             <td>${idx+1}</td>
             <td>${row.name}</td>
+            <td>${row.email}</td>
+            <td>${row.phone}</td>
             <td>${row.department_id}</td>
             <td><span class="badge ${row.is_active === '1' ? 'bg-success' : 'bg-secondary'}">${row.is_active === '1' ? 'Active' : 'Inactive'}</span></td>
             <td>${validationHtml}</td>

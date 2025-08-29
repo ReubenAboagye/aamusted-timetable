@@ -83,6 +83,21 @@
       </div>
     </div>
 
+    <!-- System Administration Section -->
+    <div class="nav-section">
+      <div class="dropdown-header" data-bs-target="#systemAdminCollapse" aria-expanded="false">
+        <i class="fas fa-cogs me-2"></i>System Administration
+        <i class="fas fa-chevron-down ms-auto"></i>
+      </div>
+      <div class="collapse" id="systemAdminCollapse">
+        <div class="dropdown-menu-items">
+          <a href="sync_database.php" class="nav-link <?= ($currentPage == 'sync_database.php') ? 'active' : '' ?>">
+            <i class="fas fa-sync-alt me-2"></i>Database Sync
+          </a>
+        </div>
+      </div>
+    </div>
+
   </div>
   
   <!-- Stream Management - Fixed at bottom -->
