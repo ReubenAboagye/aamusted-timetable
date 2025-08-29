@@ -209,25 +209,29 @@ $level_result = $conn->query($level_sql);
                     
                     <div class="alert alert-info">
                         <i class="fas fa-info-circle me-2"></i>
-                        <strong>Auto-Class Generation:</strong> Enter the total capacity and the system will automatically create multiple classes (max 100 students per class) with proper naming convention.
+                        <strong>Auto-Class Generation:</strong> Select the program, level, and enter the number of students. The system will automatically create multiple classes (max 100 students per class) with proper naming convention.
                     </div>
                     
                     <div class="row">
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label for="department_id" class="form-label">Department *</label>
-                                <select class="form-select" id="department_id" name="department_id" required>
-                                    <option value="">Select Department</option>
-                                    <?php if ($dept_result && $dept_result->num_rows > 0): ?>
-                                        <?php while ($dept = $dept_result->fetch_assoc()): ?>
-                                            <option value="<?php echo $dept['id']; ?>" data-short="<?php echo htmlspecialchars($dept['short_name'] ?? ''); ?>">
-                                                <?php echo htmlspecialchars($dept['name']); ?>
-                                                <?php if ($dept['short_name']): ?>
-                                                    (<?php echo htmlspecialchars($dept['short_name']); ?>)
-                                                <?php endif; ?>
-                                            </option>
-                                        <?php endwhile; ?>
-                                    <?php endif; ?>
+                                <label for="program_code" class="form-label">Program Code *</label>
+                                <select class="form-select" id="program_code" name="program_code" required>
+                                    <option value="">Select Program</option>
+                                    <?php
+                                    // Fetch programs for dropdown
+                                    $programs_sql = "SELECT id, name, code FROM programs WHERE is_active = 1 ORDER BY name";
+                                    $programs_result = $conn->query($programs_sql);
+                                    if ($programs_result && $programs_result->num_rows > 0):
+                                        while ($program = $programs_result->fetch_assoc()):
+                                    ?>
+                                        <option value="<?php echo $program['id']; ?>" data-code="<?php echo htmlspecialchars($program['code']); ?>">
+                                            <?php echo htmlspecialchars($program['name']); ?> (<?php echo htmlspecialchars($program['code']); ?>)
+                                        </option>
+                                    <?php 
+                                        endwhile;
+                                    endif;
+                                    ?>
                                 </select>
                             </div>
                         </div>
@@ -247,71 +251,12 @@ $level_result = $conn->query($level_sql);
                     </div>
                     
                     <div class="row">
-                        <div class="col-md-8">
+                        <div class="col-md-12">
                             <div class="mb-3">
-                                <label for="stream_id" class="form-label">Stream *</label>
-                                <select class="form-select" id="stream_id" name="stream_id" required>
-                                    <option value="">Select Stream</option>
-                                    <?php if ($streams_result && $streams_result->num_rows > 0): ?>
-                                        <?php while ($stream = $streams_result->fetch_assoc()): ?>
-                                            <option value="<?php echo $stream['id']; ?>"><?php echo htmlspecialchars($stream['name']); ?> (<?php echo htmlspecialchars($stream['code']); ?>)</option>
-                                        <?php endwhile; ?>
-                                    <?php endif; ?>
-                                </select>
-                                <small class="form-text text-muted">Choose the time stream for these classes</small>
-                            </div>
-                        </div>
-                        <div class="col-md-4">
-                            <div class="mb-3">
-                                <label for="total_capacity" class="form-label">Total Capacity *</label>
+                                <label for="total_capacity" class="form-label">Number of Students *</label>
                                 <input type="number" class="form-control" id="total_capacity" name="total_capacity" min="1" max="1000" value="100" required>
-                                <small class="text-muted">Max 100 per class</small>
+                                <small class="text-muted">The system will automatically create multiple classes (max 100 students per class)</small>
                             </div>
-                        </div>
-                    </div>
-                    
-                    <div class="row">
-                        <div class="col-md-4">
-                            <div class="mb-3">
-                                <label for="current_enrollment" class="form-label">Current Enrollment</label>
-                                <input type="number" class="form-control" id="current_enrollment" name="current_enrollment" min="0" max="1000" value="0">
-                            </div>
-                        </div>
-                        <div class="col-md-4">
-                            <div class="mb-3">
-                                <label for="max_daily_courses" class="form-label">Max Daily Courses</label>
-                                <input type="number" class="form-control" id="max_daily_courses" name="max_daily_courses" min="1" max="10" value="3">
-                            </div>
-                        </div>
-                        <div class="col-md-4">
-                            <div class="mb-3">
-                                <label for="max_weekly_hours" class="form-label">Max Weekly Hours</label>
-                                <input type="number" class="form-control" id="max_weekly_hours" name="max_weekly_hours" min="1" max="40" value="25">
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label for="preferred_start_time" class="form-label">Preferred Start Time</label>
-                                <input type="time" class="form-control" id="preferred_start_time" name="preferred_start_time" value="08:00">
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label for="preferred_end_time" class="form-label">Preferred End Time</label>
-                                <input type="time" class="form-control" id="preferred_end_time" name="preferred_end_time" value="17:00">
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="mb-3">
-                        <div class="form-check">
-                            <input class="form-check-input" type="checkbox" id="is_active" name="is_active" checked>
-                            <label class="form-check-label" for="is_active">
-                                Classes Active
-                            </label>
                         </div>
                     </div>
                     
@@ -341,34 +286,34 @@ function editClass(id) {
 
 // Preview class names as user types
 document.getElementById('total_capacity').addEventListener('input', updateClassPreview);
-document.getElementById('department_id').addEventListener('change', updateClassPreview);
+document.getElementById('program_code').addEventListener('change', updateClassPreview);
 document.getElementById('level_id').addEventListener('change', updateClassPreview);
-document.getElementById('stream_id').addEventListener('change', updateClassPreview);
 
 
 function updateClassPreview() {
     const capacity = parseInt(document.getElementById('total_capacity').value) || 0;
-    const deptSelect = document.getElementById('department_id');
+    const programSelect = document.getElementById('program_code');
     const levelSelect = document.getElementById('level_id');
-    const streamSelect = document.getElementById('stream_id');
     const previewDiv = document.getElementById('classPreview');
     const previewText = document.getElementById('previewText');
     
-    if (capacity > 0 && deptSelect.value && levelSelect.value && streamSelect.value) {
-        const selectedOption = deptSelect.options[deptSelect.selectedIndex];
-        const deptShort = selectedOption.dataset.short || selectedOption.text.substring(0, 3);
-        const levelName = levelSelect.options[levelSelect.selectedIndex].text;
-        const streamName = streamSelect.options[streamSelect.selectedIndex].text;
+    if (capacity > 0 && programSelect.value && levelSelect.value) {
+        const selectedOption = programSelect.options[programSelect.selectedIndex];
+        const programCode = selectedOption.dataset.code || selectedOption.text.match(/\(([^)]+)\)/)?.[1] || 'PROG';
+        const levelText = levelSelect.options[levelSelect.selectedIndex].text;
+        
+        // Extract just the number from level text (e.g., "Level 100" -> "100")
+        const levelNumber = levelText.match(/\d+/)?.[0] || levelText.replace(/\D/g, '');
         
         const numClasses = Math.ceil(capacity / 100);
         const classes = [];
         
         for (let i = 0; i < numClasses; i++) {
             const letter = String.fromCharCode(65 + i);
-            classes.push(deptShort + ' ' + levelName + letter);
+            classes.push(programCode + levelNumber + letter);
         }
         
-        previewText.textContent = classes.join(', ') + ' (' + streamName + ')';
+        previewText.textContent = classes.join(', ');
         previewDiv.style.display = 'block';
     } else {
         previewDiv.style.display = 'none';
