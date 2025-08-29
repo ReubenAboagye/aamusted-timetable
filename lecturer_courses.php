@@ -56,11 +56,14 @@ $courses_query = "SELECT c.id, c.name, c.code, d.name AS department_name FROM co
 if ($selected_department > 0) { $courses_query .= " AND c.department_id = " . $selected_department; }
 $courses_query .= " ORDER BY c.name";
 $courses = $conn->query($courses_query);
-$mappings = $conn->query("SELECT lc.id, l.name AS lecturer_name, c.name AS course_name, c.code
-                          FROM lecturer_courses lc
-                          JOIN lecturers l ON l.id = lc.lecturer_id
-                          JOIN courses c ON c.id = lc.course_id
-                          ORDER BY l.name, c.name");
+$mappings = $conn->query("SELECT l.id as lecturer_id, l.name AS lecturer_name, 
+                          GROUP_CONCAT(c.code ORDER BY c.code SEPARATOR ', ') AS course_codes
+                          FROM lecturers l
+                          LEFT JOIN lecturer_courses lc ON l.id = lc.lecturer_id
+                          LEFT JOIN courses c ON c.id = lc.course_id
+                          WHERE l.is_active = 1
+                          GROUP BY l.id, l.name
+                          ORDER BY l.name");
 ?>
 
 <div class="main-content" id="mainContent">
@@ -83,45 +86,6 @@ $mappings = $conn->query("SELECT lc.id, l.name AS lecturer_name, c.name AS cours
             </div>
         <?php endif; ?>
 
-        <div class="card m-3">
-            <div class="card-body">
-                <form method="GET" class="row g-3">
-                    <div class="col-md-4">
-                        <label class="form-label">Department (filter courses)</label>
-                        <select name="department_id" class="form-select" onchange="this.form.submit()">
-                            <option value="">All</option>
-                            <?php if ($departments) { while ($d = $departments->fetch_assoc()) { ?>
-                                <option value="<?php echo $d['id']; ?>" <?php echo ($selected_department == $d['id']) ? 'selected' : ''; ?>><?php echo htmlspecialchars($d['name']); ?></option>
-                            <?php } } ?>
-                        </select>
-                    </div>
-                </form>
-                <form method="POST" class="row g-3 mt-1">
-                    <input type="hidden" name="action" value="bulk_add" />
-                    <div class="col-md-4">
-                        <label class="form-label">Lecturer</label>
-                        <select name="lecturer_id" class="form-select" required>
-                            <option value="">Choose lecturer...</option>
-                            <?php if ($lecturers) { while ($l = $lecturers->fetch_assoc()) { ?>
-                                <option value="<?php echo $l['id']; ?>"><?php echo htmlspecialchars($l['name']); ?></option>
-                            <?php } } ?>
-                        </select>
-                    </div>
-                    <div class="col-md-8">
-                        <label class="form-label">Courses (multi-select)</label>
-                        <select name="course_ids[]" class="form-select" multiple size="8" required>
-                            <?php if ($courses) { while ($c = $courses->fetch_assoc()) { ?>
-                                <option value="<?php echo $c['id']; ?>"><?php echo htmlspecialchars($c['name'] . ' (' . $c['code'] . ') - ' . $c['department_name']); ?></option>
-                            <?php } } ?>
-                        </select>
-                    </div>
-                    <div class="col-12 d-flex justify-content-end">
-                        <button type="submit" class="btn btn-primary"><i class="fas fa-plus me-2"></i>Add Mappings</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-
         <div class="table-responsive m-3">
             <table class="table">
                 <thead>
@@ -136,11 +100,14 @@ $mappings = $conn->query("SELECT lc.id, l.name AS lecturer_name, c.name AS cours
                         <?php while ($m = $mappings->fetch_assoc()): ?>
                             <tr>
                                 <td><?php echo htmlspecialchars($m['lecturer_name']); ?></td>
-                                <td><?php echo htmlspecialchars($m['course_name'] . ' (' . $m['code'] . ')'); ?></td>
+                                <td><?php echo htmlspecialchars($m['course_codes']); ?></td>
                                 <td>
+                                    <button class="btn btn-sm btn-outline-primary me-1" onclick="editMapping(<?php echo $m['lecturer_id']; ?>)">
+                                        <i class="fas fa-edit"></i>
+                                    </button>
                                     <form method="POST" onsubmit="return confirm('Remove this mapping?')" style="display:inline;">
                                         <input type="hidden" name="action" value="delete" />
-                                        <input type="hidden" name="id" value="<?php echo $m['id']; ?>" />
+                                        <input type="hidden" name="id" value="<?php echo $m['lecturer_id']; ?>" />
                                         <button class="btn btn-sm btn-outline-danger"><i class="fas fa-trash"></i></button>
                                     </form>
                                 </td>
@@ -159,6 +126,165 @@ $mappings = $conn->query("SELECT lc.id, l.name AS lecturer_name, c.name AS cours
         </div>
     </div>
 </div>
+
+<!-- Edit Course Assignment Modal -->
+<div class="modal fade" id="editModal" tabindex="-1" aria-labelledby="editModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="editModalLabel">Edit Course Assignments</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row">
+                    <!-- Available Courses (Left Side) -->
+                    <div class="col-md-6">
+                        <h6>Available Courses</h6>
+                        <div class="mb-3">
+                            <input type="text" class="form-control" id="courseSearch" placeholder="Search courses...">
+                        </div>
+                        <div class="border rounded p-2" style="height: 300px; overflow-y: auto;">
+                            <div id="availableCoursesList">
+                                <!-- Available courses will be populated here -->
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Assigned Courses (Right Side) -->
+                    <div class="col-md-6">
+                        <h6>Assigned Courses</h6>
+                        <div class="border rounded p-2" style="height: 300px; overflow-y: auto;">
+                            <div id="assignedCoursesList">
+                                <!-- Assigned courses will be populated here -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="saveAssignments()">Save Changes</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let currentLecturerId = null;
+let availableCourses = [];
+let assignedCourses = [];
+
+function editMapping(lecturerId) {
+    currentLecturerId = lecturerId;
+    
+    // Dummy data for testing - remove this when backend is ready
+    availableCourses = [
+        { id: '1', code: 'CS101', name: 'Introduction to Computer Science' },
+        { id: '2', code: 'CS102', name: 'Programming Fundamentals' },
+        { id: '3', code: 'CS201', name: 'Data Structures' },
+        { id: '4', code: 'CS202', name: 'Algorithms' },
+        { id: '5', code: 'CS301', name: 'Database Systems' },
+        { id: '6', code: 'CS302', name: 'Software Engineering' },
+        { id: '7', code: 'MATH101', name: 'Calculus I' },
+        { id: '8', code: 'MATH102', name: 'Calculus II' },
+        { id: '9', code: 'PHYS101', name: 'Physics I' },
+        { id: '10', code: 'PHYS102', name: 'Physics II' }
+    ];
+    
+    assignedCourses = [
+        { id: '1', code: 'CS101', name: 'Introduction to Computer Science' },
+        { id: '3', code: 'CS201', name: 'Data Structures' }
+    ];
+    
+    populateCourseLists();
+    
+    // Use Bootstrap 5 modal methods instead of jQuery
+    const modal = new bootstrap.Modal(document.getElementById('editModal'));
+    modal.show();
+}
+
+function populateCourseLists() {
+    // Populate available courses
+    const availableList = document.getElementById('availableCoursesList');
+    availableList.innerHTML = '';
+    
+    availableCourses.forEach(course => {
+        const courseDiv = document.createElement('div');
+        courseDiv.className = 'course-item p-2 border-bottom';
+        courseDiv.innerHTML = `
+            <div class="d-flex justify-content-between align-items-center">
+                <span>${course.code} - ${course.name}</span>
+                <button class="btn btn-sm btn-outline-primary" onclick="assignCourse('${course.id}')">
+                    <i class="fas fa-plus"></i>
+                </button>
+            </div>
+        `;
+        availableList.appendChild(courseDiv);
+    });
+    
+    // Populate assigned courses
+    const assignedList = document.getElementById('assignedCoursesList');
+    assignedList.innerHTML = '';
+    
+    assignedCourses.forEach(course => {
+        const courseDiv = document.createElement('div');
+        courseDiv.className = 'course-item p-2 border-bottom';
+        courseDiv.innerHTML = `
+            <div class="d-flex justify-content-between align-items-center">
+                <span>${course.code} - ${course.name}</span>
+                <button class="btn btn-sm btn-outline-danger" onclick="unassignCourse('${course.id}')">
+                    <i class="fas fa-minus"></i>
+                </button>
+            </div>
+        `;
+        assignedList.appendChild(courseDiv);
+    });
+}
+
+function assignCourse(courseId) {
+    const course = availableCourses.find(c => c.id === courseId);
+    if (course) {
+        assignedCourses.push(course);
+        availableCourses = availableCourses.filter(c => c.id !== courseId);
+        populateCourseLists();
+    }
+}
+
+function unassignCourse(courseId) {
+    const course = assignedCourses.find(c => c.id === courseId);
+    if (course) {
+        availableCourses.push(course);
+        assignedCourses = assignedCourses.filter(c => c.id !== courseId);
+        populateCourseLists();
+    }
+}
+
+function saveAssignments() {
+    const courseIds = assignedCourses.map(c => c.id);
+    
+    // Dummy save for testing - remove this when backend is ready
+    alert(`Changes saved! Assigned courses: ${assignedCourses.map(c => c.code).join(', ')}`);
+    
+    // Use Bootstrap 5 modal methods instead of jQuery
+    const modal = bootstrap.Modal.getInstance(document.getElementById('editModal'));
+    modal.hide();
+}
+
+// Course search functionality
+document.getElementById('courseSearch').addEventListener('input', function(e) {
+    const searchTerm = e.target.value.toLowerCase();
+    const courseItems = document.querySelectorAll('#availableCoursesList .course-item');
+    
+    courseItems.forEach(item => {
+        const courseText = item.textContent.toLowerCase();
+        if (courseText.includes(searchTerm)) {
+            item.style.display = 'block';
+        } else {
+            item.style.display = 'none';
+        }
+    });
+});
+</script>
 
 <?php include 'includes/footer.php'; ?>
 

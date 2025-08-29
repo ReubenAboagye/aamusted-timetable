@@ -1,5 +1,5 @@
 <?php
-$pageTitle = 'Map Courses to Classes (per Session)';
+$pageTitle = 'Map Courses to Classes ';
 include 'includes/header.php';
 include 'includes/sidebar.php';
 include 'connect.php';
@@ -121,7 +121,7 @@ if ($selected_session > 0) {
 <div class="main-content" id="mainContent">
     <div class="table-container">
         <div class="table-header d-flex justify-content-between align-items-center">
-            <h4><i class="fas fa-sitemap me-2"></i>Map Courses to Classes (per Session)</h4>
+            <h4><i class="fas fa-sitemap me-2"></i>Map Courses to Classes </h4>
         </div>
 
         <?php if ($success_message): ?>

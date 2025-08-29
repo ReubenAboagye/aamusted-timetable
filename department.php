@@ -164,9 +164,6 @@ $result = $conn->query($sql);
                     <tr>
                         <th>Department Name</th>
                         <th>Code</th>
-                        <th>Short Name</th>
-                        <th>Head of Department</th>
-                        <th>Status</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
@@ -176,15 +173,6 @@ $result = $conn->query($sql);
                             <tr>
                                 <td><strong><?php echo htmlspecialchars($row['name']); ?></strong></td>
                                 <td><span class="badge bg-primary"><?php echo htmlspecialchars($row['code']); ?></span></td>
-                                <td><?php echo htmlspecialchars($row['short_name'] ?? 'N/A'); ?></td>
-                                <td><?php echo htmlspecialchars($row['head_of_department'] ?? 'N/A'); ?></td>
-                                <td>
-                                    <?php if ($row['is_active']): ?>
-                                        <span class="badge bg-success">Active</span>
-                                    <?php else: ?>
-                                        <span class="badge bg-secondary">Inactive</span>
-                                    <?php endif; ?>
-                                </td>
                                 <td>
                                     <button class="btn btn-sm btn-outline-primary me-1" onclick="editDepartment(<?php echo $row['id']; ?>, '<?php echo htmlspecialchars(addslashes($row['name'])); ?>', '<?php echo htmlspecialchars(addslashes($row['code'])); ?>', '<?php echo htmlspecialchars(addslashes($row['short_name'] ?? '')); ?>', '<?php echo htmlspecialchars(addslashes($row['head_of_department'] ?? '')); ?>', <?php echo $row['is_active']; ?>)">
                                         <i class="fas fa-edit"></i>
@@ -201,7 +189,7 @@ $result = $conn->query($sql);
                         <?php endwhile; ?>
                     <?php else: ?>
                         <tr>
-                            <td colspan="6" class="empty-state">
+                            <td colspan="3" class="empty-state">
                                 <i class="fas fa-building"></i>
                                 <p>No departments found. Add your first department to get started!</p>
                             </td>

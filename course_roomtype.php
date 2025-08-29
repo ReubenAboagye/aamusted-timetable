@@ -1,12 +1,12 @@
 <?php
-$pageTitle = 'Course Session Availability';
+$pageTitle = 'Course room type';
 include 'includes/header.php';
 include 'includes/sidebar.php';
 
 // Database connection
 include 'connect.php';
 
-// Handle form submission for adding new course session availability
+// Handle form submission for adding new Course room type
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     if ($_POST['action'] === 'add') {
         $course_id = $conn->real_escape_string($_POST['course_id']);
@@ -29,9 +29,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $stmt->bind_param("ii", $course_id, $session_id);
         
         if ($stmt->execute()) {
-            $success_message = "Course session availability added successfully!";
+            $success_message = "Course room type added successfully!";
         } else {
-            $error_message = "Error adding course session availability: " . $conn->error;
+            $error_message = "Error adding Course room type: " . $conn->error;
         }
         $stmt->close();
         }
@@ -103,15 +103,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $stmt->bind_param("ii", $course_id, $session_id);
         
         if ($stmt->execute()) {
-            $success_message = "Course session availability deleted successfully!";
+            $success_message = "Course room type deleted successfully!";
         } else {
-            $error_message = "Error deleting course session availability: " . $conn->error;
+            $error_message = "Error deleting Course room type: " . $conn->error;
+        }
+        $stmt->close();
+    } elseif ($_POST['action'] === 'edit_room_type' && isset($_POST['edit_course_id']) && isset($_POST['edit_session_id']) && isset($_POST['room_type'])) {
+        $course_id = $conn->real_escape_string($_POST['edit_course_id']);
+        $session_id = $conn->real_escape_string($_POST['edit_session_id']);
+        $room_type = $conn->real_escape_string($_POST['room_type']);
+        
+        // Update the course's preferred room type
+        $sql = "UPDATE courses SET preferred_room_type = ? WHERE id = ?";
+        $stmt = $conn->prepare($sql);
+        $stmt->bind_param("si", $room_type, $course_id);
+        
+        if ($stmt->execute()) {
+            $success_message = "Room type updated successfully!";
+        } else {
+            $error_message = "Error updating room type: " . $conn->error;
         }
         $stmt->close();
     }
 }
 
-// Fetch course session availability with related data - Updated to include all available fields from schema
+// Fetch Course room type with related data - Updated to include all available fields from schema
 $sql = "SELECT csa.course_id, csa.session_id, 
                c.name as course_name, c.code as course_code, c.credits, c.hours_per_week, c.level, c.preferred_room_type,
                CONCAT(s.academic_year, ' - ', s.semester_name) as session_name,
@@ -141,7 +157,7 @@ $sess_result = $conn->query($sess_sql);
 <div class="main-content" id="mainContent">
     <div class="table-container">
         <div class="table-header d-flex justify-content-between align-items-center">
-            <h4><i class="fas fa-book-clock me-2"></i>Course Session Availability</h4>
+            <h4><i class="fas fa-book-clock me-2"></i>Course room type</h4>
             <div>
                 <button class="btn btn-success me-2" data-bs-toggle="modal" data-bs-target="#bulkCourseSessionModal">
                     <i class="fas fa-books me-2"></i>Bulk Add Courses
@@ -167,21 +183,15 @@ $sess_result = $conn->query($sess_sql);
         <?php endif; ?>
 
         <div class="search-container m-3">
-            <input type="text" class="search-input" placeholder="Search course session availability...">
+            <input type="text" class="search-input" placeholder="Search Course room type...">
         </div>
 
         <div class="table-responsive">
             <table class="table" id="courseSessionTable">
                 <thead>
                     <tr>
-                        <th>Course</th>
-                        <th>Code</th>
-                        <th>Department</th>
-                        <th>Level</th>
-                        <th>Credits</th>
-                        <th>Hours/Week</th>
+                        <th>Course Code</th>
                         <th>Room Type</th>
-                        <th>Session</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
@@ -190,56 +200,24 @@ $sess_result = $conn->query($sess_sql);
                         <?php while ($row = $result->fetch_assoc()): ?>
                             <tr>
                                 <td>
-                                    <strong><?php echo htmlspecialchars($row['course_name'] ?? 'N/A'); ?></strong>
-                                </td>
-                                <td>
                                     <code class="text-primary"><?php echo htmlspecialchars($row['course_code'] ?? 'N/A'); ?></code>
-                                </td>
-                                <td>
-                                    <div>
-                                        <span class="badge bg-info"><?php echo htmlspecialchars($row['department_name'] ?? 'N/A'); ?></span>
-                                        <?php if ($row['department_short_name']): ?>
-                                            <br><small class="text-muted"><?php echo htmlspecialchars($row['department_short_name']); ?></small>
-                                    <?php endif; ?>
-                                    </div>
-                                </td>
-                                <td>
-                                    <span class="badge bg-secondary">Level <?php echo htmlspecialchars($row['level'] ?? 'N/A'); ?></span>
-                                </td>
-                                <td>
-                                    <span class="badge bg-warning"><?php echo htmlspecialchars($row['credits'] ?? 'N/A'); ?> credits</span>
-                                </td>
-                                <td>
-                                    <span class="badge bg-success"><?php echo htmlspecialchars($row['hours_per_week'] ?? 'N/A'); ?> hrs/week</span>
                                 </td>
                                 <td>
                                     <span class="badge bg-dark"><?php echo htmlspecialchars(str_replace('_', ' ', ucfirst($row['preferred_room_type'] ?? 'N/A'))); ?></span>
                                 </td>
                                 <td>
-                                    <div>
-                                        <strong><?php echo htmlspecialchars($row['session_name'] ?? 'N/A'); ?></strong>
-                                        <br><small class="text-muted">
-                                            <?php echo htmlspecialchars($row['start_date'] ?? ''); ?> to <?php echo htmlspecialchars($row['end_date'] ?? ''); ?>
-                                        </small>
-                                    </div>
-                                </td>
-                                <td>
-                                    <form method="POST" style="display: inline;" onsubmit="return confirm('Are you sure you want to remove this availability?')">
-                                        <input type="hidden" name="action" value="delete">
-                                        <input type="hidden" name="course_id" value="<?php echo $row['course_id']; ?>">
-                                        <input type="hidden" name="session_id" value="<?php echo $row['session_id']; ?>">
-                                        <button type="submit" class="btn btn-sm btn-outline-danger">
-                                            <i class="fas fa-trash"></i> Remove
-                                        </button>
-                                    </form>
+                                    <button type="button" class="btn btn-sm btn-outline-primary" 
+                                            onclick="openEditModal('<?php echo $row['course_id']; ?>', '<?php echo $row['session_id']; ?>', '<?php echo htmlspecialchars($row['course_code']); ?>', '<?php echo htmlspecialchars($row['preferred_room_type'] ?? ''); ?>')">
+                                        <i class="fas fa-edit"></i> Edit
+                                    </button>
                                 </td>
                             </tr>
                         <?php endwhile; ?>
                     <?php else: ?>
                         <tr>
-                            <td colspan="9" class="empty-state">
+                            <td colspan="3" class="empty-state">
                                 <i class="fas fa-book-clock"></i>
-                                <p>No course session availability found. Add your first availability to get started!</p>
+                                <p>No Course room type found. Add your first availability to get started!</p>
                             </td>
                         </tr>
                     <?php endif; ?>
@@ -249,7 +227,7 @@ $sess_result = $conn->query($sess_sql);
     </div>
 </div>
 
-<!-- Bulk Add Course Session Availability Modal -->
+<!-- Bulk Add Course room type Modal -->
 <div class="modal fade" id="bulkCourseSessionModal" tabindex="-1">
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
@@ -332,7 +310,7 @@ $sess_result = $conn->query($sess_sql);
     </div>
 </div>
 
-<!-- Add Single Course Session Availability Modal -->
+<!-- Add Single Course room type Modal -->
 <div class="modal fade" id="addCourseSessionModal" tabindex="-1">
     <div class="modal-dialog">
         <div class="modal-content">
@@ -386,6 +364,57 @@ $sess_result = $conn->query($sess_sql);
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                     <button type="submit" class="btn btn-primary">Add Course</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Course Room Type Modal -->
+<div class="modal fade" id="editRoomTypeModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Edit Room Type</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST">
+                <div class="modal-body">
+                    <input type="hidden" name="action" value="edit_room_type">
+                    <input type="hidden" name="edit_course_id" id="edit_course_id">
+                    <input type="hidden" name="edit_session_id" id="edit_session_id">
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Course</label>
+                        <div class="form-control-plaintext" id="edit_course_display"></div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Room Type *</label>
+                        <div class="d-flex gap-3">
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="room_type" id="room_type_lecture" value="lecture_hall" required>
+                                <label class="form-check-label" for="room_type_lecture">
+                                    <i class="fas fa-chalkboard-teacher me-2"></i>Lecture Hall
+                                </label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="room_type" id="room_type_lab" value="laboratory" required>
+                                <label class="form-check-label" for="room_type_lab">
+                                    <i class="fas fa-flask me-2"></i>Laboratory
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle me-2"></i>
+                        <strong>Note:</strong> This will update the preferred room type for this course in the selected session.
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Update Room Type</button>
                 </div>
             </form>
         </div>
@@ -465,4 +494,27 @@ document.querySelector('#bulkCourseSessionModal form').addEventListener('submit'
     
     return true;
 });
+
+// Edit room type modal functions
+function openEditModal(courseId, sessionId, courseCode, currentRoomType) {
+    // Set the hidden form values
+    document.getElementById('edit_course_id').value = courseId;
+    document.getElementById('edit_session_id').value = sessionId;
+    document.getElementById('edit_course_display').textContent = courseCode;
+    
+    // Set the current room type selection
+    if (currentRoomType === 'lecture_hall') {
+        document.getElementById('room_type_lecture').checked = true;
+    } else if (currentRoomType === 'laboratory') {
+        document.getElementById('room_type_lab').checked = true;
+    } else {
+        // If no current room type, uncheck both
+        document.getElementById('room_type_lecture').checked = false;
+        document.getElementById('room_type_lab').checked = false;
+    }
+    
+    // Show the modal
+    const editModal = new bootstrap.Modal(document.getElementById('editRoomTypeModal'));
+    editModal.show();
+}
 </script>

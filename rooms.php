@@ -660,9 +660,6 @@ $result = $conn->query($sql);
         <div class="table-header d-flex justify-content-between align-items-center">
             <h4><i class="fas fa-door-open me-2"></i>Rooms Management</h4>
             <div class="d-flex gap-2">
-                <button class="btn btn-warning" id="bulkEditBtn" data-bs-toggle="modal" data-bs-target="#bulkEditModal" disabled>
-                    <i class="fas fa-edit me-2"></i>Bulk Edit (<span id="selectedCount">0</span>)
-                </button>
                 <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#importModal">
                     <i class="fas fa-upload me-2"></i>Import
                 </button>
@@ -694,20 +691,11 @@ $result = $conn->query($sql);
             <table class="table" id="roomsTable">
                 <thead>
                     <tr>
-                        <th>
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" id="selectAllRooms">
-                                <label class="form-check-label" for="selectAllRooms">All</label>
-                            </div>
-                        </th>
+
                         <th>Room Name</th>
                         <th>Type</th>
                         <th>Capacity</th>
                         <th>Building</th>
-                        <th>Stream Availability</th>
-                        <th>Facilities</th>
-                        <th>Accessibility</th>
-                        <th>Status</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
@@ -715,11 +703,6 @@ $result = $conn->query($sql);
                     <?php if ($result && $result->num_rows > 0): ?>
                         <?php while ($row = $result->fetch_assoc()): ?>
                             <tr>
-                                <td>
-                                    <div class="form-check">
-                                        <input class="form-check-input room-checkbox" type="checkbox" value="<?php echo $row['id']; ?>">
-                                    </div>
-                                </td>
                                 <td><strong><?php echo htmlspecialchars($row['name']); ?></strong></td>
                                 <td>
                                     <?php 
@@ -739,43 +722,6 @@ $result = $conn->query($sql);
                                 <td><span class="badge bg-dark"><?php echo htmlspecialchars($row['capacity']); ?> students</span></td>
                                 <td><?php echo htmlspecialchars($row['building']); ?></td>
                                 <td>
-                                    <?php 
-                                    $stream_avail = json_decode($row['stream_availability'], true);
-                                    if ($stream_avail && is_array($stream_avail)) {
-                                        foreach ($stream_avail as $avail) {
-                                            echo '<span class="badge bg-info me-1">' . htmlspecialchars(ucfirst($avail)) . '</span>';
-                                        }
-                                    }
-                                    ?>
-                                </td>
-                                <td>
-                                    <?php 
-                                    $facilities = json_decode($row['facilities'], true);
-                                    if ($facilities && is_array($facilities)) {
-                                        foreach ($facilities as $facility) {
-                                            echo '<span class="badge bg-success me-1">' . htmlspecialchars(ucfirst($facility)) . '</span>';
-                                        }
-                                    }
-                                    ?>
-                                </td>
-                                <td>
-                                    <?php 
-                                    $accessibility = json_decode($row['accessibility_features'], true);
-                                    if ($accessibility && is_array($accessibility)) {
-                                        foreach ($accessibility as $feature) {
-                                            echo '<span class="badge bg-warning me-1">' . htmlspecialchars(ucwords(str_replace('_', ' ', $feature))) . '</span>';
-                                        }
-                                    }
-                                    ?>
-                                </td>
-                                <td>
-                                    <?php if ($row['is_active']): ?>
-                                        <span class="badge bg-success">Available</span>
-                                    <?php else: ?>
-                                        <span class="badge bg-secondary">Unavailable</span>
-                                    <?php endif; ?>
-                                </td>
-                                <td>
                                     <button class="btn btn-sm btn-outline-primary me-1" onclick="editRoom(<?php echo $row['id']; ?>, <?php echo json_encode($row['name']); ?>, <?php echo json_encode($row['building']); ?>, <?php echo json_encode(ucwords(str_replace('_', ' ', $row['room_type']))); ?>, <?php echo (int)$row['capacity']; ?>, <?php echo json_encode($row['stream_availability']); ?>, <?php echo json_encode($row['facilities']); ?>, <?php echo json_encode($row['accessibility_features']); ?>, <?php echo $row['is_active']; ?>)">
                                         <i class="fas fa-edit"></i>
                                     </button>
@@ -791,7 +737,7 @@ $result = $conn->query($sql);
                         <?php endwhile; ?>
                     <?php else: ?>
                         <tr>
-                            <td colspan="9" class="empty-state">
+                            <td colspan="4" class="empty-state">
                                 <i class="fas fa-door-open"></i>
                                 <p>No rooms found. Add your first room to get started!</p>
                             </td>

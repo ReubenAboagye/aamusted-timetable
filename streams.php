@@ -13,17 +13,17 @@ $result = $conn->query($sql);
 // Handle form submission for adding new stream
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     if ($_POST['action'] === 'add') {
-                 $name = $conn->real_escape_string($_POST['name']);
-         $period_start = $conn->real_escape_string($_POST['period_start']);
-         $period_end = $conn->real_escape_string($_POST['period_end']);
-         $break_start = $conn->real_escape_string($_POST['break_start']);
-         $break_end = $conn->real_escape_string($_POST['break_end']);
-         $active_days = isset($_POST['active_days']) ? implode(',', $_POST['active_days']) : '';
-         $is_active = isset($_POST['is_active']) ? 1 : 0;
-         
-         $sql = "INSERT INTO streams (name, period_start, period_end, break_start, break_end, active_days, is_active) VALUES (?, ?, ?, ?, ?, ?, ?)";
-         $stmt = $conn->prepare($sql);
-         $stmt->bind_param("ssssssi", $name, $period_start, $period_end, $break_start, $break_end, $active_days, $is_active);
+        $name = $conn->real_escape_string($_POST['name']);
+        $period_start = $conn->real_escape_string($_POST['period_start']);
+        $period_end = $conn->real_escape_string($_POST['period_end']);
+        $break_start = $conn->real_escape_string($_POST['break_start']);
+        $break_end = $conn->real_escape_string($_POST['break_end']);
+        $active_days = isset($_POST['active_days']) ? implode(',', $_POST['active_days']) : '';
+        $is_active = isset($_POST['is_active']) ? 1 : 0;
+        
+        $sql = "INSERT INTO streams (name, period_start, period_end, break_start, break_end, active_days, is_active) VALUES (?, ?, ?, ?, ?, ?, ?)";
+        $stmt = $conn->prepare($sql);
+        $stmt->bind_param("ssssssi", $name, $period_start, $period_end, $break_start, $break_end, $active_days, $is_active);
         
         if ($stmt->execute()) {
             $success_message = "Stream added successfully!";
@@ -43,12 +43,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $error_message = "Error deleting stream: " . $conn->error;
         }
         $stmt->close();
+    } elseif ($_POST['action'] === 'edit' && isset($_POST['id'])) {
+        $id = $conn->real_escape_string($_POST['id']);
+        $name = $conn->real_escape_string($_POST['name']);
+        $period_start = $conn->real_escape_string($_POST['period_start']);
+        $period_end = $conn->real_escape_string($_POST['period_end']);
+        $break_start = $conn->real_escape_string($_POST['break_start']);
+        $break_end = $conn->real_escape_string($_POST['break_end']);
+        $active_days = isset($_POST['active_days']) ? implode(',', $_POST['active_days']) : '';
+        $is_active = isset($_POST['is_active']) ? 1 : 0;
+        
+        $sql = "UPDATE streams SET name = ?, period_start = ?, period_end = ?, break_start = ?, break_end = ?, active_days = ?, is_active = ? WHERE id = ?";
+        $stmt = $conn->prepare($sql);
+        $stmt->bind_param("ssssssii", $name, $period_start, $period_end, $break_start, $break_end, $active_days, $is_active, $id);
+        
+        if ($stmt->execute()) {
+            $success_message = "Stream updated successfully!";
+        } else {
+            $error_message = "Error updating stream: " . $conn->error;
+        }
+        $stmt->close();
     }
 }
 
 // Refresh the result after any changes
 if (isset($success_message) || isset($error_message)) {
-    $result = $conn->query($sql);
+    $result = $conn->query("SELECT * FROM streams WHERE is_active = 1 ORDER BY name");
+}
+
+// Get stream data for editing
+$edit_stream = null;
+if (isset($_GET['edit']) && is_numeric($_GET['edit'])) {
+    $edit_id = $conn->real_escape_string($_GET['edit']);
+    $edit_sql = "SELECT * FROM streams WHERE id = ? AND is_active = 1";
+    $edit_stmt = $conn->prepare($edit_sql);
+    $edit_stmt->bind_param("i", $edit_id);
+    $edit_stmt->execute();
+    $edit_result = $edit_stmt->get_result();
+    if ($edit_result->num_rows > 0) {
+        $edit_stream = $edit_result->fetch_assoc();
+    }
+    $edit_stmt->close();
 }
 ?>
 
@@ -118,9 +153,9 @@ if (isset($success_message) || isset($error_message)) {
                                     </span>
                                 </td>
                                 <td>
-                                    <button class="btn btn-sm btn-outline-primary me-1" onclick="editStream(<?php echo $row['id']; ?>)">
+                                    <a href="?edit=<?php echo $row['id']; ?>" class="btn btn-sm btn-outline-primary me-1">
                                         <i class="fas fa-edit"></i>
-                                    </button>
+                                    </a>
                                     <form method="POST" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this stream?')">
                                         <input type="hidden" name="action" value="delete">
                                         <input type="hidden" name="id" value="<?php echo $row['id']; ?>">
@@ -145,68 +180,44 @@ if (isset($success_message) || isset($error_message)) {
     </div>
 </div>
 
-<!-- Add Stream Modal -->
+<!-- Add/Edit Stream Modal -->
 <div class="modal fade" id="addStreamModal" tabindex="-1">
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title">Add New Stream</h5>
+                <h5 class="modal-title"><?php echo $edit_stream ? 'Edit Stream' : 'Add New Stream'; ?></h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <form method="POST">
                 <div class="modal-body">
-                    <input type="hidden" name="action" value="add">
+                    <input type="hidden" name="action" value="<?php echo $edit_stream ? 'edit' : 'add'; ?>">
+                    <?php if ($edit_stream): ?>
+                        <input type="hidden" name="id" value="<?php echo $edit_stream['id']; ?>">
+                    <?php endif; ?>
                     
-                                         <div class="mb-3">
-                         <label for="name" class="form-label">Stream Name *</label>
-                         <input type="text" class="form-control" id="name" name="name" required>
-                     </div>
+                    <div class="mb-3">
+                        <label for="name" class="form-label">Stream Name *</label>
+                        <input type="text" class="form-control" id="name" name="name" 
+                               value="<?php echo $edit_stream ? htmlspecialchars($edit_stream['name']) : ''; ?>" required>
+                    </div>
                     
                     <div class="mb-3">
                         <label class="form-label">Active Days *</label>
                         <div class="row">
+                            <?php 
+                            $days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+                            $edit_days = $edit_stream ? explode(',', $edit_stream['active_days']) : [];
+                            foreach ($days as $day): 
+                                $checked = in_array($day, $edit_days) ? 'checked' : '';
+                            ?>
                             <div class="col-md-3">
                                 <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" id="monday" name="active_days[]" value="Monday">
-                                    <label class="form-check-label" for="monday">Monday</label>
+                                    <input class="form-check-input" type="checkbox" id="<?php echo strtolower($day); ?>" 
+                                           name="active_days[]" value="<?php echo $day; ?>" <?php echo $checked; ?>>
+                                    <label class="form-check-label" for="<?php echo strtolower($day); ?>"><?php echo $day; ?></label>
                                 </div>
                             </div>
-                            <div class="col-md-3">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" id="tuesday" name="active_days[]" value="Tuesday">
-                                    <label class="form-check-label" for="tuesday">Tuesday</label>
-                                </div>
-                            </div>
-                            <div class="col-md-3">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" id="wednesday" name="active_days[]" value="Wednesday">
-                                    <label class="form-check-label" for="wednesday">Wednesday</label>
-                                </div>
-                            </div>
-                            <div class="col-md-3">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" id="thursday" name="active_days[]" value="Thursday">
-                                    <label class="form-check-label" for="thursday">Thursday</label>
-                                </div>
-                            </div>
-                            <div class="col-md-3">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" id="friday" name="active_days[]" value="Friday">
-                                    <label class="form-check-label" for="friday">Friday</label>
-                                </div>
-                            </div>
-                            <div class="col-md-3">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" id="saturday" name="active_days[]" value="Saturday">
-                                    <label class="form-check-label" for="saturday">Saturday</label>
-                                </div>
-                            </div>
-                            <div class="col-md-3">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" id="sunday" name="active_days[]" value="Sunday">
-                                    <label class="form-check-label" for="sunday">Sunday</label>
-                                </div>
-                            </div>
+                            <?php endforeach; ?>
                         </div>
                     </div>
                     
@@ -216,8 +227,11 @@ if (isset($success_message) || isset($error_message)) {
                                 <label for="period_start" class="form-label">Period Start Time *</label>
                                 <select class="form-control" id="period_start" name="period_start" required>
                                     <option value="">Select Start Time</option>
-                                    <?php for ($hour = 6; $hour <= 22; $hour++): ?>
-                                        <option value="<?php echo sprintf('%02d:00', $hour); ?>"><?php echo sprintf('%02d:00', $hour); ?></option>
+                                    <?php for ($hour = 6; $hour <= 22; $hour++): 
+                                        $time = sprintf('%02d:00', $hour);
+                                        $selected = ($edit_stream && $edit_stream['period_start'] == $time) ? 'selected' : '';
+                                    ?>
+                                        <option value="<?php echo $time; ?>" <?php echo $selected; ?>><?php echo $time; ?></option>
                                     <?php endfor; ?>
                                 </select>
                             </div>
@@ -227,8 +241,11 @@ if (isset($success_message) || isset($error_message)) {
                                 <label for="period_end" class="form-label">Period End Time *</label>
                                 <select class="form-control" id="period_end" name="period_end" required>
                                     <option value="">Select End Time</option>
-                                    <?php for ($hour = 7; $hour <= 23; $hour++): ?>
-                                        <option value="<?php echo sprintf('%02d:00', $hour); ?>"><?php echo sprintf('%02d:00', $hour); ?></option>
+                                    <?php for ($hour = 7; $hour <= 23; $hour++): 
+                                        $time = sprintf('%02d:00', $hour);
+                                        $selected = ($edit_stream && $edit_stream['period_end'] == $time) ? 'selected' : '';
+                                    ?>
+                                        <option value="<?php echo $time; ?>" <?php echo $selected; ?>><?php echo $time; ?></option>
                                     <?php endfor; ?>
                                 </select>
                             </div>
@@ -241,8 +258,11 @@ if (isset($success_message) || isset($error_message)) {
                                 <label for="break_start" class="form-label">Break Start Time</label>
                                 <select class="form-control" id="break_start" name="break_start">
                                     <option value="">Select Break Start</option>
-                                    <?php for ($hour = 6; $hour <= 22; $hour++): ?>
-                                        <option value="<?php echo sprintf('%02d:00', $hour); ?>"><?php echo sprintf('%02d:00', $hour); ?></option>
+                                    <?php for ($hour = 6; $hour <= 22; $hour++): 
+                                        $time = sprintf('%02d:00', $hour);
+                                        $selected = ($edit_stream && $edit_stream['break_start'] == $time) ? 'selected' : '';
+                                    ?>
+                                        <option value="<?php echo $time; ?>" <?php echo $selected; ?>><?php echo $time; ?></option>
                                     <?php endfor; ?>
                                 </select>
                             </div>
@@ -252,17 +272,21 @@ if (isset($success_message) || isset($error_message)) {
                                 <label for="break_end" class="form-label">Break End Time</label>
                                 <select class="form-control" id="break_end" name="break_end">
                                     <option value="">Select Break End</option>
-                                    <?php for ($hour = 7; $hour <= 23; $hour++): ?>
-                                        <option value="<?php echo sprintf('%02d:00', $hour); ?>"><?php echo sprintf('%02d:00', $hour); ?></option>
+                                    <?php for ($hour = 7; $hour <= 23; $hour++): 
+                                        $time = sprintf('%02d:00', $hour);
+                                        $selected = ($edit_stream && $edit_stream['break_end'] == $time) ? 'selected' : '';
+                                    ?>
+                                        <option value="<?php echo $time; ?>" <?php echo $selected; ?>><?php echo $time; ?></option>
                                     <?php endfor; ?>
                                 </select>
                             </div>
                         </div>
                     </div>
                     
-                                         <div class="mb-3">
+                    <div class="mb-3">
                         <div class="form-check">
-                            <input class="form-check-input" type="checkbox" id="is_active" name="is_active" checked>
+                            <input class="form-check-input" type="checkbox" id="is_active" name="is_active" 
+                                   <?php echo ($edit_stream && $edit_stream['is_active'] == 1) || !$edit_stream ? 'checked' : ''; ?>>
                             <label class="form-check-label" for="is_active">
                                 Stream Active
                             </label>
@@ -271,7 +295,7 @@ if (isset($success_message) || isset($error_message)) {
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Add Stream</button>
+                    <button type="submit" class="btn btn-primary"><?php echo $edit_stream ? 'Update Stream' : 'Add Stream'; ?></button>
                 </div>
             </form>
         </div>
@@ -284,10 +308,13 @@ include 'includes/footer.php';
 ?>
 
 <script>
-function editStream(id) {
-    // TODO: Implement edit functionality
-    alert('Edit functionality will be implemented here for stream ID: ' + id);
-}
+// Auto-open modal if editing
+<?php if ($edit_stream): ?>
+document.addEventListener('DOMContentLoaded', function() {
+    var modal = new bootstrap.Modal(document.getElementById('addStreamModal'));
+    modal.show();
+});
+<?php endif; ?>
 
 // Add validation to ensure period end is after period start
 document.getElementById('period_end').addEventListener('change', function() {
@@ -309,5 +336,20 @@ document.getElementById('break_end').addEventListener('change', function() {
         alert('Break end time must be after break start time');
         this.value = '';
     }
+});
+
+// Search functionality
+document.querySelector('.search-input').addEventListener('input', function() {
+    const searchTerm = this.value.toLowerCase();
+    const tableRows = document.querySelectorAll('#streamsTable tbody tr');
+    
+    tableRows.forEach(row => {
+        const streamName = row.querySelector('td:first-child').textContent.toLowerCase();
+        if (streamName.includes(searchTerm)) {
+            row.style.display = '';
+        } else {
+            row.style.display = 'none';
+        }
+    });
 });
 </script>

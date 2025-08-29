@@ -157,7 +157,6 @@ $dept_result = $conn->query($dept_sql);
                     <tr>
                         <th>Course Name</th>
                         <th>Code</th>
-                        <th>Department</th>
                         <th>Hours/Week</th>
                         <th>Actions</th>
                     </tr>
@@ -168,7 +167,6 @@ $dept_result = $conn->query($dept_sql);
                             <tr>
                                 <td><strong><?php echo htmlspecialchars($row['name']); ?></strong></td>
                                 <td><span class="badge bg-primary"><?php echo htmlspecialchars($row['code']); ?></span></td>
-                                <td><?php echo htmlspecialchars($row['department_name'] ?? 'N/A'); ?></td>
                                 <td><span class="badge bg-warning"><?php echo htmlspecialchars($row['hours_per_week']); ?> hrs/week</span></td>
                                 <td>
                                     <button class="btn btn-sm btn-outline-primary me-1" onclick="editCourse(<?php echo $row['id']; ?>)">
@@ -186,7 +184,7 @@ $dept_result = $conn->query($dept_sql);
                         <?php endwhile; ?>
                     <?php else: ?>
                         <tr>
-                            <td colspan="5" class="empty-state">
+                            <td colspan="4" class="empty-state">
                                 <i class="fas fa-book"></i>
                                 <p>No courses found. Add your first course to get started!</p>
                             </td>
