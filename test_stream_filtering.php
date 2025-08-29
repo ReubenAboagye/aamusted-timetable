@@ -24,18 +24,18 @@ foreach ($streams as $stream) {
     $classes_result = $conn->query($classes_sql);
     $classes_count = $classes_result->fetch_assoc()['count'];
     
-    // Count courses
-    $courses_sql = "SELECT COUNT(*) as count FROM courses WHERE stream_id = " . $stream['id'] . " AND is_active = 1";
+    // Count courses (courses are global; do not count per-stream)
+    $courses_sql = "SELECT COUNT(*) as count FROM courses WHERE is_active = 1";
     $courses_result = $conn->query($courses_sql);
     $courses_count = $courses_result->fetch_assoc()['count'];
     
-    // Count lecturers
-    $lecturers_sql = "SELECT COUNT(*) as count FROM lecturers WHERE stream_id = " . $stream['id'] . " AND is_active = 1";
+    // Count lecturers (global)
+    $lecturers_sql = "SELECT COUNT(*) as count FROM lecturers WHERE is_active = 1";
     $lecturers_result = $conn->query($lecturers_sql);
     $lecturers_count = $lecturers_result->fetch_assoc()['count'];
     
-    // Count departments
-    $departments_sql = "SELECT COUNT(*) as count FROM departments WHERE stream_id = " . $stream['id'] . " AND is_active = 1";
+    // Count departments (global)
+    $departments_sql = "SELECT COUNT(*) as count FROM departments WHERE is_active = 1";
     $departments_result = $conn->query($departments_sql);
     $departments_count = $departments_result->fetch_assoc()['count'];
     
@@ -50,8 +50,8 @@ foreach ($streams as $stream) {
 
 // Get sample data for current stream
 $sample_classes = $conn->query("SELECT name, level FROM classes WHERE stream_id = " . $current_stream_id . " AND is_active = 1 LIMIT 5");
-$sample_courses = $conn->query("SELECT name, code FROM courses WHERE stream_id = " . $current_stream_id . " AND is_active = 1 LIMIT 5");
-$sample_lecturers = $conn->query("SELECT name FROM lecturers WHERE stream_id = " . $current_stream_id . " AND is_active = 1 LIMIT 5");
+$sample_courses = $conn->query("SELECT name, code FROM courses WHERE is_active = 1 LIMIT 5");
+$sample_lecturers = $conn->query("SELECT name FROM lecturers WHERE is_active = 1 LIMIT 5");
 ?>
 
 <div class="main-content" id="mainContent">
