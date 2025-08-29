@@ -8,22 +8,6 @@
       </a>
     </div>
 
-    <!-- Academic Year Section -->
-    <div class="nav-section">
-
-      <div class="dropdown-header" data-bs-target="#academicYearCollapse" aria-expanded="false">
-        <i class="fas fa-calendar-year me-2"></i>Academic Year
-        <i class="fas fa-chevron-down ms-auto"></i>
-      </div>
-      <div class="collapse" id="academicYearCollapse">
-        <div class="dropdown-menu-items">
-          <a href="sessions.php" class="nav-link <?= ($currentPage == 'sessions.php') ? 'active' : '' ?>">
-            <i class="fas fa-calendar me-2"></i>Sessions
-          </a>
-        </div>
-      </div>
-    </div>
-
     <!-- Data Management Section -->
     <div class="nav-section">
 
@@ -38,12 +22,6 @@
           </a>
           <a href="programs.php" class="nav-link <?= ($currentPage == 'programs.php') ? 'active' : '' ?>">
             <i class="fas fa-graduation-cap me-2"></i>Programs
-          </a>
-          <a href="levels.php" class="nav-link <?= ($currentPage == 'levels.php') ? 'active' : '' ?>">
-            <i class="fas fa-layer-group me-2"></i>Levels
-          </a>
-          <a href="streams.php" class="nav-link <?= ($currentPage == 'streams.php') ? 'active' : '' ?>">
-            <i class="fas fa-clock me-2"></i>Streams
           </a>
           <a href="lecturers.php" class="nav-link <?= ($currentPage == 'lecturers.php') ? 'active' : '' ?>">
             <i class="fas fa-chalkboard-teacher me-2"></i>Lecturers
@@ -102,16 +80,13 @@
       </div>
     </div>
 
-    <!-- Additional Timetable Views -->
-    <div class="nav-section">
-
-      <a href="rooms_timetable.php" class="nav-link <?= ($currentPage == 'rooms_timetable.php') ? 'active' : '' ?>">
-        <i class="fas fa-th me-2"></i>Rooms Timetable
-      </a>
-      <a href="lecturer_timetable.php" class="nav-link <?= ($currentPage == 'lecturer_timetable.php') ? 'active' : '' ?>">
-        <i class="fas fa-user me-2"></i>Lecturer Timetable
-      </a>
-    </div>
+  </div>
+  
+  <!-- Stream Management - Fixed at bottom -->
+  <div class="stream-management-section">
+    <a href="streams.php" class="nav-link stream-management-link <?= ($currentPage == 'streams.php') ? 'active' : '' ?>">
+      <i class="fas fa-cogs me-2"></i>Stream Management
+    </a>
   </div>
 </div>
 

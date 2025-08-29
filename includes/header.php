@@ -57,13 +57,13 @@ if (!isset($pageTitle)) {
       top: 70px; 
       left: 0; 
       width: 280px; 
-      padding: 20px; 
       box-shadow: 2px 0 5px rgba(0,0,0,0.1); 
       transition: transform 0.3s ease; 
       transform: translateX(0); 
       z-index: 1040; 
       height: calc(100vh - 70px); 
-      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
     }
     .sidebar.collapsed { transform: translateX(-100%); }
     
@@ -71,7 +71,9 @@ if (!isset($pageTitle)) {
       display: flex; 
       flex-direction: column; 
       gap: 0; 
-      padding-bottom: 20px; 
+      padding: 20px 20px 80px 20px;
+      overflow-y: auto;
+      flex: 1;
     }
     .nav-section { 
       margin-bottom: 15px; 
@@ -150,6 +152,36 @@ if (!isset($pageTitle)) {
     }
     .dropdown-menu-items .nav-link:hover {
       transform: translateX(3px);
+    }
+    
+    /* Stream Management Section - Fixed at bottom */
+    .stream-management-section {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      width: 280px;
+      padding: 20px;
+      border-top: 2px solid rgba(128, 0, 32, 0.2);
+      background-color: var(--sidebar-bg);
+      flex-shrink: 0;
+      z-index: 1041;
+    }
+    
+    .stream-management-link {
+      background-color: rgba(128, 0, 32, 0.1);
+      border: 2px solid rgba(128, 0, 32, 0.3);
+      font-weight: 700;
+      text-align: center;
+      padding: 12px 16px;
+      margin: 0;
+    }
+    
+    .stream-management-link:hover,
+    .stream-management-link.active {
+      background-color: var(--primary-color);
+      border-color: var(--primary-color);
+      color: white;
+      transform: scale(1.02);
     }
     .main-content { transition: margin-left 0.3s ease; margin-left: 280px; padding: 20px; height: calc(100vh - 70px); overflow: auto; }
     .main-content.collapsed { margin-left: 0; }
@@ -299,6 +331,9 @@ if (!isset($pageTitle)) {
       <a class="navbar-brand text-white" href="#">
         <img src="images/aamustedLog.png" alt="AAMUSTED Logo">University Timetable Generator
       </a>
+      <div class="mx-auto text-white" id="currentStream">
+        <i class="fas fa-clock me-2"></i>Current Stream: <span id="streamName">Morning</span>
+      </div>
       <div class="ms-auto text-white" id="currentTime">12:00:00 PM</div>
     </div>
   </nav>

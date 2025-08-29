@@ -25,6 +25,29 @@
       setInterval(updateTime,1000); 
       updateTime();
       
+      // Stream update functionality
+      function updateCurrentStream() {
+        const now = new Date();
+        const currentHour = now.getHours();
+        const streamEl = document.getElementById('streamName');
+        
+        if (streamEl) {
+          let streamName = 'Morning';
+          if (currentHour >= 6 && currentHour < 12) {
+            streamName = 'Morning';
+          } else if (currentHour >= 12 && currentHour < 17) {
+            streamName = 'Afternoon';
+          } else if (currentHour >= 17 && currentHour < 22) {
+            streamName = 'Evening';
+          } else {
+            streamName = 'Night';
+          }
+          streamEl.textContent = streamName;
+        }
+      }
+      setInterval(updateCurrentStream, 60000); // Update every minute
+      updateCurrentStream();
+      
       // Sidebar toggle with persistent user preference (localStorage)
       const storageKey = 'sidebarCollapsed';
       const sidebarToggle = document.getElementById('sidebarToggle');
@@ -149,24 +172,58 @@
               const target = document.querySelector(targetId);
               
               if (target) {
-                  // Toggle the collapse manually
-                  if (target.classList.contains('show')) {
+                  // Check if this dropdown was marked as "keep open"
+                  const shouldKeepOpen = target.getAttribute('data-keep-open') === 'true';
+                  
+                  if (shouldKeepOpen) {
+                      // If it was marked as keep open, just close it and remove the mark
                       target.classList.remove('show');
                       this.setAttribute('aria-expanded', 'false');
+                      target.removeAttribute('data-keep-open');
                   } else {
-                      // Close other open dropdowns first
-                      document.querySelectorAll('.collapse.show').forEach(openCollapse => {
-                          if (openCollapse !== target) {
-                              openCollapse.classList.remove('show');
-                              const openHeader = document.querySelector(`[data-bs-target="#${openCollapse.id}"]`);
-                              if (openHeader) {
-                                  openHeader.setAttribute('aria-expanded', 'false');
+                      // Normal toggle behavior
+                      if (target.classList.contains('show')) {
+                          target.classList.remove('show');
+                          this.setAttribute('aria-expanded', 'false');
+                      } else {
+                          // Close other open dropdowns first
+                          document.querySelectorAll('.collapse.show').forEach(openCollapse => {
+                              if (openCollapse !== target) {
+                                  openCollapse.classList.remove('show');
+                                  openCollapse.removeAttribute('data-keep-open');
+                                  const openHeader = document.querySelector(`[data-bs-target="#${openCollapse.id}"]`);
+                                  if (openHeader) {
+                                      openHeader.setAttribute('aria-expanded', 'false');
+                                  }
                               }
-                          }
-                      });
-                      
-                      target.classList.add('show');
-                      this.setAttribute('aria-expanded', 'true');
+                          });
+                          
+                          target.classList.add('show');
+                          this.setAttribute('aria-expanded', 'true');
+                      }
+                  }
+              }
+          });
+      });
+      
+      // Prevent dropdowns from closing when clicking on navigation links
+      const sidebarNavLinks = document.querySelectorAll('.sidebar .nav-link');
+      sidebarNavLinks.forEach(link => {
+          link.addEventListener('click', function(e) {
+              // Find the parent dropdown if this link is inside one
+              const parentDropdown = this.closest('.collapse');
+              if (parentDropdown) {
+                  // Mark this dropdown as "keep open" by adding a data attribute
+                  parentDropdown.setAttribute('data-keep-open', 'true');
+                  
+                  // Ensure the dropdown stays visible
+                  parentDropdown.classList.add('show');
+                  
+                  // Update the corresponding header's aria-expanded attribute
+                  const dropdownId = parentDropdown.id;
+                  const header = document.querySelector(`[data-bs-target="#${dropdownId}"]`);
+                  if (header) {
+                      header.setAttribute('aria-expanded', 'true');
                   }
               }
           });
