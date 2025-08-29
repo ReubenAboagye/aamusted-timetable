@@ -58,11 +58,7 @@ if ($room_filter > 0) {
     $types .= "i";
 }
 
-if ($stream_filter > 0) {
-    $main_query .= " AND co.stream_id = ?";
-    $params[] = $stream_filter;
-    $types .= "i";
-}
+// Note: courses are global (no stream-specific filtering) so we do not apply stream filter here.
 
 $main_query .= " ORDER BY d.id, ts.start_time, c.name";
 
