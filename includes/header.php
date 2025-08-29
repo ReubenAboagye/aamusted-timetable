@@ -7,6 +7,47 @@ if (!isset($pageTitle)) {
 if (session_status() == PHP_SESSION_NONE) {
   session_start();
 }
+
+// --- Handle stream switching (keep session key consistent with index.php) ---
+if (isset($_GET['stream_id'])) {
+    $_SESSION['active_stream'] = intval($_GET['stream_id']);
+}
+
+// Determine active stream (use value from including page if provided)
+$active_stream = $active_stream ?? $_SESSION['active_stream'] ?? $_SESSION['stream_id'] ?? 1; // default to Regular (id=1)
+
+// --- Fetch streams dynamically if not already provided by caller ---
+if (!isset($streams) || !is_array($streams) || empty($streams)) {
+    $streams = [];
+    $result = $conn->query("SELECT id, name FROM streams WHERE is_active = 1 ORDER BY id ASC");
+    while ($row = $result->fetch_assoc()) {
+        $streams[] = $row;
+    }
+}
+
+// --- Get current stream name if not provided by caller ---
+if (!isset($current_stream_name) || $current_stream_name === '') {
+    $current_stream_name = '';
+    foreach ($streams as $s) {
+        if ($s['id'] == $active_stream) {
+            $current_stream_name = $s['name'];
+            break;
+        }
+    }
+}
+
+// --- Helper function for counts (guard against redeclaration) ---
+if (!function_exists('getCount')) {
+    function getCount($conn, $query, $stream_id) {
+        $stmt = $conn->prepare($query);
+        if ($stmt === false) return 0;
+        $stmt->bind_param("i", $stream_id);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $row = $result->fetch_assoc();
+        return $row ? intval(array_values($row)[0]) : 0;
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -338,11 +379,7 @@ if (session_status() == PHP_SESSION_NONE) {
       </a>
       <div class="mx-auto text-white" id="currentStream">
         <i class="fas fa-clock me-2"></i>Current Stream: 
-        <select id="streamSelect" class="form-select form-select-sm d-inline-block w-auto" style="background: transparent; color: white; border: 1px solid rgba(255,255,255,0.3);">
-          <option value="1">Regular</option>
-          <option value="2">Weekend</option>
-          <option value="3">Evening</option>
-        </select>
+        <span class="me-2"><strong><?= htmlspecialchars($current_stream_name) ?></strong></span>
       </div>
       <div class="ms-auto text-white" id="currentTime">12:00:00 PM</div>
     </div>

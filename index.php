@@ -97,10 +97,7 @@ foreach ($streams as $s) {
 <div class="main-content" id="mainContent">
   <h2>Dashboard</h2>
 
-  <!-- Current Stream -->
-  <h5 style="margin-top:10px; color:#444;">
-    📌 Current Stream: <strong><?= htmlspecialchars($current_stream_name) ?></strong>
-  </h5>
+ 
 
   <!-- Stream Selector -->
   <div class="stream-select">
