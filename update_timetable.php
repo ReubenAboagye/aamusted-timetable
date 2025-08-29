@@ -1,5 +1,9 @@
 <?php
 include 'connect.php';
+include 'includes/stream_manager.php';
+
+$streamManager = getStreamManager();
+$currentStreamId = $streamManager->getCurrentStreamId();
 
 $success_message = '';
 $error_message = '';
@@ -33,14 +37,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $lecturer_course_id = (int)($_POST['lecturer_course_id'] ?? 0);
         
         if ($id > 0 && $day_id > 0 && $time_slot_id > 0 && $room_id > 0 && $class_course_id > 0) {
-            // Check for conflicts (same day, time, room but different entry)
-            $check_sql = "SELECT COUNT(*) as count FROM timetable WHERE day_id = ? AND time_slot_id = ? AND room_id = ? AND id != ?";
+            // Conflict checks
+            $conflict = false;
+            // 1) Room conflict (other entry using same room/time)
+            $check_sql = "SELECT 1 FROM timetable WHERE day_id = ? AND time_slot_id = ? AND room_id = ? AND id != ? LIMIT 1";
             $check_stmt = $conn->prepare($check_sql);
             $check_stmt->bind_param("iiii", $day_id, $time_slot_id, $room_id, $id);
             $check_stmt->execute();
-            $check_result = $check_stmt->get_result();
-            $conflict = $check_result->fetch_assoc()['count'] > 0;
+            $conflict = $check_stmt->get_result()->num_rows > 0;
             $check_stmt->close();
+            // 2) Class conflict (same class/time different entry)
+            if (!$conflict) {
+                $check_class_sql = "SELECT 1 FROM timetable t JOIN class_courses cc ON t.class_course_id = cc.id WHERE t.day_id = ? AND t.time_slot_id = ? AND t.id != ? AND cc.class_id = (SELECT class_id FROM class_courses WHERE id = ?) LIMIT 1";
+                $check_class_stmt = $conn->prepare($check_class_sql);
+                $check_class_stmt->bind_param("iiii", $day_id, $time_slot_id, $id, $class_course_id);
+                $check_class_stmt->execute();
+                $conflict = $check_class_stmt->get_result()->num_rows > 0;
+                $check_class_stmt->close();
+            }
+            // 3) Lecturer conflict (if provided)
+            if (!$conflict && $lecturer_course_id > 0) {
+                $check_lect_sql = "SELECT 1 FROM timetable t JOIN lecturer_courses lc ON t.lecturer_course_id = lc.id WHERE t.day_id = ? AND t.time_slot_id = ? AND lc.lecturer_id = (SELECT lecturer_id FROM lecturer_courses WHERE id = ?) AND t.id != ? LIMIT 1";
+                $check_lect_stmt = $conn->prepare($check_lect_sql);
+                $check_lect_stmt->bind_param("iiii", $day_id, $time_slot_id, $lecturer_course_id, $id);
+                $check_lect_stmt->execute();
+                $conflict = $check_lect_stmt->get_result()->num_rows > 0;
+                $check_lect_stmt->close();
+            }
             
             if ($conflict) {
                 $error_message = "This time slot and room is already occupied. Please choose a different time or room.";
@@ -66,14 +89,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $lecturer_course_id = (int)($_POST['lecturer_course_id'] ?? 0);
         
         if ($day_id > 0 && $time_slot_id > 0 && $room_id > 0 && $class_course_id > 0) {
-            // Check for conflicts
-            $check_sql = "SELECT COUNT(*) as count FROM timetable WHERE day_id = ? AND time_slot_id = ? AND room_id = ?";
+            // Conflict checks
+            $conflict = false;
+            // 1) Room conflict
+            $check_sql = "SELECT 1 FROM timetable WHERE day_id = ? AND time_slot_id = ? AND room_id = ? LIMIT 1";
             $check_stmt = $conn->prepare($check_sql);
             $check_stmt->bind_param("iii", $day_id, $time_slot_id, $room_id);
             $check_stmt->execute();
-            $check_result = $check_stmt->get_result();
-            $conflict = $check_result->fetch_assoc()['count'] > 0;
+            $conflict = $check_stmt->get_result()->num_rows > 0;
             $check_stmt->close();
+            // 2) Class conflict
+            if (!$conflict) {
+                $check_class_sql = "SELECT 1 FROM timetable t JOIN class_courses cc ON t.class_course_id = cc.id WHERE t.day_id = ? AND t.time_slot_id = ? AND cc.class_id = (SELECT class_id FROM class_courses WHERE id = ?) LIMIT 1";
+                $check_class_stmt = $conn->prepare($check_class_sql);
+                $check_class_stmt->bind_param("iii", $day_id, $time_slot_id, $class_course_id);
+                $check_class_stmt->execute();
+                $conflict = $check_class_stmt->get_result()->num_rows > 0;
+                $check_class_stmt->close();
+            }
+            // 3) Lecturer conflict
+            if (!$conflict && $lecturer_course_id > 0) {
+                $check_lect_sql = "SELECT 1 FROM timetable t JOIN lecturer_courses lc ON t.lecturer_course_id = lc.id WHERE t.day_id = ? AND t.time_slot_id = ? AND lc.lecturer_id = (SELECT lecturer_id FROM lecturer_courses WHERE id = ?) LIMIT 1";
+                $check_lect_stmt = $conn->prepare($check_lect_sql);
+                $check_lect_stmt->bind_param("iii", $day_id, $time_slot_id, $lecturer_course_id);
+                $check_lect_stmt->execute();
+                $conflict = $check_lect_stmt->get_result()->num_rows > 0;
+                $check_lect_stmt->close();
+            }
             
             if ($conflict) {
                 $error_message = "This time slot and room is already occupied. Please choose a different time or room.";
@@ -99,7 +141,7 @@ $edit_entry = null;
 if (isset($_GET['id'])) {
     $id = (int)$_GET['id'];
     $stmt = $conn->prepare("
-        SELECT t.*, c.name as class_name, co.course_code, co.course_name, d.name as day_name, 
+        SELECT t.*, c.name as class_name, co.code AS course_code, co.name AS course_name, d.name as day_name, 
                ts.start_time, ts.end_time, r.name as room_name, l.name as lecturer_name
         FROM timetable t
         JOIN class_courses cc ON t.class_course_id = cc.id
@@ -122,22 +164,34 @@ if (isset($_GET['id'])) {
 // Get filter options
 $days_result = $conn->query("SELECT id, name FROM days ORDER BY id");
 $time_slots_result = $conn->query("SELECT id, start_time, end_time FROM time_slots WHERE is_mandatory = 1 ORDER BY start_time");
-$rooms_result = $conn->query("SELECT id, name, capacity FROM rooms WHERE is_active = 1 ORDER BY name");
+$rooms_stmt = $conn->prepare("SELECT r.id, r.name, r.capacity FROM rooms r WHERE r.is_active = 1 AND (r.stream_id = ? OR JSON_CONTAINS(r.stream_availability, ?)) ORDER BY r.name");
+// Resolve stream code for JSON check
+$stream_code = null;
+$code_stmt = $conn->prepare("SELECT code FROM streams WHERE id = ?");
+$code_stmt->bind_param('i', $currentStreamId);
+$code_stmt->execute();
+$code_res = $code_stmt->get_result();
+if ($code_res && $row = $code_res->fetch_assoc()) { $stream_code = '"' . $row['code'] . '"'; }
+$code_stmt->close();
+if ($stream_code === null) { $stream_code = '"REG"'; }
+$rooms_stmt->bind_param('is', $currentStreamId, $stream_code);
+$rooms_stmt->execute();
+$rooms_result = $rooms_stmt->get_result();
 $class_courses_result = $conn->query("
-    SELECT cc.id, c.name as class_name, co.course_code, co.course_name
+    SELECT cc.id, c.name as class_name, co.code AS course_code, co.name AS course_name
     FROM class_courses cc
     JOIN classes c ON cc.class_id = c.id
     JOIN courses co ON cc.course_id = co.id
-    WHERE cc.is_active = 1
-    ORDER BY c.name, co.course_code
+    WHERE cc.is_active = 1 AND c.stream_id = " . (int)$currentStreamId . "
+    ORDER BY c.name, co.code
 ");
 $lecturer_courses_result = $conn->query("
-    SELECT lc.id, l.name as lecturer_name, co.course_code, co.course_name
+    SELECT lc.id, l.name as lecturer_name, co.code AS course_code, co.name AS course_name
     FROM lecturer_courses lc
     JOIN lecturers l ON lc.lecturer_id = l.id
     JOIN courses co ON lc.course_id = co.id
     WHERE lc.is_active = 1
-    ORDER BY l.name, co.course_code
+    ORDER BY l.name, co.code
 ");
 ?>
 
