@@ -1,2 +1,3 @@
 [2025-08-29 14:47:56] Department added successfully | Context: {"name":"aanika","code":"AA","description":"zsgvx","is_active":0}
 [2025-08-29 14:49:59] Department added successfully | Context: {"name":"Regular","code":"R","description":"hjghg","is_active":1}
+[2025-08-29 15:02:12] Department updated successfully | Context: {"id":7,"name":"Reg","code":"R","description":"hjghg","is_active":1}
