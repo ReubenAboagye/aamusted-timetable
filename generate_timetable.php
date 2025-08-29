@@ -1,22 +1,35 @@
 <?php
 include 'connect.php';
+include 'includes/stream_manager.php';
+
+$streamManager = getStreamManager();
+$currentStreamId = $streamManager->getCurrentStreamId();
 
 $success_message = '';
 $error_message = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     if ($_POST['action'] === 'generate_timetable') {
-        // Clear existing timetable
-        $clear_sql = "DELETE FROM timetable";
-        $conn->query($clear_sql);
+        // Clear existing timetable for the current stream only
+        $clear_sql = "DELETE t FROM timetable t
+                      JOIN class_courses cc ON t.class_course_id = cc.id
+                      JOIN classes c ON cc.class_id = c.id
+                      WHERE c.stream_id = ?";
+        $clear_stmt = $conn->prepare($clear_sql);
+        $clear_stmt->bind_param('i', $currentStreamId);
+        $clear_stmt->execute();
+        $clear_stmt->close();
         
         // Get all class-course assignments
-        $assignments_sql = "SELECT cc.id, cc.class_id, cc.course_id, c.name as class_name, co.course_code, co.course_name
+        $assignments_sql = "SELECT cc.id, cc.class_id, cc.course_id, c.name as class_name, co.code AS course_code, co.name AS course_name
                            FROM class_courses cc
                            JOIN classes c ON cc.class_id = c.id
                            JOIN courses co ON cc.course_id = co.id
-                           WHERE cc.is_active = 1";
-        $assignments_result = $conn->query($assignments_sql);
+                           WHERE cc.is_active = 1 AND c.stream_id = ?";
+        $assignments_stmt = $conn->prepare($assignments_sql);
+        $assignments_stmt->bind_param('i', $currentStreamId);
+        $assignments_stmt->execute();
+        $assignments_result = $assignments_stmt->get_result();
         
         if ($assignments_result && $assignments_result->num_rows > 0) {
             $success_count = 0;
@@ -38,8 +51,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             }
             
             // Get available rooms
-            $rooms_sql = "SELECT id, name, capacity FROM rooms WHERE is_active = 1 ORDER BY capacity";
-            $rooms_result = $conn->query($rooms_sql);
+            // Fetch rooms available to current stream (by stream_id or stream_availability JSON)
+            $rooms_sql = "SELECT r.id, r.name, r.capacity
+                          FROM rooms r
+                          WHERE r.is_active = 1 AND (r.stream_id = ? OR JSON_CONTAINS(r.stream_availability, ?))
+                          ORDER BY r.capacity";
+            $rooms_stmt = $conn->prepare($rooms_sql);
+            // JSON_CONTAINS expects a JSON array or scalar; we pass the stream code as a quoted string
+            // Resolve stream code for JSON check
+            $stream_code = null;
+            $code_stmt = $conn->prepare("SELECT code FROM streams WHERE id = ?");
+            $code_stmt->bind_param('i', $currentStreamId);
+            $code_stmt->execute();
+            $code_res = $code_stmt->get_result();
+            if ($code_res && $row = $code_res->fetch_assoc()) { $stream_code = '"' . $row['code'] . '"'; }
+            $code_stmt->close();
+            if ($stream_code === null) { $stream_code = '"REG"'; }
+            $rooms_stmt->bind_param('is', $currentStreamId, $stream_code);
+            $rooms_stmt->execute();
+            $rooms_result = $rooms_stmt->get_result();
             $rooms = [];
             while ($room = $rooms_result->fetch_assoc()) {
                 $rooms[] = $room;
@@ -52,35 +82,65 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $day = $days[array_rand($days)];
                 $room = $rooms[array_rand($rooms)];
                 
-                // Check if this time slot and room is already occupied
-                $check_sql = "SELECT COUNT(*) as count FROM timetable WHERE day_id = ? AND time_slot_id = ? AND room_id = ?";
-                $check_stmt = $conn->prepare($check_sql);
-                $check_stmt->bind_param("iii", $day['id'], $time_slot['id'], $room['id']);
-                $check_stmt->execute();
-                $check_result = $check_stmt->get_result();
-                $occupied = $check_result->fetch_assoc()['count'] > 0;
-                $check_stmt->close();
+                // Conflict checks
+                $occupied = false;
+                // 1) Room conflict
+                $check_room_sql = "SELECT 1 FROM timetable WHERE day_id = ? AND time_slot_id = ? AND room_id = ? LIMIT 1";
+                $check_room_stmt = $conn->prepare($check_room_sql);
+                $check_room_stmt->bind_param("iii", $day['id'], $time_slot['id'], $room['id']);
+                $check_room_stmt->execute();
+                $occupied = $check_room_stmt->get_result()->num_rows > 0;
+                $check_room_stmt->close();
+                
+                // 2) Class conflict (same class at same time)
+                if (!$occupied) {
+                    $check_class_sql = "SELECT 1 FROM timetable t
+                                        JOIN class_courses cc2 ON t.class_course_id = cc2.id
+                                        WHERE t.day_id = ? AND t.time_slot_id = ? AND cc2.class_id = ? LIMIT 1";
+                    $check_class_stmt = $conn->prepare($check_class_sql);
+                    $check_class_stmt->bind_param("iii", $day['id'], $time_slot['id'], $assignment['class_id']);
+                    $check_class_stmt->execute();
+                    $occupied = $check_class_stmt->get_result()->num_rows > 0;
+                    $check_class_stmt->close();
+                }
+                
+                // Pick a lecturer (optional). If lecturer chosen, ensure lecturer conflict check
+                $lecturer_course_id = null;
+                if (!$occupied) {
+                    $lecturer_course_sql = "SELECT lc.id, lc.lecturer_id FROM lecturer_courses lc WHERE lc.course_id = ? LIMIT 1";
+                    $lecturer_course_stmt = $conn->prepare($lecturer_course_sql);
+                    $lecturer_course_stmt->bind_param("i", $assignment['course_id']);
+                    $lecturer_course_stmt->execute();
+                    $lecturer_course_result = $lecturer_course_stmt->get_result();
+                    $lecturer_course = $lecturer_course_result->fetch_assoc();
+                    $lecturer_course_stmt->close();
+                    if ($lecturer_course) {
+                        // Lecturer-time conflict
+                        $check_lect_sql = "SELECT 1 FROM timetable t
+                                           JOIN lecturer_courses lc2 ON t.lecturer_course_id = lc2.id
+                                           WHERE t.day_id = ? AND t.time_slot_id = ? AND lc2.lecturer_id = ? LIMIT 1";
+                        $check_lect_stmt = $conn->prepare($check_lect_sql);
+                        $check_lect_stmt->bind_param("iii", $day['id'], $time_slot['id'], $lecturer_course['lecturer_id']);
+                        $check_lect_stmt->execute();
+                        $lect_conflict = $check_lect_stmt->get_result()->num_rows > 0;
+                        $check_lect_stmt->close();
+                        if (!$lect_conflict) {
+                            $lecturer_course_id = (int)$lecturer_course['id'];
+                        }
+                    }
+                }
                 
                 if (!$occupied) {
-                                    // Get a default lecturer_course_id for this course
-                $lecturer_course_sql = "SELECT lc.id FROM lecturer_courses lc WHERE lc.course_id = ? LIMIT 1";
-                $lecturer_course_stmt = $conn->prepare($lecturer_course_sql);
-                $lecturer_course_stmt->bind_param("i", $assignment['course_id']);
-                $lecturer_course_stmt->execute();
-                $lecturer_course_result = $lecturer_course_stmt->get_result();
-                $lecturer_course = $lecturer_course_result->fetch_assoc();
-                $lecturer_course_stmt->close();
-                
-                if ($lecturer_course) {
-                    // Insert timetable entry with lecturer_course_id
-                    $insert_sql = "INSERT INTO timetable (class_course_id, lecturer_course_id, day_id, time_slot_id, room_id) VALUES (?, ?, ?, ?, ?)";
-                    $insert_stmt = $conn->prepare($insert_sql);
-                    $insert_stmt->bind_param("iiiii", $assignment['id'], $lecturer_course['id'], $day['id'], $time_slot['id'], $room['id']);
-                } else {
-                    // Skip if no lecturer is assigned to this course
-                    $error_count++;
-                    continue;
-                }
+                    // Insert timetable entry (lecturer optional)
+                    if ($lecturer_course_id) {
+                        $insert_sql = "INSERT INTO timetable (class_course_id, lecturer_course_id, day_id, time_slot_id, room_id) VALUES (?, ?, ?, ?, ?)";
+                        $insert_stmt = $conn->prepare($insert_sql);
+                        $insert_stmt->bind_param("iiiii", $assignment['id'], $lecturer_course_id, $day['id'], $time_slot['id'], $room['id']);
+                    } else {
+                        $insert_sql = "INSERT INTO timetable (class_course_id, day_id, time_slot_id, room_id) VALUES (?, ?, ?, ?)";
+                        $insert_stmt = $conn->prepare($insert_sql);
+                        $insert_stmt->bind_param("iiii", $assignment['id'], $day['id'], $time_slot['id'], $room['id']);
+                    }
                     
                     if ($insert_stmt->execute()) {
                         $success_count++;
@@ -102,6 +162,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         } else {
             $error_message = "No class-course assignments found. Please assign courses to classes first.";
         }
+        $assignments_stmt->close();
     }
 }
 

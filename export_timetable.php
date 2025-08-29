@@ -11,8 +11,8 @@ $format = isset($_GET['format']) ? $_GET['format'] : 'excel';
 $main_query = "
     SELECT 
         c.name as class_name,
-        co.course_code,
-        co.course_name,
+        co.code AS course_code,
+        co.name AS course_name,
         d.name as day_name,
         ts.start_time,
         ts.end_time,

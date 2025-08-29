@@ -1,11 +1,15 @@
 <?php
 include 'connect.php';
+include 'includes/stream_manager.php';
+
+$streamManager = getStreamManager();
+$currentStreamId = $streamManager->getCurrentStreamId();
 
 // Get filter parameters
 $class_filter = isset($_GET['class_id']) ? (int)$_GET['class_id'] : 0;
 $day_filter = isset($_GET['day_id']) ? (int)$_GET['day_id'] : 0;
 $room_filter = isset($_GET['room_id']) ? (int)$_GET['room_id'] : 0;
-$stream_filter = isset($_GET['stream_id']) ? (int)$_GET['stream_id'] : 0;
+$stream_filter = isset($_GET['stream_id']) ? (int)$_GET['stream_id'] : $currentStreamId;
 
 // Build the main query for timetable data
 $main_query = "
@@ -14,8 +18,8 @@ $main_query = "
         t.day_id,
         t.time_slot_id,
         c.name as class_name,
-        co.course_code,
-        co.course_name,
+        co.code AS course_code,
+        co.name AS course_name,
         d.name as day_name,
         ts.start_time,
         ts.end_time,
@@ -59,7 +63,7 @@ if ($room_filter > 0) {
 }
 
 if ($stream_filter > 0) {
-    $main_query .= " AND co.stream_id = ?";
+    $main_query .= " AND c.stream_id = ?";
     $params[] = $stream_filter;
     $types .= "i";
 }
@@ -75,7 +79,7 @@ $stmt->execute();
 $timetable_result = $stmt->get_result();
 
 // Get filter options
-$classes_result = $conn->query("SELECT id, name FROM classes WHERE is_active = 1 ORDER BY name");
+$classes_result = $conn->query("SELECT id, name FROM classes WHERE is_active = 1 AND stream_id = " . (int)$stream_filter . " ORDER BY name");
 $days_result = $conn->query("SELECT id, name FROM days ORDER BY id");
 $rooms_result = $conn->query("SELECT id, name FROM rooms WHERE is_active = 1 ORDER BY name");
 $streams_result = $conn->query("SELECT id, name FROM streams WHERE is_active = 1 ORDER BY name");

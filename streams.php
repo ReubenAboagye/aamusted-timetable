@@ -6,31 +6,51 @@ include 'includes/sidebar.php';
 // Database connection
 include 'connect.php';
 
-// Fetch streams from database
-$sql = "SELECT * FROM streams WHERE is_active = 1 ORDER BY name";
+// Fetch streams from database with settings
+$sql = "SELECT s.id, s.name, s.code, s.is_active,
+               ss.period_start, ss.period_end, ss.break_start, ss.break_end, ss.active_days
+        FROM streams s
+        LEFT JOIN stream_settings ss ON ss.stream_id = s.id
+        WHERE s.is_active = 1
+        ORDER BY s.name";
 $result = $conn->query($sql);
 
-// Handle form submission for adding new stream
+// Handle form submission for adding/editing/deleting stream (streams + stream_settings)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     if ($_POST['action'] === 'add') {
         $name = $conn->real_escape_string($_POST['name']);
+        $code = strtoupper(trim($conn->real_escape_string($_POST['code'] ?? '')));
         $period_start = $conn->real_escape_string($_POST['period_start']);
         $period_end = $conn->real_escape_string($_POST['period_end']);
         $break_start = $conn->real_escape_string($_POST['break_start']);
         $break_end = $conn->real_escape_string($_POST['break_end']);
         $active_days = isset($_POST['active_days']) ? implode(',', $_POST['active_days']) : '';
         $is_active = isset($_POST['is_active']) ? 1 : 0;
-        
-        $sql = "INSERT INTO streams (name, period_start, period_end, break_start, break_end, active_days, is_active) VALUES (?, ?, ?, ?, ?, ?, ?)";
-        $stmt = $conn->prepare($sql);
-        $stmt->bind_param("ssssssi", $name, $period_start, $period_end, $break_start, $break_end, $active_days, $is_active);
-        
-        if ($stmt->execute()) {
-            $success_message = "Stream added successfully!";
+        if ($name === '' || $code === '') {
+            $error_message = "Name and Code are required.";
         } else {
-            $error_message = "Error adding stream: " . $conn->error;
+            // Insert into streams
+            $sql = "INSERT INTO streams (name, code, is_active) VALUES (?, ?, ?)";
+            $stmt = $conn->prepare($sql);
+            $stmt->bind_param("ssi", $name, $code, $is_active);
+            if ($stmt && $stmt->execute()) {
+                $stream_id = $stmt->insert_id;
+                $stmt->close();
+                // Insert default settings
+                $sql2 = "INSERT INTO stream_settings (stream_id, period_start, period_end, break_start, break_end, active_days) VALUES (?, ?, ?, ?, ?, ?)";
+                $stmt2 = $conn->prepare($sql2);
+                $stmt2->bind_param("isssss", $stream_id, $period_start, $period_end, $break_start, $break_end, $active_days);
+                if ($stmt2->execute()) {
+                    $success_message = "Stream added successfully!";
+                } else {
+                    $error_message = "Stream created but failed to save settings: " . $conn->error;
+                }
+                $stmt2->close();
+            } else {
+                $error_message = "Error adding stream: " . $conn->error;
+                if ($stmt) { $stmt->close(); }
+            }
         }
-        $stmt->close();
     } elseif ($_POST['action'] === 'delete' && isset($_POST['id'])) {
         $id = $conn->real_escape_string($_POST['id']);
         $sql = "UPDATE streams SET is_active = 0 WHERE id = ?";
@@ -46,36 +66,55 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     } elseif ($_POST['action'] === 'edit' && isset($_POST['id'])) {
         $id = $conn->real_escape_string($_POST['id']);
         $name = $conn->real_escape_string($_POST['name']);
+        $code = strtoupper(trim($conn->real_escape_string($_POST['code'] ?? '')));
         $period_start = $conn->real_escape_string($_POST['period_start']);
         $period_end = $conn->real_escape_string($_POST['period_end']);
         $break_start = $conn->real_escape_string($_POST['break_start']);
         $break_end = $conn->real_escape_string($_POST['break_end']);
         $active_days = isset($_POST['active_days']) ? implode(',', $_POST['active_days']) : '';
         $is_active = isset($_POST['is_active']) ? 1 : 0;
-        
-        $sql = "UPDATE streams SET name = ?, period_start = ?, period_end = ?, break_start = ?, break_end = ?, active_days = ?, is_active = ? WHERE id = ?";
-        $stmt = $conn->prepare($sql);
-        $stmt->bind_param("ssssssii", $name, $period_start, $period_end, $break_start, $break_end, $active_days, $is_active, $id);
-        
-        if ($stmt->execute()) {
-            $success_message = "Stream updated successfully!";
+        if ($name === '' || $code === '') {
+            $error_message = "Name and Code are required.";
         } else {
-            $error_message = "Error updating stream: " . $conn->error;
+            // Update streams
+            $sql = "UPDATE streams SET name = ?, code = ?, is_active = ? WHERE id = ?";
+            $stmt = $conn->prepare($sql);
+            $stmt->bind_param("ssii", $name, $code, $is_active, $id);
+            $ok1 = $stmt && $stmt->execute();
+            if ($stmt) $stmt->close();
+
+            // Upsert stream_settings
+            $sql2 = "INSERT INTO stream_settings (stream_id, period_start, period_end, break_start, break_end, active_days)
+                     VALUES (?, ?, ?, ?, ?, ?)
+                     ON DUPLICATE KEY UPDATE period_start = VALUES(period_start), period_end = VALUES(period_end),
+                     break_start = VALUES(break_start), break_end = VALUES(break_end), active_days = VALUES(active_days)";
+            $stmt2 = $conn->prepare($sql2);
+            $stmt2->bind_param("isssss", $id, $period_start, $period_end, $break_start, $break_end, $active_days);
+            $ok2 = $stmt2 && $stmt2->execute();
+            if ($stmt2) $stmt2->close();
+
+            if ($ok1 && $ok2) {
+                $success_message = "Stream updated successfully!";
+            } else {
+                $error_message = "Error updating stream or settings: " . $conn->error;
+            }
         }
-        $stmt->close();
     }
 }
 
 // Refresh the result after any changes
 if (isset($success_message) || isset($error_message)) {
-    $result = $conn->query("SELECT * FROM streams WHERE is_active = 1 ORDER BY name");
+    $result = $conn->query("SELECT s.id, s.name, s.code, s.is_active, ss.period_start, ss.period_end, ss.break_start, ss.break_end, ss.active_days FROM streams s LEFT JOIN stream_settings ss ON ss.stream_id = s.id WHERE s.is_active = 1 ORDER BY s.name");
 }
 
 // Get stream data for editing
 $edit_stream = null;
 if (isset($_GET['edit']) && is_numeric($_GET['edit'])) {
     $edit_id = $conn->real_escape_string($_GET['edit']);
-    $edit_sql = "SELECT * FROM streams WHERE id = ? AND is_active = 1";
+    $edit_sql = "SELECT s.id, s.name, s.code, s.is_active, ss.period_start, ss.period_end, ss.break_start, ss.break_end, ss.active_days
+                 FROM streams s
+                 LEFT JOIN stream_settings ss ON ss.stream_id = s.id
+                 WHERE s.id = ? AND s.is_active = 1";
     $edit_stmt = $conn->prepare($edit_sql);
     $edit_stmt->bind_param("i", $edit_id);
     $edit_stmt->execute();
@@ -119,6 +158,7 @@ if (isset($_GET['edit']) && is_numeric($_GET['edit'])) {
                 <thead>
                     <tr>
                         <th>Stream Name</th>
+                        <th>Code</th>
                         <th>Active Days</th>
                         <th>Period Time</th>
                         <th>Break Time</th>
@@ -130,6 +170,7 @@ if (isset($_GET['edit']) && is_numeric($_GET['edit'])) {
                         <?php while ($row = $result->fetch_assoc()): ?>
                             <tr>
                                 <td><strong><?php echo htmlspecialchars($row['name']); ?></strong></td>
+                                <td><span class="badge bg-primary"><?php echo htmlspecialchars($row['code']); ?></span></td>
                                 <td>
                                     <?php 
                                     if (!empty($row['active_days'])) {
@@ -199,6 +240,12 @@ if (isset($_GET['edit']) && is_numeric($_GET['edit'])) {
                         <label for="name" class="form-label">Stream Name *</label>
                         <input type="text" class="form-control" id="name" name="name" 
                                value="<?php echo $edit_stream ? htmlspecialchars($edit_stream['name']) : ''; ?>" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="code" class="form-label">Stream Code *</label>
+                        <input type="text" class="form-control" id="code" name="code" 
+                               value="<?php echo $edit_stream ? htmlspecialchars($edit_stream['code']) : ''; ?>" required>
+                        <div class="form-text">Short code, e.g., REG, EVE, SAN, MST</div>
                     </div>
                     
                     <div class="mb-3">
