@@ -6,6 +6,13 @@ include 'includes/sidebar.php';
 // Database connection
 include 'connect.php';
 
+// Check whether the `departments` table has a `short_name` column (some DBs may lack it)
+$dept_short_exists = false;
+$col_check = $conn->query("SHOW COLUMNS FROM departments LIKE 'short_name'");
+if ($col_check && $col_check->num_rows > 0) {
+    $dept_short_exists = true;
+}
+
 // Fetch streams from database
 $streams_sql = "SELECT id, name, code FROM streams WHERE is_active = 1 ORDER BY name";
 $streams_result = $conn->query($streams_sql);
@@ -25,7 +32,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $is_active = isset($_POST['is_active']) ? 1 : 0;
         
         // Get department short name and level name
-        $dept_query = "SELECT short_name FROM departments WHERE id = ?";
+        if ($dept_short_exists) {
+            $dept_query = "SELECT short_name, name FROM departments WHERE id = ?";
+        } else {
+            $dept_query = "SELECT name FROM departments WHERE id = ?";
+        }
         $dept_stmt = $conn->prepare($dept_query);
         $dept_stmt->bind_param("i", $department_id);
         $dept_stmt->execute();
@@ -42,7 +53,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $level_stmt->close();
         
         if ($department && $level) {
-            $dept_short = $department['short_name'] ?: substr($department['name'], 0, 3);
+            // Use short_name when available, otherwise derive from department name
+            $dept_short = ($department['short_name'] ?? '') ?: substr($department['name'], 0, 3);
             $level_name = $level['name'];
             
             // Calculate number of classes needed (max 100 students per class)
@@ -103,22 +115,79 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 include 'includes/stream_manager.php';
 $streamManager = getStreamManager();
 
-// Fetch classes with department and stream information
-$sql = "SELECT c.*, d.name as department_name, d.short_name as department_short, 
-               s.name as stream_name, s.code as stream_code
-        FROM classes c 
-        LEFT JOIN departments d ON c.department_id = d.id 
-        LEFT JOIN streams s ON c.stream_id = s.id
-        WHERE c.is_active = 1 AND c.stream_id = " . $streamManager->getCurrentStreamId() . "
-        ORDER BY c.name";
+// Fetch classes with related program, level and stream information
+// Detect commonly used foreign keys on `classes` and join accordingly
+$class_has_program = false;
+$class_has_level = false;
+$class_has_stream = false;
+$col = $conn->query("SHOW COLUMNS FROM classes LIKE 'program_id'");
+if ($col && $col->num_rows > 0) {
+    $class_has_program = true;
+}
+$col = $conn->query("SHOW COLUMNS FROM classes LIKE 'level_id'");
+if ($col && $col->num_rows > 0) {
+    $class_has_level = true;
+}
+$col = $conn->query("SHOW COLUMNS FROM classes LIKE 'stream_id'");
+if ($col && $col->num_rows > 0) {
+    $class_has_stream = true;
+}
+
+$select_extra = [];
+$from_clause = "FROM classes c ";
+
+// Join programs
+if ($class_has_program) {
+    $select_extra[] = "p.name as program_name";
+    $select_extra[] = "p.code as program_code";
+    $from_clause .= "LEFT JOIN programs p ON c.program_id = p.id ";
+}
+
+// Join levels
+if ($class_has_level) {
+    $select_extra[] = "l.name as level_name";
+    $from_clause .= "LEFT JOIN levels l ON c.level_id = l.id ";
+}
+
+// Join streams
+if ($class_has_stream) {
+    $select_extra[] = "s.name as stream_name";
+    $select_extra[] = "s.code as stream_code";
+    $from_clause .= "LEFT JOIN streams s ON c.stream_id = s.id ";
+}
+
+// Preserve department short selection (only used when programs/departments are linked)
+if ($dept_short_exists && !$class_has_program) {
+    // If we don't have program join, but departments are expected elsewhere, include department placeholder
+    $select_extra[] = $dept_short_exists ? "d.short_name as department_short" : "SUBSTRING(d.name,1,3) as department_short";
+}
+
+$select_clause = "c.*";
+if (!empty($select_extra)) {
+    $select_clause .= ", " . implode(', ', $select_extra);
+}
+
+$where_clause = "WHERE c.is_active = 1";
+if ($class_has_stream) {
+    $where_clause .= " AND c.stream_id = " . $streamManager->getCurrentStreamId();
+}
+
+$sql = "SELECT " . $select_clause . "\n        " . $from_clause . "\n        " . $where_clause . "\n        ORDER BY c.name";
 $result = $conn->query($sql);
 
 // Fetch departments for dropdown (filtered by stream)
-$dept_sql = "SELECT id, name, short_name FROM departments WHERE is_active = 1 AND stream_id = " . $streamManager->getCurrentStreamId() . " ORDER BY name";
+$dept_select_cols = $dept_short_exists ? "id, name, short_name" : "id, name";
+$dept_sql = "SELECT " . $dept_select_cols . " FROM departments WHERE is_active = 1 AND stream_id = " . $streamManager->getCurrentStreamId() . " ORDER BY name";
 $dept_result = $conn->query($dept_sql);
 
 // Fetch levels for dropdown
-$level_sql = "SELECT id, name FROM levels ORDER BY year_number";
+// Use year_number for ordering when available, otherwise fall back to id
+$level_order_col = 'year_number';
+$col_check = $conn->query("SHOW COLUMNS FROM levels LIKE 'year_number'");
+if (!($col_check && $col_check->num_rows > 0)) {
+    $level_order_col = 'id';
+}
+$level_sql = "SELECT id, name FROM levels ORDER BY " . $level_order_col;
 $level_result = $conn->query($level_sql);
 
 
@@ -166,7 +235,7 @@ $level_result = $conn->query($level_sql);
                         <?php while ($row = $result->fetch_assoc()): ?>
                             <tr>
                                 <td><strong><?php echo htmlspecialchars($row['name']); ?></strong></td>
-                                <td><span class="badge bg-warning"><?php echo htmlspecialchars($row['level']); ?></span></td>
+                                <td><span class="badge bg-warning"><?php echo htmlspecialchars($row['level'] ?? ($row['level_name'] ?? 'N/A')); ?></span></td>
                                 <td>
                                     <span class="badge bg-info"><?php echo htmlspecialchars($row['program_name'] ?? 'N/A'); ?></span>
                                     <br><small class="text-muted"><?php echo htmlspecialchars($row['program_code'] ?? ''); ?></small>
