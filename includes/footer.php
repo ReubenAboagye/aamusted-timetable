@@ -140,32 +140,31 @@
           });
       });
       
-      // Sidebar dropdown functionality
+      // Initialize Bootstrap collapse functionality for sidebar dropdowns
       const dropdownHeaders = document.querySelectorAll('.dropdown-header');
       dropdownHeaders.forEach(header => {
-          header.addEventListener('click', function() {
+          header.addEventListener('click', function(e) {
+              e.preventDefault();
               const targetId = this.getAttribute('data-bs-target');
               const target = document.querySelector(targetId);
-              const isExpanded = this.getAttribute('aria-expanded') === 'true';
               
-              // Close other dropdowns
-              dropdownHeaders.forEach(otherHeader => {
-                  if (otherHeader !== this) {
-                      const otherTargetId = otherHeader.getAttribute('data-bs-target');
-                      const otherTarget = document.querySelector(otherTargetId);
-                      if (otherTarget) {
-                          otherTarget.classList.remove('show');
-                          otherHeader.setAttribute('aria-expanded', 'false');
-                      }
-                  }
-              });
-              
-              // Toggle current dropdown
               if (target) {
-                  if (isExpanded) {
+                  // Toggle the collapse manually
+                  if (target.classList.contains('show')) {
                       target.classList.remove('show');
                       this.setAttribute('aria-expanded', 'false');
                   } else {
+                      // Close other open dropdowns first
+                      document.querySelectorAll('.collapse.show').forEach(openCollapse => {
+                          if (openCollapse !== target) {
+                              openCollapse.classList.remove('show');
+                              const openHeader = document.querySelector(`[data-bs-target="#${openCollapse.id}"]`);
+                              if (openHeader) {
+                                  openHeader.setAttribute('aria-expanded', 'false');
+                              }
+                          }
+                      });
+                      
                       target.classList.add('show');
                       this.setAttribute('aria-expanded', 'true');
                   }
