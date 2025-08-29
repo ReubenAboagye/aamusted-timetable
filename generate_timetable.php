@@ -79,9 +79,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 } else {
                     // Skip if no lecturer is assigned to this course
                     $error_count++;
-                    continue;
-                }
-                    
+                        continue;
+                    }
+
                     if ($insert_stmt->execute()) {
                         $success_count++;
                     } else {
@@ -96,7 +96,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 if ($error_count > 0) {
                     $success_message .= " $error_count entries failed.";
                 }
-            } else {
+    } else {
                 $error_message = "No timetable entries could be generated.";
             }
         } else {
@@ -147,21 +147,21 @@ $total_courses = $conn->query("SELECT COUNT(*) as count FROM courses WHERE is_ac
                         <h5 class="mb-0">
                             <i class="fas fa-calendar-alt me-2"></i>Generate Timetable
                         </h5>
-                    </div>
+            </div>
                     <div class="card-body">
                         <?php if ($success_message): ?>
                             <div class="alert alert-success alert-dismissible fade show" role="alert">
                                 <i class="fas fa-check-circle me-2"></i><?php echo $success_message; ?>
-                                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                            </div>
-                        <?php endif; ?>
-                        
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        <?php endif; ?>
+
                         <?php if ($error_message): ?>
                             <div class="alert alert-danger alert-dismissible fade show" role="alert">
                                 <i class="fas fa-exclamation-circle me-2"></i><?php echo $error_message; ?>
-                                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                            </div>
-                        <?php endif; ?>
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        <?php endif; ?>
 
                         <!-- Statistics Cards -->
                         <div class="row mb-4">
@@ -189,9 +189,9 @@ $total_courses = $conn->query("SELECT COUNT(*) as count FROM courses WHERE is_ac
                                         <i class="fas fa-link fa-2x mb-2"></i>
                                         <div class="stat-number"><?php echo $total_assignments; ?></div>
                                         <div>Assignments</div>
-                                    </div>
-                                </div>
-                            </div>
+                    </div>
+                        </div>
+                    </div>
                             <div class="col-md-3">
                                 <div class="card stat-card">
                                     <div class="card-body text-center">
@@ -199,18 +199,18 @@ $total_courses = $conn->query("SELECT COUNT(*) as count FROM courses WHERE is_ac
                                         <div class="stat-number"><?php echo $total_timetable_entries; ?></div>
                                         <div>Timetable Entries</div>
                                     </div>
-                                </div>
-                            </div>
-                        </div>
+                    </div>
+            </div>
+        </div>
 
                         <!-- Generation Controls -->
                         <div class="row">
                             <div class="col-md-8">
                                 <div class="card">
-                                    <div class="card-header">
+                <div class="card-header">
                                         <h6 class="mb-0">Timetable Generation</h6>
-                                    </div>
-                                    <div class="card-body">
+                </div>
+                <div class="card-body">
                                         <p class="text-muted">
                                             This will generate a new timetable based on current class-course assignments.
                                             Any existing timetable entries will be cleared.
@@ -221,8 +221,8 @@ $total_courses = $conn->query("SELECT COUNT(*) as count FROM courses WHERE is_ac
                                             <button type="submit" class="btn btn-primary btn-lg" 
                                                     onclick="return confirm('This will clear the existing timetable and generate a new one. Continue?')">
                                                 <i class="fas fa-magic me-2"></i>Generate New Timetable
-                                            </button>
-                                        </form>
+                            </button>
+                        </form>
                                     </div>
                                 </div>
                             </div>
@@ -284,18 +284,18 @@ $total_courses = $conn->query("SELECT COUNT(*) as count FROM courses WHERE is_ac
                                                         <span class="badge bg-success">Active</span>
                                                     </td>
                                                 </tr>
-                                                <?php endwhile; ?>
+                                        <?php endwhile; ?>
                                             </tbody>
                                         </table>
                                     </div>
                                 </div>
                             </div>
-                        <?php endif; ?>
+                                    <?php endif; ?>
                     </div>
                 </div>
             </div>
-        </div>
     </div>
+</div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
 </body>

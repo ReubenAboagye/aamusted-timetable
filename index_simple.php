@@ -1,57 +1,8 @@
-<?php
-// Query counts for each module
-include 'connect.php';
-
-// Initialize variables with default values
-$dept_count = 0;
-$course_count = 0;
-$lect_count = 0;
-$room_count = 0;
-$timetable_count = 0;
-
-// Department count
-$dept_query = "SELECT COUNT(*) AS dept_count FROM departments WHERE is_active = 1";
-$dept_result = $conn->query($dept_query);
-if ($dept_result) {
-    $dept_row = $dept_result->fetch_assoc();
-    $dept_count = $dept_row['dept_count'];
-}
-
-// Course count
-$course_query = "SELECT COUNT(*) AS course_count FROM courses WHERE is_active = 1";
-$course_result = $conn->query($course_query);
-if ($course_result) {
-    $course_row = $course_result->fetch_assoc();
-    $course_count = $course_row['course_count'];
-}
-
-// Lecturer count
-$lect_query = "SELECT COUNT(*) AS lect_count FROM lecturers WHERE is_active = 1";
-$lect_result = $conn->query($lect_query);
-if ($lect_result) {
-    $lect_row = $lect_result->fetch_assoc();
-    $lect_count = $lect_row['lect_count'];
-}
-
-// Room count
-$room_query = "SELECT COUNT(*) AS room_count FROM rooms WHERE is_active = 1";
-$room_result = $conn->query($room_query);
-if ($room_result) {
-    $room_row = $room_result->fetch_assoc();
-    $room_count = $room_row['room_count'];
-}
-
-// Timetable entries count
-$timetable_query = "SELECT COUNT(*) AS timetable_count FROM timetable";
-$timetable_result = $conn->query($timetable_query);
-if ($timetable_result) {
-    $timetable_row = $timetable_result->fetch_assoc();
-    $timetable_count = $timetable_row['timetable_count'];
-}
-
-$conn->close();
+<?php 
+$pageTitle = 'Dashboard'; 
+include 'includes/header.php'; 
+include 'includes/sidebar.php'; 
 ?>
-<?php $pageTitle = 'Dashboard'; include 'includes/header.php'; include 'includes/sidebar.php'; ?>
 
 <style>
   /* Dashboard Cards */
@@ -115,26 +66,18 @@ $conn->close();
   <div class="row g-3 mb-3" id="dashboardGrid">
     <!-- Main Dashboard Cards -->
     <div class="col-md-3">
-      <?php if ($timetable_count > 0): ?>
-        <a href="view_timetable.php" class="grid-button">
-          <i class="fas fa-table"></i>
-          <div>View Timetable</div>
-          <span class="count-circle"><?php echo $timetable_count; ?></span>
-        </a>
-      <?php else: ?>
-        <a href="generate_timetable.php" class="grid-button">
-          <i class="fas fa-calendar-plus"></i>
-          <div>Generate Timetable</div>
-          <span class="count-circle">0</span>
-        </a>
-      <?php endif; ?>
+      <a href="view_timetable.php" class="grid-button">
+        <i class="fas fa-table"></i>
+        <div>View Timetable</div>
+        <span class="count-circle">12</span>
+      </a>
     </div>
     
     <div class="col-md-3">
-      <a href="department.php" class="grid-button">
+      <a href="adddepartmentform.php" class="grid-button">
         <i class="fas fa-building"></i>
         <div>Departments</div>
-        <span class="count-circle"><?php echo $dept_count; ?></span>
+        <span class="count-circle">5</span>
       </a>
     </div>
     
@@ -142,7 +85,7 @@ $conn->close();
       <a href="lecturers.php" class="grid-button">
         <i class="fas fa-chalkboard-teacher"></i>
         <div>Lecturers</div>
-        <span class="count-circle"><?php echo $lect_count; ?></span>
+        <span class="count-circle">15</span>
       </a>
     </div>
     
@@ -150,7 +93,7 @@ $conn->close();
       <a href="rooms.php" class="grid-button">
         <i class="fas fa-door-open"></i>
         <div>Rooms</div>
-        <span class="count-circle"><?php echo $room_count; ?></span>
+        <span class="count-circle">12</span>
       </a>
     </div>
   </div>
@@ -161,7 +104,7 @@ $conn->close();
       <h5 class="card-title">Dashboard Overview</h5>
       <p class="card-text">Welcome to the University Timetable Generator! This dashboard provides quick access to the core modules:</p>
       <ul class="mb-0">
-        <li><strong>Timetable:</strong> <?php echo ($timetable_count > 0) ? 'View existing timetables' : 'Generate new timetables'; ?></li>
+        <li><strong>Timetable:</strong> View existing timetables</li>
         <li><strong>Departments:</strong> Manage academic departments and structure</li>
         <li><strong>Lecturers:</strong> Manage teaching staff and assignments</li>
         <li><strong>Rooms:</strong> Manage physical spaces and facilities</li>
@@ -223,5 +166,3 @@ $conn->close();
     });
   }
 </script>
-</body>
-</html>

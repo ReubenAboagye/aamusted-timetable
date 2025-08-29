@@ -29,7 +29,8 @@ if (!isset($pageTitle)) {
       background-color: var(--bg-color);
       margin: 0;
       padding-top: 70px; /* For fixed header */
-      overflow: hidden;
+      overflow-x: hidden;
+      overflow-y: auto;
       font-size: 14px;
     }
     .navbar { background-color: var(--primary-color); position: fixed; top: 0; width: 100%; z-index: 1050; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
@@ -372,10 +373,13 @@ if (!isset($pageTitle)) {
   document.addEventListener('DOMContentLoaded', function() {
     // This will be populated by PHP when the page loads
     const currentStreamId = '<?php 
-      if (isset($conn)) {
-        include_once "includes/stream_manager.php";
-        $streamManager = getStreamManager();
-        echo $streamManager->getCurrentStreamId();
+      if (isset($conn) && function_exists('getStreamManager')) {
+        try {
+          $streamManager = getStreamManager();
+          echo $streamManager->getCurrentStreamId();
+        } catch (Exception $e) {
+          echo "1";
+        }
       } else {
         echo "1";
       }

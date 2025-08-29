@@ -10,28 +10,28 @@ $stream_filter = isset($_GET['stream_id']) ? (int)$_GET['stream_id'] : 0;
 // Build the main query for timetable data
 $main_query = "
     SELECT 
-        t.id,
+                    t.id,
         t.day_id,
         t.time_slot_id,
         c.name as class_name,
         co.course_code,
         co.course_name,
-        d.name as day_name,
+                    d.name as day_name,
         ts.start_time,
         ts.end_time,
         r.name as room_name,
         r.capacity,
-        l.name as lecturer_name,
+                    l.name as lecturer_name,
         l.id as lecturer_id,
         cc.id as class_course_id,
         lc.id as lecturer_course_id
-    FROM timetable t
+                  FROM timetable t
     JOIN class_courses cc ON t.class_course_id = cc.id
     JOIN classes c ON cc.class_id = c.id
     JOIN courses co ON cc.course_id = co.id
-    JOIN days d ON t.day_id = d.id
+                  JOIN days d ON t.day_id = d.id
     JOIN time_slots ts ON t.time_slot_id = ts.id
-    JOIN rooms r ON t.room_id = r.id
+                  JOIN rooms r ON t.room_id = r.id
     LEFT JOIN lecturer_courses lc ON t.lecturer_course_id = lc.id
     LEFT JOIN lecturers l ON lc.lecturer_id = l.id
     WHERE 1=1
@@ -71,7 +71,7 @@ $stmt = $conn->prepare($main_query);
 if (!empty($params)) {
     $stmt->bind_param($types, ...$params);
 }
-$stmt->execute();
+            $stmt->execute();
 $timetable_result = $stmt->get_result();
 
 // Get filter options
@@ -278,7 +278,7 @@ while ($entry = $timetable_result->fetch_assoc()) {
                         <h5 class="mb-0">
                             <i class="fas fa-calendar-alt me-2"></i>View Timetable
                         </h5>
-                        <div class="d-flex gap-2">
+            <div class="d-flex gap-2">
                             <a href="generate_timetable.php" class="btn btn-outline-primary">
                                 <i class="fas fa-plus me-2"></i>Generate Timetable
                             </a>
@@ -325,9 +325,9 @@ while ($entry = $timetable_result->fetch_assoc()) {
                                         <div>Working Days</div>
                                     </div>
                                 </div>
-                            </div>
-                        </div>
-                        
+            </div>
+        </div>
+        
                         <!-- Additional Statistics Row -->
                         <div class="row mb-4">
                             <div class="col-md-4">
@@ -356,7 +356,7 @@ while ($entry = $timetable_result->fetch_assoc()) {
                                         <div>Time Periods</div>
                                     </div>
                                 </div>
-                        </div>
+            </div>
 
                         <!-- View Toggle -->
                         <div class="view-toggle">
@@ -366,7 +366,7 @@ while ($entry = $timetable_result->fetch_assoc()) {
                             <button class="btn btn-outline-secondary" onclick="showListView()">
                                 <i class="fas fa-list me-2"></i>List View
                             </button>
-                        </div>
+            </div>
 
                         <!-- Filters -->
                         <div class="filters-section">
@@ -376,7 +376,7 @@ while ($entry = $timetable_result->fetch_assoc()) {
                                     <label for="class_id" class="form-label">Class</label>
                                     <select name="class_id" id="class_id" class="form-select">
                                         <option value="">All Classes</option>
-                                        <?php while ($class = $classes_result->fetch_assoc()): ?>
+                                <?php while ($class = $classes_result->fetch_assoc()): ?>
                                             <option value="<?php echo $class['id']; ?>" 
                                                     <?php echo $class_filter == $class['id'] ? 'selected' : ''; ?>>
                                                 <?php echo htmlspecialchars($class['name']); ?>
@@ -392,10 +392,10 @@ while ($entry = $timetable_result->fetch_assoc()) {
                                             <option value="<?php echo $day['id']; ?>" 
                                                     <?php echo $day_filter == $day['id'] ? 'selected' : ''; ?>>
                                                 <?php echo htmlspecialchars($day['name']); ?>
-                                            </option>
-                                        <?php endwhile; ?>
-                                    </select>
-                                </div>
+                                    </option>
+                                <?php endwhile; ?>
+                        </select>
+                    </div>
                                 <div class="col-md-2">
                                     <label for="room_id" class="form-label">Room</label>
                                     <select name="room_id" id="room_id" class="form-select">
@@ -404,11 +404,11 @@ while ($entry = $timetable_result->fetch_assoc()) {
                                             <option value="<?php echo $room['id']; ?>" 
                                                     <?php echo $room_filter == $room['id'] ? 'selected' : ''; ?>>
                                                 <?php echo htmlspecialchars($room['name']); ?>
-                                            </option>
-                                        <?php endwhile; ?>
-                                    </select>
-                                </div>
-                                <div class="col-md-2">
+                                    </option>
+                                <?php endwhile; ?>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
                                     <label for="stream_id" class="form-label">Stream</label>
                                     <select name="stream_id" id="stream_id" class="form-select">
                                         <option value="">All Streams</option>
@@ -424,14 +424,14 @@ while ($entry = $timetable_result->fetch_assoc()) {
                                     <div class="d-flex gap-2 w-100">
                                         <button type="submit" class="btn btn-primary flex-fill">
                                             <i class="fas fa-filter me-2"></i>Apply Filters
-                                        </button>
+                        </button>
                                         <a href="view_timetable.php" class="btn btn-outline-secondary">
                                             <i class="fas fa-times me-2"></i>Clear
                                         </a>
                                     </div>
-                                </div>
-                            </form>
-                        </div>
+                    </div>
+                </form>
+            </div>
 
                         <!-- Grid View -->
                         <div id="grid-view">
@@ -443,7 +443,7 @@ while ($entry = $timetable_result->fetch_assoc()) {
                                             <span class="badge bg-info ms-2">Filtered</span>
                                         <?php endif; ?>
                                     </h6>
-                                </div>
+        </div>
                                 <div class="card-body">
                                     <div class="timetable-grid">
                                         <table class="table table-bordered">
@@ -452,15 +452,15 @@ while ($entry = $timetable_result->fetch_assoc()) {
                                                     <th class="time-slot-header">Time</th>
                                                     <?php foreach ($days as $day_id => $day_name): ?>
                                                         <th class="day-header"><?php echo htmlspecialchars($day_name); ?></th>
-                                                    <?php endforeach; ?>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
+                                <?php endforeach; ?>
+                            </tr>
+                        </thead>
+                        <tbody>
                                                 <?php foreach ($time_slots as $time_slot_id => $time_slot): ?>
                                                 <tr>
                                                     <td class="time-slot-header">
                                                         <?php echo htmlspecialchars(substr($time_slot['start_time'], 0, 5) . ' - ' . substr($time_slot['end_time'], 0, 5)); ?>
-                                                    </td>
+                                    </td>
                                                     <?php foreach ($days as $day_id => $day_name): ?>
                                                         <td class="timetable-cell <?php 
                                                             if (isset($timetable_grid[$day_id][$time_slot_id]) && !empty($timetable_grid[$day_id][$time_slot_id])) {
@@ -489,7 +489,7 @@ while ($entry = $timetable_result->fetch_assoc()) {
                                                                      onclick="editTimetableEntry(<?php echo $entry['id']; ?>)"
                                                                      title="Click to edit - <?php echo htmlspecialchars($entry['class_name'] . ' - ' . $entry['course_code']); ?>">
                                                                     <div class="class-name"><?php echo htmlspecialchars($entry['class_name']); ?></div>
-                                                                    <div class="course-code"><?php echo htmlspecialchars($entry['course_code']); ?></div>
+                                                        <div class="course-code"><?php echo htmlspecialchars($entry['course_code']); ?></div>
                                                                     <?php if ($entry['lecturer_name']): ?>
                                                                         <div class="lecturer-name"><?php echo htmlspecialchars($entry['lecturer_name']); ?></div>
                                                                     <?php endif; ?>
@@ -507,31 +507,31 @@ while ($entry = $timetable_result->fetch_assoc()) {
                                                                 <div class="empty-cell">
                                                                     <i class="fas fa-plus text-muted"></i><br>
                                                                     <small>No classes</small>
-                                                                </div>
-                                                            <?php endif; ?>
-                                                        </td>
-                                                    <?php endforeach; ?>
-                                                </tr>
-                                                <?php endforeach; ?>
-                                            </tbody>
-                                        </table>
+                                                    </div>
+                                                <?php endif; ?>
+                                            </td>
+                                    <?php endforeach; ?>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
                                     </div>
                                 </div>
-                            </div>
-                        </div>
+                </div>
+            </div>
 
                         <!-- List View (Hidden by default) -->
                         <div id="list-view" style="display: none;">
                             <div class="card">
-                                <div class="card-header">
+                <div class="card-header">
                                     <h6 class="mb-0">
                                         <i class="fas fa-list me-2"></i>Timetable List View
                                         <?php if ($class_filter || $day_filter || $room_filter || $stream_filter): ?>
                                             <span class="badge bg-info ms-2">Filtered</span>
                                         <?php endif; ?>
                                     </h6>
-                                </div>
-                                <div class="card-body">
+                </div>
+                <div class="card-body">
                                     <div class="table-responsive">
                                         <table class="table table-striped table-hover">
                                             <thead>
@@ -581,21 +581,21 @@ while ($entry = $timetable_result->fetch_assoc()) {
                                                                     onclick="deleteEntry(<?php echo $entry['id']; ?>)" title="Delete">
                                                                 <i class="fas fa-trash"></i>
                                                             </button>
-                                                        </div>
+                            </div>
                                                     </td>
                                                 </tr>
                                                 <?php endwhile; ?>
                                             </tbody>
                                         </table>
-                                    </div>
-                                </div>
+                            </div>
+                        </div>
                             </div>
                         </div>
                     </div>
                 </div>
             </div>
-        </div>
     </div>
+</div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
@@ -639,6 +639,6 @@ while ($entry = $timetable_result->fetch_assoc()) {
                 form.submit();
             }
         }
-    </script>
+</script>
 </body>
 </html>
