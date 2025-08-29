@@ -33,16 +33,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $success_message = 'Bulk mappings added.';
             } else { $error_message = 'Prepare failed: ' . $conn->error; }
         }
-    } elseif ($_POST['action'] === 'delete') {
-        $id = (int)($_POST['id'] ?? 0);
-        if ($id > 0) {
-            $stmt = $conn->prepare("DELETE FROM lecturer_courses WHERE id = ?");
-            if ($stmt) {
-                $stmt->bind_param('i', $id);
-                if ($stmt->execute()) { $success_message = 'Mapping removed.'; } else { $error_message = 'Delete failed: ' . $conn->error; }
-                $stmt->close();
-            } else { $error_message = 'Prepare failed: ' . $conn->error; }
-        }
     }
 }
 
@@ -102,14 +92,9 @@ $mappings = $conn->query("SELECT l.id as lecturer_id, l.name AS lecturer_name,
                                 <td><?php echo htmlspecialchars($m['lecturer_name']); ?></td>
                                 <td><?php echo htmlspecialchars($m['course_codes']); ?></td>
                                 <td>
-                                    <button class="btn btn-sm btn-outline-primary me-1" onclick="editMapping(<?php echo $m['lecturer_id']; ?>)">
+                                    <button class="btn btn-sm btn-outline-primary" onclick="editMapping(<?php echo $m['lecturer_id']; ?>)">
                                         <i class="fas fa-edit"></i>
                                     </button>
-                                    <form method="POST" onsubmit="return confirm('Remove this mapping?')" style="display:inline;">
-                                        <input type="hidden" name="action" value="delete" />
-                                        <input type="hidden" name="id" value="<?php echo $m['lecturer_id']; ?>" />
-                                        <button class="btn btn-sm btn-outline-danger"><i class="fas fa-trash"></i></button>
-                                    </form>
                                 </td>
                             </tr>
                         <?php endwhile; ?>

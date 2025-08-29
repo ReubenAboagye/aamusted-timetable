@@ -53,17 +53,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 }
 
 // Data for UI
-$sessions = $conn->query("SELECT id, semester_name, academic_year FROM sessions WHERE is_active = 1 ORDER BY academic_year DESC, semester_number");
-$departments = $conn->query("SELECT id, name FROM departments WHERE is_active = 1 ORDER BY name");
 $levels = $conn->query("SELECT id, name, year_number FROM levels ORDER BY year_number");
-
-$selected_session = isset($_GET['session_id']) ? (int)$_GET['session_id'] : 0;
-if ($selected_session <= 0 && $sessions && $sessions->num_rows > 0) {
-    $first = $sessions->fetch_assoc();
-    $selected_session = (int)$first['id'];
-    // reset pointer
-    $sessions = $conn->query("SELECT id, semester_name, academic_year FROM sessions WHERE is_active = 1 ORDER BY academic_year DESC, semester_number");
-}
+$departments = $conn->query("SELECT id, name FROM departments WHERE is_active = 1 ORDER BY name");
 
 $selected_department = isset($_GET['department_id']) ? (int)$_GET['department_id'] : 0;
 $selected_level_id = isset($_GET['level_id']) ? (int)$_GET['level_id'] : 0;
@@ -102,18 +93,105 @@ $courses = $courses_stmt ? $courses_stmt->get_result() : $conn->query("SELECT id
 if ($courses_stmt) { $courses_stmt->close(); }
 
 $mappings = null;
-if ($selected_session > 0) {
-    $stmt = $conn->prepare("SELECT cc.id, cl.name AS class_name, co.name AS course_name, co.code
-                            FROM class_courses cc
-                            JOIN classes cl ON cl.id = cc.class_id
-                            JOIN courses co ON co.id = cc.course_id
-                            WHERE cc.session_id = ?
-                            ORDER BY cl.name, co.name");
-    if ($stmt) {
-        $stmt->bind_param('i', $selected_session);
-        $stmt->execute();
-        $mappings = $stmt->get_result();
-        $stmt->close();
+// Get all active sessions to identify semester 1 and 2
+$all_sessions = $conn->query("SELECT id, semester_number, semester_name, academic_year FROM sessions WHERE is_active = 1 ORDER BY semester_number");
+$semester1_id = null;
+$semester2_id = null;
+
+if ($all_sessions) {
+    while ($sess = $all_sessions->fetch_assoc()) {
+        if ($sess['semester_number'] == 1) {
+            $semester1_id = $sess['id'];
+        } elseif ($sess['semester_number'] == 2) {
+            $semester2_id = $sess['id'];
+        }
+    }
+}
+
+// Get classes with their courses for both semesters
+$stmt = $conn->prepare("
+    SELECT 
+        cl.id as class_id,
+        cl.name AS class_name,
+        cl.department_id,
+        cl.level
+    FROM classes cl 
+    WHERE cl.is_active = 1
+    " . ($selected_department > 0 ? "AND cl.department_id = ?" : "") . "
+    " . ($level_name ? "AND cl.level = ?" : "") . "
+    ORDER BY cl.name
+");
+
+if ($stmt) {
+    $params = [];
+    $types = '';
+    if ($selected_department > 0) {
+        $params[] = $selected_department;
+        $types .= 'i';
+    }
+    if ($level_name) {
+        $params[] = $level_name;
+        $types .= 's';
+    }
+    
+    if (!empty($params)) {
+        $stmt->bind_param($types, ...$params);
+    }
+    
+    $stmt->execute();
+    $classes_result = $stmt->get_result();
+    $stmt->close();
+    
+    // Build the mappings array with semester data
+    $mappings = [];
+    if ($classes_result) {
+        while ($class = $classes_result->fetch_assoc()) {
+            $class_id = $class['class_id'];
+            
+            // Get semester 1 courses
+            $sem1_courses = [];
+            if ($semester1_id) {
+                $stmt = $conn->prepare("
+                    SELECT co.name, co.code 
+                    FROM class_courses cc
+                    JOIN courses co ON co.id = cc.course_id
+                    WHERE cc.class_id = ? AND cc.session_id = ?
+                    ORDER BY co.name
+                ");
+                $stmt->bind_param('ii', $class_id, $semester1_id);
+                $stmt->execute();
+                $sem1_result = $stmt->get_result();
+                while ($course = $sem1_result->fetch_assoc()) {
+                    $sem1_courses[] = $course['name'] . ' (' . $course['code'] . ')';
+                }
+                $stmt->close();
+            }
+            
+            // Get semester 2 courses
+            $sem2_courses = [];
+            if ($semester2_id) {
+                $stmt = $conn->prepare("
+                    SELECT co.name, co.code 
+                    FROM class_courses cc
+                    JOIN courses co ON co.id = cc.course_id
+                    WHERE cc.class_id = ? AND cc.session_id = ?
+                    ORDER BY co.name
+                ");
+                $stmt->bind_param('ii', $class_id, $semester2_id);
+                $stmt->execute();
+                $sem2_result = $stmt->get_result();
+                while ($course = $sem2_result->fetch_assoc()) {
+                    $sem2_courses[] = $course['name'] . ' (' . $course['code'] . ')';
+                }
+                $stmt->close();
+            }
+            
+            $mappings[] = [
+                'class_name' => $class['class_name'],
+                'semester1_courses' => $sem1_courses,
+                'semester2_courses' => $sem2_courses
+            ];
+        }
     }
 }
 ?>
@@ -142,17 +220,7 @@ if ($selected_session > 0) {
             <div class="card-body">
                 <form method="GET" class="row g-3">
                     <div class="col-md-6">
-                        <label class="form-label">Session</label>
-                        <select name="session_id" class="form-select" onchange="this.form.submit()">
-                            <?php if ($sessions) { while ($s = $sessions->fetch_assoc()) { ?>
-                                <option value="<?php echo $s['id']; ?>" <?php echo ($selected_session == $s['id']) ? 'selected' : ''; ?>>
-                                    <?php echo htmlspecialchars($s['semester_name'] . ' (' . $s['academic_year'] . ')'); ?>
-                                </option>
-                            <?php } } ?>
-                        </select>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label">Department</label>
+                        <label class="form-label">Program</label>
                         <select name="department_id" class="form-select" onchange="this.form.submit()">
                             <option value="">All</option>
                             <?php if ($departments) { while ($d = $departments->fetch_assoc()) { ?>
@@ -162,12 +230,12 @@ if ($selected_session > 0) {
                             <?php } } ?>
                         </select>
                     </div>
-                    <div class="col-md-3">
+                    <div class="col-md-6">
                         <label class="form-label">Level</label>
                         <select name="level_id" class="form-select" onchange="this.form.submit()">
                             <option value="">All</option>
                             <?php if ($levels) { while ($lv = $levels->fetch_assoc()) { ?>
-                                <option value="<?php echo $lv['id']; ?>" <?php echo ($selected_level_id == $lv['id']) ? 'selected' : ''; ?>>
+                                <option value="<?php echo $lv['id']; ?>" <?php echo ($selected_level_id == $lv['id']) ? 'selected' : ''; ?>
                                     <?php echo htmlspecialchars($lv['name']); ?>
                                 </option>
                             <?php } } ?>
@@ -179,62 +247,276 @@ if ($selected_session > 0) {
 
         <div class="card m-3">
             <div class="card-body">
-                <form method="POST" class="row g-3">
-                    <input type="hidden" name="action" value="bulk_add" />
-                    <input type="hidden" name="session_id" value="<?php echo $selected_session; ?>" />
-                    <div class="col-md-6">
-                        <label class="form-label">Classes (multi-select)</label>
-                        <select name="class_ids[]" class="form-select" multiple size="8" required>
-                            <?php if ($classes) { while ($cl = $classes->fetch_assoc()) { ?>
-                                <option value="<?php echo $cl['id']; ?>"><?php echo htmlspecialchars($cl['name']); ?></option>
-                            <?php } } ?>
-                        </select>
-                    </div>
-                    <div class="col-md-6">
-                        <label class="form-label">Courses (multi-select)</label>
-                        <select name="course_ids[]" class="form-select" multiple size="8" required>
-                            <?php if ($courses) { while ($co = $courses->fetch_assoc()) { ?>
-                                <option value="<?php echo $co['id']; ?>"><?php echo htmlspecialchars($co['name'] . ' (' . $co['code'] . ')'); ?></option>
-                            <?php } } ?>
-                        </select>
-                    </div>
-                    <div class="col-12 d-flex justify-content-end">
-                        <button type="submit" class="btn btn-primary"><i class="fas fa-plus me-2"></i>Add Mappings</button>
-                    </div>
-                </form>
-                <div class="mt-2 text-muted"><small>Tip: Filter by Department and Level to select groups like "Level 100 ITE A/B/C" then assign multiple courses at once.</small></div>
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h6 class="mb-0">Course Assignment</h6>
+                    <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#assignCoursesModal">
+                        <i class="fas fa-plus me-2"></i>Assign Courses
+                    </button>
+                </div>
+                <div class="text-muted"><small>Use the filters above to select specific classes, then click "Assign Courses" to assign courses to all filtered classes.</small></div>
             </div>
         </div>
 
+        <!-- Assign Courses Modal -->
+        <div class="modal fade" id="assignCoursesModal" tabindex="-1" aria-labelledby="assignCoursesModalLabel" aria-hidden="true">
+            <div class="modal-dialog modal-xl">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="assignCoursesModalLabel">Assign Courses to Classes</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="row">
+                            <!-- Available Courses (Left Side) -->
+                            <div class="col-md-6">
+                                <div class="card">
+                                    <div class="card-header">
+                                        <h6 class="mb-0">Available Courses</h6>
+                                        <div class="mt-2">
+                                            <select class="form-select" id="courseDropdown" size="8">
+                                                <option value="">Select courses to assign...</option>
+                                                <!-- Courses will be populated here -->
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div class="card-body p-0">
+                                        <div class="d-grid gap-2 p-2">
+                                            <button class="btn btn-outline-primary btn-sm" id="addSelectedCourses">
+                                                <i class="fas fa-plus me-2"></i>Add Selected Courses
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Selected Courses (Right Side) -->
+                            <div class="col-md-6">
+                                <div class="card">
+                                    <div class="card-header">
+                                        <h6 class="mb-0">Selected Courses</h6>
+                                        <small class="text-muted">Courses to be assigned to all filtered classes</small>
+                                    </div>
+                                    <div class="card-body p-0">
+                                        <div class="list-group list-group-flush" id="selectedCoursesList" style="max-height: 400px; overflow-y: auto;">
+                                            <!-- Selected courses will appear here -->
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Selected Classes Info -->
+                        <div class="mt-3">
+                            <div class="alert alert-info">
+                                <strong>Classes to receive courses:</strong>
+                                <div id="selectedClassesInfo" class="mt-2">
+                                    <!-- Class information will be displayed here -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="button" class="btn btn-primary" id="confirmAssign">Assign Courses</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const courseDropdown = document.getElementById('courseDropdown');
+            const addSelectedCoursesBtn = document.getElementById('addSelectedCourses');
+            const selectedCoursesList = document.getElementById('selectedCoursesList');
+            const selectedClassesInfo = document.getElementById('selectedClassesInfo');
+            const confirmAssign = document.getElementById('confirmAssign');
+            
+            let allCourses = [];
+            let selectedCourses = [];
+            let filteredClasses = [];
+            
+            // Load courses when modal opens
+            document.getElementById('assignCoursesModal').addEventListener('show.bs.modal', function() {
+                loadCourses();
+                loadFilteredClasses();
+            });
+            
+            // Load available courses
+            function loadCourses() {
+                fetch('get_courses.php?department_id=<?php echo $selected_department; ?>&level=<?php echo $level_year; ?>')
+                    .then(response => response.json())
+                    .then(data => {
+                        allCourses = data;
+                        displayAvailableCourses();
+                    })
+                    .catch(error => console.error('Error loading courses:', error));
+            }
+            
+            // Load filtered classes
+            function loadFilteredClasses() {
+                fetch('get_filtered_classes.php?department_id=<?php echo $selected_department; ?>&level=<?php echo $level_name; ?>')
+                    .then(response => response.json())
+                    .then(data => {
+                        filteredClasses = data;
+                        displaySelectedClasses();
+                    })
+                    .catch(error => console.error('Error loading classes:', error));
+            }
+            
+            // Display available courses in dropdown
+            function displayAvailableCourses() {
+                courseDropdown.innerHTML = '<option value="">Select courses to assign...</option>';
+                allCourses.forEach(course => {
+                    const option = document.createElement('option');
+                    option.value = course.id;
+                    option.textContent = `${course.code} - ${course.name}`;
+                    courseDropdown.appendChild(option);
+                });
+            }
+            
+            // Add selected courses to the right list
+            addSelectedCoursesBtn.addEventListener('click', function() {
+                const selectedCourseIds = Array.from(courseDropdown.selectedOptions).map(option => option.value);
+                const newSelectedCourses = allCourses.filter(course => selectedCourseIds.includes(course.id));
+                
+                newSelectedCourses.forEach(course => {
+                    if (!selectedCourses.find(sc => sc.id === course.id)) {
+                        selectedCourses.push({id: course.id, code: course.code, name: course.name});
+                    }
+                });
+                displaySelectedCourses();
+                courseDropdown.value = ''; // Clear selected options
+            });
+            
+            // Remove course from selected list
+            window.removeCourse = function(courseId) {
+                selectedCourses = selectedCourses.filter(sc => sc.id !== courseId);
+                displaySelectedCourses();
+            };
+            
+            // Display selected courses
+            function displaySelectedCourses() {
+                selectedCoursesList.innerHTML = '';
+                selectedCourses.forEach(course => {
+                    const item = document.createElement('div');
+                    item.className = 'list-group-item d-flex justify-content-between align-items-center';
+                    item.innerHTML = `
+                        <div>
+                            <strong>${course.code}</strong><br>
+                            <small class="text-muted">${course.name}</small>
+                        </div>
+                        <button class="btn btn-sm btn-outline-danger" onclick="removeCourse(${course.id})">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    `;
+                    selectedCoursesList.appendChild(item);
+                });
+            }
+            
+            // Display selected classes info
+            function displaySelectedClasses() {
+                if (filteredClasses.length === 0) {
+                    selectedClassesInfo.innerHTML = '<span class="text-warning">No classes match the current filters. Please adjust your Program and Level selection.</span>';
+                    confirmAssign.disabled = true;
+                } else {
+                    selectedClassesInfo.innerHTML = filteredClasses.map(cls => 
+                        `<span class="badge bg-primary me-1">${cls.name}</span>`
+                    ).join('');
+                    confirmAssign.disabled = false;
+                }
+            }
+            
+            // Confirm assignment
+            confirmAssign.addEventListener('click', function() {
+                if (selectedCourses.length === 0) {
+                    alert('Please select at least one course to assign.');
+                    return;
+                }
+                
+                if (filteredClasses.length === 0) {
+                    alert('No classes selected. Please adjust your filters.');
+                    return;
+                }
+                
+                // Prepare data for assignment
+                const assignmentData = {
+                    action: 'bulk_assign',
+                    class_ids: filteredClasses.map(cls => cls.id),
+                    course_ids: selectedCourses.map(course => course.id)
+                };
+                
+                // Send assignment request
+                fetch('assign_courses.php', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(assignmentData)
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        alert('Courses assigned successfully!');
+                        location.reload(); // Refresh the page to show new assignments
+                    } else {
+                        alert('Error assigning courses: ' + data.message);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('Error assigning courses. Please try again.');
+                });
+            });
+        });
+        </script>
+
         <div class="table-responsive m-3">
-            <table class="table">
-                <thead>
+            <table class="table table-bordered">
+                <thead class="table-dark">
                     <tr>
-                        <th>Class</th>
-                        <th>Course</th>
-                        <th>Actions</th>
+                        <th>Class Name</th>
+                        <th>Semester 1 Courses</th>
+                        <th>Semester 2 Courses</th>
                     </tr>
                 </thead>
                 <tbody>
-                    <?php if ($mappings && $mappings->num_rows > 0): ?>
-                        <?php while ($m = $mappings->fetch_assoc()): ?>
+                    <?php if ($mappings && count($mappings) > 0): ?>
+                        <?php foreach ($mappings as $m): ?>
                             <tr>
-                                <td><?php echo htmlspecialchars($m['class_name']); ?></td>
-                                <td><?php echo htmlspecialchars($m['course_name'] . ' (' . $m['code'] . ')'); ?></td>
+                                <td class="fw-bold"><?php echo htmlspecialchars($m['class_name']); ?></td>
                                 <td>
-                                    <form method="POST" onsubmit="return confirm('Remove this mapping?')" style="display:inline;">
-                                        <input type="hidden" name="action" value="delete" />
-                                        <input type="hidden" name="id" value="<?php echo $m['id']; ?>" />
-                                        <button class="btn btn-sm btn-outline-danger"><i class="fas fa-trash"></i></button>
-                                    </form>
+                                    <?php if (!empty($m['semester1_courses'])): ?>
+                                        <ul class="list-unstyled mb-0">
+                                            <?php foreach ($m['semester1_courses'] as $course): ?>
+                                                <li class="mb-1">
+                                                    <span class="badge bg-primary"><?php echo htmlspecialchars($course); ?></span>
+                                                </li>
+                                            <?php endforeach; ?>
+                                        </ul>
+                                    <?php else: ?>
+                                        <span class="text-muted fst-italic">No courses assigned</span>
+                                    <?php endif; ?>
+                                </td>
+                                <td>
+                                    <?php if (!empty($m['semester2_courses'])): ?>
+                                        <ul class="list-unstyled mb-0">
+                                            <?php foreach ($m['semester2_courses'] as $course): ?>
+                                                <li class="mb-1">
+                                                    <span class="badge bg-success"><?php echo htmlspecialchars($course); ?></span>
+                                                </li>
+                                            <?php endforeach; ?>
+                                        </ul>
+                                    <?php else: ?>
+                                        <span class="text-muted fst-italic">No courses assigned</span>
+                                    <?php endif; ?>
                                 </td>
                             </tr>
-                        <?php endwhile; ?>
+                        <?php endforeach; ?>
                     <?php else: ?>
                         <tr>
-                            <td colspan="3" class="empty-state">
-                                <i class="fas fa-info-circle"></i>
-                                <p>No mappings for this session yet. Add some above.</p>
+                            <td colspan="3" class="empty-state text-center py-4">
+                                <i class="fas fa-info-circle fa-2x text-muted mb-2"></i>
+                                <p class="text-muted">No classes found for the selected filters.</p>
                             </td>
                         </tr>
                     <?php endif; ?>

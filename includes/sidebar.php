@@ -46,16 +46,19 @@
         <i class="fas fa-calendar-alt me-2"></i>Timetable Management
         <i class="fas fa-chevron-down ms-auto"></i>
       </div>
-      <div class="collapse" id="timetableManagementCollapse">
-        <div class="dropdown-menu-items">
-          <a href="generate_timetable.php" class="nav-link <?= ($currentPage == 'generate_timetable.php') ? 'active' : '' ?>">
-            <i class="fas fa-calendar-plus me-2"></i>Generate Timetable
-          </a>
-          <a href="view_timetable.php" class="nav-link <?= ($currentPage == 'view_timetable.php') ? 'active' : '' ?>">
-            <i class="fas fa-calendar-check me-2"></i>View Timetable
-          </a>
+              <div class="collapse" id="timetableManagementCollapse">
+          <div class="dropdown-menu-items">
+            <a href="generate_timetable.php" class="nav-link <?= ($currentPage == 'generate_timetable.php') ? 'active' : '' ?>">
+              <i class="fas fa-calendar-plus me-2"></i>Generate Timetable
+            </a>
+            <a href="view_timetable.php" class="nav-link <?= ($currentPage == 'view_timetable.php') ? 'active' : '' ?>">
+              <i class="fas fa-calendar-check me-2"></i>View Timetable
+            </a>
+            <a href="saved_timetable.php" class="nav-link <?= ($currentPage == 'saved_timetable.php') ? 'active' : '' ?>">
+              <i class="fas fa-save me-2"></i>Saved Timetable
+            </a>
+          </div>
         </div>
-      </div>
     </div>
 
     <!-- Assignment Management Section -->
@@ -73,7 +76,7 @@
           <a href="class_courses.php" class="nav-link <?= ($currentPage == 'class_courses.php') ? 'active' : '' ?>">
             <i class="fas fa-sitemap me-2"></i>Class Course
           </a>
-          <a href="course_session_availability.php" class="nav-link <?= ($currentPage == 'course_session_availability.php') ? 'active' : '' ?>">
+          <a href="course_roomtype.php" class="nav-link <?= ($currentPage == 'course_roomtype.php') ? 'active' : '' ?>">
             <i class="fas fa-book-clock me-2"></i>Course Room Type
           </a>
         </div>
