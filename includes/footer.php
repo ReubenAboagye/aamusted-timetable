@@ -1,13 +1,15 @@
-  <!-- Footer -->
-  <div class="footer" id="footer">&copy; 2025 TimeTable Generator</div>
+  <!-- Footer (removed per request) -->
+  <div class="footer" id="footer" style="display:none;"><!-- Footer removed --> </div>
 
-  <!-- Back to Top Button -->
+  <!-- Back to Top Button removed -->
+  <!--
   <button id="backToTop">
     <svg width="50" height="50" viewBox="0 0 50 50">
       <circle id="progressCircle" cx="25" cy="25" r="20" fill="none" stroke="#FFD700" stroke-width="4" stroke-dasharray="126" stroke-dashoffset="126"/>
     </svg>
     <i class="fas fa-arrow-up arrow-icon"></i>
   </button>
+  -->
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.2/js/bootstrap.bundle.min.js"></script>
   <script>
