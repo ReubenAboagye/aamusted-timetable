@@ -12,21 +12,30 @@ if (isset($_GET['stream_id'])) {
 $active_stream = $_SESSION['active_stream'] ?? 1;
 
 // Helper function to safely count rows
-function getCount($conn, $query, $stream_id) {
+function getCount($conn, $query, $stream_id = null) {
     $stmt = $conn->prepare($query);
-    $stmt->bind_param("i", $stream_id);
+    if ($stmt === false) {
+        return 0;
+    }
+
+    // Bind parameter only if query contains a placeholder
+    if (strpos($query, '?') !== false && $stream_id !== null) {
+        $stmt->bind_param("i", $stream_id);
+    }
+
     $stmt->execute();
     $result = $stmt->get_result();
     $row = $result->fetch_assoc();
+    $stmt->close();
     return $row ? intval($row['c']) : 0;
 }
 
 // Counts per stream
-$dept_count      = getCount($conn, "SELECT COUNT(*) AS c FROM departments WHERE is_active = 1 AND stream_id = ?", $active_stream);
-$course_count    = getCount($conn, "SELECT COUNT(*) AS c FROM courses WHERE is_active = 1 AND stream_id = ?", $active_stream);
-$lect_count      = getCount($conn, "SELECT COUNT(*) AS c FROM lecturers WHERE is_active = 1 AND stream_id = ?", $active_stream);
-$room_count      = getCount($conn, "SELECT COUNT(*) AS c FROM rooms WHERE is_active = 1 AND stream_id = ?", $active_stream);
-$timetable_count = getCount($conn, "SELECT COUNT(*) AS c FROM timetable WHERE stream_id = ?", $active_stream);
+$dept_count      = getCount($conn, "SELECT COUNT(*) AS c FROM departments WHERE is_active = 1", $active_stream);
+$course_count    = getCount($conn, "SELECT COUNT(*) AS c FROM courses WHERE is_active = 1", $active_stream);
+$lect_count      = getCount($conn, "SELECT COUNT(*) AS c FROM lecturers WHERE is_active = 1", $active_stream);
+$room_count      = getCount($conn, "SELECT COUNT(*) AS c FROM rooms WHERE is_active = 1", $active_stream);
+$timetable_count = getCount($conn, "SELECT COUNT(*) AS c FROM timetable", $active_stream);
 
 // Get streams dynamically
 $streams = [];

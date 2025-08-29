@@ -23,6 +23,7 @@ $where_conditions = ["t.session_id IS NOT NULL"];
 $params = [];
 $param_types = "";
 
+// Stream filtering for saved timetables is optional; keep ability but do not force stream on other tables
 if ($selected_stream > 0) {
     $where_conditions[] = "c.stream_id = ?";
     $params[] = $selected_stream;
