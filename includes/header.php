@@ -342,6 +342,71 @@ if (!isset($pageTitle)) {
       <div class="ms-auto text-white" id="currentTime">12:00:00 PM</div>
     </div>
   </nav>
+  
+  <script>
+  (function(){
+    var storageKey = 'sidebarCollapsed';
+    function getEl(id){ try { return document.getElementById(id); } catch(e) { return null; } }
+
+    // Ensure toggle button exists (create fallback if missing)
+    var sidebarToggle = getEl('sidebarToggle');
+    if (!sidebarToggle) {
+      try {
+        var navContainer = document.querySelector('.navbar .container-fluid') || document.body;
+        sidebarToggle = document.createElement('button');
+        sidebarToggle.id = 'sidebarToggle';
+        sidebarToggle.innerHTML = '<i class="fas fa-bars"></i>';
+        sidebarToggle.style.border = 'none';
+        sidebarToggle.style.background = 'transparent';
+        sidebarToggle.style.color = '#fff';
+        sidebarToggle.style.fontSize = '1.5rem';
+        sidebarToggle.style.cursor = 'pointer';
+        if (navContainer.firstChild) navContainer.insertBefore(sidebarToggle, navContainer.firstChild);
+        else navContainer.appendChild(sidebarToggle);
+      } catch (e) { /* fail silently */ }
+    }
+
+    function applyState(collapsed) {
+      var sidebar = getEl('sidebar');
+      var main = getEl('mainContent');
+      var footer = getEl('footer');
+      if (!sidebar && !main && !footer) return;
+      if (collapsed) {
+        if (sidebar) sidebar.classList.add('collapsed');
+        if (main) main.classList.add('collapsed');
+        if (footer) footer.classList.add('collapsed');
+      } else {
+        if (sidebar) sidebar.classList.remove('collapsed');
+        if (main) main.classList.remove('collapsed');
+        if (footer) footer.classList.remove('collapsed');
+      }
+    }
+
+    // Initialize from localStorage (safe)
+    try {
+      var stored = localStorage.getItem(storageKey);
+      applyState(stored === 'true');
+    } catch (e) { /* ignore storage errors */ }
+
+    // Attach click handler (safe)
+    try {
+      sidebarToggle.addEventListener('click', function(e) {
+        try {
+          var sidebar = getEl('sidebar');
+          var main = getEl('mainContent');
+          var footer = getEl('footer');
+          var collapsed = false;
+          if (sidebar) collapsed = sidebar.classList.toggle('collapsed');
+          if (main) main.classList.toggle('collapsed', collapsed);
+          if (footer) footer.classList.toggle('collapsed', collapsed);
+          try { localStorage.setItem(storageKey, String(collapsed)); } catch (e) {}
+        } catch (e) { /* silent */ }
+      });
+      // Mark handler attached so other scripts (footer) can skip attaching again
+      try { window.__sidebarToggleAttached = true; } catch (e) {}
+    } catch (e) { /* silent */ }
+  })();
+  </script>
 
   <!-- Stream Change JavaScript -->
   <script>

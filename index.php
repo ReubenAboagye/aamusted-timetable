@@ -54,7 +54,6 @@ $timetable_count = $timetable_row['timetable_count'];
 
 
 
-$conn->close();
 ?>
 <?php $pageTitle = 'Dashboard'; include 'includes/header.php'; include 'includes/sidebar.php'; ?>
 
@@ -174,7 +173,7 @@ $conn->close();
     </div>
   </div>
   
-<?php include 'includes/footer.php'; ?>
+<?php include 'includes/footer.php'; $conn->close(); ?>
   <script>
     // Update current time in header
     function updateTime() {
@@ -190,20 +189,7 @@ $conn->close();
     setInterval(updateTime, 1000);
     updateTime();
     
-    // Toggle sidebar visibility
-    document.getElementById('sidebarToggle').addEventListener('click', function() {
-      const sidebar = document.getElementById('sidebar');
-      const mainContent = document.getElementById('mainContent');
-      const footer = document.getElementById('footer');
-      sidebar.classList.toggle('show');
-      if (sidebar.classList.contains('show')) {
-        mainContent.classList.add('shift');
-        footer.classList.add('shift');
-      } else {
-        mainContent.classList.remove('shift');
-        footer.classList.remove('shift');
-      }
-    });
+    // Sidebar toggle is handled centrally in `includes/header.php` (resilient) — no duplicate handler here
     
     // Dashboard grid search functionality
     document.getElementById('dashboardSearchInput').addEventListener('keyup', function() {

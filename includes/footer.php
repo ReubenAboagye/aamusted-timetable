@@ -95,7 +95,7 @@
         console.log('Storage error:', e);
       }
 
-      if (sidebarToggle) {
+      if (sidebarToggle && !window.__sidebarToggleAttached) {
         console.log('Adding click event listener to sidebar toggle');
         sidebarToggle.addEventListener('click', function(e){
           e.preventDefault();

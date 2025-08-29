@@ -1,10 +1,13 @@
 <?php
 $pageTitle = 'Lecturers Management';
+
+// Database connection and stream manager must be loaded before any output
+include 'connect.php';
+include 'includes/stream_manager.php';
+$streamManager = getStreamManager();
+
 include 'includes/header.php';
 include 'includes/sidebar.php';
-
-// Database connection
-include 'connect.php';
 
 // Handle form submission for adding/editing/deleting lecturer
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
@@ -175,15 +178,27 @@ include 'includes/stream_manager.php';
 $streamManager = getStreamManager();
 
 // Fetch lecturers with department names
+$stream_id_filter = '';
+// Only apply stream filtering if the `stream_id` column exists in lecturers table
+$cols_res = $conn->query("SHOW COLUMNS FROM lecturers LIKE 'stream_id'");
+if ($cols_res && $cols_res->num_rows > 0) {
+    $stream_id_filter = " AND l.stream_id = " . (int)$streamManager->getCurrentStreamId();
+}
+
 $sql = "SELECT l.*, d.name as department_name 
         FROM lecturers l 
         LEFT JOIN departments d ON l.department_id = d.id 
-        WHERE l.is_active = 1 AND l.stream_id = " . $streamManager->getCurrentStreamId() . "
+        WHERE l.is_active = 1" . $stream_id_filter . "
         ORDER BY l.name";
 $result = $conn->query($sql);
 
-// Fetch departments for dropdown (filtered by stream)
-$dept_sql = "SELECT id, name FROM departments WHERE is_active = 1 AND stream_id = " . $streamManager->getCurrentStreamId() . " ORDER BY name";
+// Fetch departments for dropdown (filtered by stream if supported)
+$dept_stream_filter = '';
+$cols_dept_res = $conn->query("SHOW COLUMNS FROM departments LIKE 'stream_id'");
+if ($cols_dept_res && $cols_dept_res->num_rows > 0) {
+    $dept_stream_filter = " AND stream_id = " . (int)$streamManager->getCurrentStreamId();
+}
+$dept_sql = "SELECT id, name FROM departments WHERE is_active = 1" . $dept_stream_filter . " ORDER BY name";
 $dept_result = $conn->query($dept_sql);
 ?>
 
