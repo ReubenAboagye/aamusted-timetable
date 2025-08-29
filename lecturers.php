@@ -16,10 +16,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $department_id = (int)$_POST['department_id'];
         $is_active = isset($_POST['is_active']) ? 1 : 0;
 
-        $stream_id = $streamManager->getCurrentStreamId();
-        $sql = "INSERT INTO lecturers (name, department_id, stream_id, is_active) VALUES (?, ?, ?, ?)";
+        // Lecturers are global; do not assign stream_id
+        $sql = "INSERT INTO lecturers (name, department_id, is_active) VALUES (?, ?, ?)";
         $stmt = $conn->prepare($sql);
-        $stmt->bind_param("siii", $name, $department_id, $stream_id, $is_active);
+        $stmt->bind_param("sii", $name, $department_id, $is_active);
 
         if ($stmt->execute()) {
             $success_message = "Lecturer added successfully!";
@@ -95,11 +95,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     }
                 }
 
-                $stream_id = $streamManager->getCurrentStreamId();
-                $sql = "INSERT INTO lecturers (name, department_id, stream_id, is_active) VALUES (?, ?, ?, ?)";
+                $sql = "INSERT INTO lecturers (name, department_id, is_active) VALUES (?, ?, ?)";
                 $stmt = $conn->prepare($sql);
                 if (!$stmt) { $error_count++; continue; }
-                $stmt->bind_param("siii", $name, $department_id, $stream_id, $is_active);
+                $stmt->bind_param("sii", $name, $department_id, $is_active);
                 if ($stmt->execute()) {
                     $success_count++;
                 } else {
@@ -178,27 +177,16 @@ include 'includes/stream_manager.php';
 $streamManager = getStreamManager();
 
 // Fetch lecturers with department names
-$stream_id_filter = '';
-// Only apply stream filtering if the `stream_id` column exists in lecturers table
-$cols_res = $conn->query("SHOW COLUMNS FROM lecturers LIKE 'stream_id'");
-if ($cols_res && $cols_res->num_rows > 0) {
-    $stream_id_filter = " AND l.stream_id = " . (int)$streamManager->getCurrentStreamId();
-}
-
 $sql = "SELECT l.*, d.name as department_name 
         FROM lecturers l 
         LEFT JOIN departments d ON l.department_id = d.id 
-        WHERE l.is_active = 1" . $stream_id_filter . "
+        WHERE l.is_active = 1
         ORDER BY l.name";
 $result = $conn->query($sql);
 
 // Fetch departments for dropdown (filtered by stream if supported)
 $dept_stream_filter = '';
-$cols_dept_res = $conn->query("SHOW COLUMNS FROM departments LIKE 'stream_id'");
-if ($cols_dept_res && $cols_dept_res->num_rows > 0) {
-    $dept_stream_filter = " AND stream_id = " . (int)$streamManager->getCurrentStreamId();
-}
-$dept_sql = "SELECT id, name FROM departments WHERE is_active = 1" . $dept_stream_filter . " ORDER BY name";
+$dept_sql = "SELECT id, name FROM departments WHERE is_active = 1 ORDER BY name";
 $dept_result = $conn->query($dept_sql);
 ?>
 
@@ -380,8 +368,9 @@ $dept_result = $conn->query($dept_sql);
 
 <?php 
 // Embed existing lecturer name+department for client-side duplicate checks
+// Lecturers are global; do not filter by stream
 $existing_name_dept = [];
-$codes_res = $conn->query("SELECT name, department_id FROM lecturers WHERE is_active = 1 AND stream_id = " . $streamManager->getCurrentStreamId());
+$codes_res = $conn->query("SELECT name, department_id FROM lecturers WHERE is_active = 1");
 if ($codes_res) {
     while ($r = $codes_res->fetch_assoc()) {
         $existing_name_dept[] = ['name' => $r['name'], 'dept' => (int)$r['department_id']];
