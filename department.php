@@ -11,13 +11,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 if (!empty($row['valid'])) {
                     $name = $conn->real_escape_string($row['name']);
                     $code = $conn->real_escape_string($row['code']);
-                    $short_name = $conn->real_escape_string($row['short_name']);
-                    $head_of_department = $conn->real_escape_string($row['head_of_department']);
+                    $description = $conn->real_escape_string($row['description'] ?? '');
                     $is_active = $row['is_active'];
 
-                    $sql = "INSERT INTO departments (name, code, short_name, head_of_department, is_active) VALUES (?, ?, ?, ?, ?)";
+                    $sql = "INSERT INTO departments (name, code, description, is_active) VALUES (?, ?, ?, ?)";
                     $stmt = $conn->prepare($sql);
-                    $stmt->bind_param("ssssi", $name, $code, $short_name, $head_of_department, $is_active);
+                    $stmt->bind_param("sssi", $name, $code, $description, $is_active);
 
                     if ($stmt->execute()) {
                         $success_count++;
@@ -48,8 +47,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     if ($_POST['action'] === 'add') {
         $name = trim($_POST['name']);
         $code = strtoupper(trim($_POST['code']));
-        $short_name = trim($_POST['short_name']);
-        $head_of_department = trim($_POST['head_of_department']);
+        $description = trim($_POST['description'] ?? '');
         $is_active = isset($_POST['is_active']) ? 1 : 0;
 
         // Check if code already exists
@@ -65,9 +63,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         } else {
             $check_stmt->close();
 
-            $sql = "INSERT INTO departments (name, code, short_name, head_of_department, is_active) VALUES (?, ?, ?, ?, ?)";
+            $sql = "INSERT INTO departments (name, code, description, is_active) VALUES (?, ?, ?, ?)";
             $stmt = $conn->prepare($sql);
-            $stmt->bind_param("ssssi", $name, $code, $short_name, $head_of_department, $is_active);
+            $stmt->bind_param("sssi", $name, $code, $description, $is_active);
 
             if ($stmt->execute()) {
                 $success_message = "Department added successfully!";
@@ -80,8 +78,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $id = $conn->real_escape_string($_POST['id']);
         $name = $conn->real_escape_string($_POST['name']);
         $code = $conn->real_escape_string($_POST['code']);
-        $short_name = $conn->real_escape_string($_POST['short_name']);
-        $head_of_department = $conn->real_escape_string($_POST['head_of_department']);
+        $description = $conn->real_escape_string($_POST['description'] ?? '');
         $is_active = isset($_POST['is_active']) ? 1 : 0;
         
         // Check if code already exists for other departments
@@ -94,9 +91,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         if ($check_result->num_rows > 0) {
             $error_message = "Department code already exists. Please choose a different code.";
         } else {
-            $sql = "UPDATE departments SET name = ?, code = ?, short_name = ?, head_of_department = ?, is_active = ? WHERE id = ?";
+            $sql = "UPDATE departments SET name = ?, code = ?, description = ?, is_active = ? WHERE id = ?";
             $stmt = $conn->prepare($sql);
-            $stmt->bind_param("ssssii", $name, $code, $short_name, $head_of_department, $is_active, $id);
+            $stmt->bind_param("sssii", $name, $code, $description, $is_active, $id);
             
             if ($stmt->execute()) {
                 $success_message = "Department updated successfully!";
@@ -174,7 +171,7 @@ $result = $conn->query($sql);
                                 <td><strong><?php echo htmlspecialchars($row['name']); ?></strong></td>
                                 <td><span class="badge bg-primary"><?php echo htmlspecialchars($row['code']); ?></span></td>
                                 <td>
-                                    <button class="btn btn-sm btn-outline-primary me-1" onclick="editDepartment(<?php echo $row['id']; ?>, '<?php echo htmlspecialchars(addslashes($row['name'])); ?>', '<?php echo htmlspecialchars(addslashes($row['code'])); ?>', '<?php echo htmlspecialchars(addslashes($row['short_name'] ?? '')); ?>', '<?php echo htmlspecialchars(addslashes($row['head_of_department'] ?? '')); ?>', <?php echo $row['is_active']; ?>)">
+                                    <button class="btn btn-sm btn-outline-primary me-1" onclick="editDepartment(<?php echo $row['id']; ?>, '<?php echo htmlspecialchars(addslashes($row['name'])); ?>', '<?php echo htmlspecialchars(addslashes($row['code'])); ?>', '<?php echo htmlspecialchars(addslashes($row['description'] ?? '')); ?>', <?php echo $row['is_active']; ?>)">
                                         <i class="fas fa-edit"></i>
                                     </button>
                                     <form method="POST" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this department?')">
@@ -227,15 +224,10 @@ $result = $conn->query($sql);
                         </div>
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label for="short_name" class="form-label">Short Name</label>
-                                <input type="text" class="form-control" id="short_name" name="short_name" placeholder="e.g., CompSci" maxlength="10">
+                                <label for="description" class="form-label">Description</label>
+                                <input type="text" class="form-control" id="description" name="description" placeholder="e.g., Department for Computer Science students">
                             </div>
                         </div>
-                    </div>
-                    
-                    <div class="mb-3">
-                        <label for="head_of_department" class="form-label">Head of Department</label>
-                        <input type="text" class="form-control" id="head_of_department" name="head_of_department" placeholder="e.g., Dr. John Smith">
                     </div>
                     
                     <div class="mb-3">
@@ -283,15 +275,10 @@ $result = $conn->query($sql);
                         </div>
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label for="edit_short_name" class="form-label">Short Name</label>
-                                <input type="text" class="form-control" id="edit_short_name" name="short_name" placeholder="e.g., CompSci" maxlength="10">
+                                <label for="edit_description" class="form-label">Description</label>
+                                <input type="text" class="form-control" id="edit_description" name="description" placeholder="e.g., Department for Computer Science students">
                             </div>
                         </div>
-                    </div>
-                    
-                    <div class="mb-3">
-                        <label for="edit_head_of_department" class="form-label">Head of Department</label>
-                        <input type="text" class="form-control" id="edit_head_of_department" name="head_of_department" placeholder="e.g., Dr. John Smith">
                     </div>
                     
                     <div class="mb-3">
@@ -345,8 +332,7 @@ $result = $conn->query($sql);
                                     <th>#</th>
                                     <th>Name</th>
                                     <th>Code</th>
-                                    <th>Short Name</th>
-                                    <th>Head of Department</th>
+                                    <th>Description</th>
                                     <th>Status</th>
                                     <th>Validation</th>
                                 </tr>
@@ -397,13 +383,12 @@ include 'includes/footer.php';
 let importData = [];
 let currentStep = 1;
 
-function editDepartment(id, name, code, shortName, headOfDepartment, isActive) {
+function editDepartment(id, name, code, description, isActive) {
     // Populate the edit modal with current values
     document.getElementById('edit_id').value = id;
     document.getElementById('edit_name').value = name;
     document.getElementById('edit_code').value = code;
-    document.getElementById('edit_short_name').value = shortName;
-    document.getElementById('edit_head_of_department').value = headOfDepartment;
+    document.getElementById('edit_description').value = description;
     document.getElementById('edit_is_active').checked = isActive == 1;
     
     // Show the edit modal
@@ -473,8 +458,7 @@ function validateData(data) {
         const validated = {
             name: row.name || row.Name || '',
             code: row.code || row.Code || '',
-            short_name: row.short_name || row['short_name'] || row.ShortName || '',
-            head_of_department: row.head_of_department || row['head_of_department'] || row.HeadOfDepartment || '',
+            description: row.description || row['description'] || '',
             is_active: (row.is_active || row['is_active'] || row.IsActive || '1') === '1' ? '1' : '0'
         };
         
@@ -490,11 +474,6 @@ function validateData(data) {
         if (!validated.code.trim()) {
             validated.valid = false;
             validated.errors.push('Code is required');
-        }
-        
-        if (validated.short_name.length > 10) {
-            validated.valid = false;
-            validated.errors.push('Short name too long');
         }
         
         return validated;
@@ -516,8 +495,7 @@ function showPreview() {
             <td>${index + 1}</td>
             <td>${row.name}</td>
             <td>${row.code}</td>
-            <td>${row.short_name}</td>
-            <td>${row.head_of_department}</td>
+            <td>${row.description}</td>
             <td><span class="badge ${row.is_active === '1' ? 'bg-success' : 'bg-secondary'}">${row.is_active === '1' ? 'Active' : 'Inactive'}</span></td>
             <td>${row.valid ? '<span class="text-success">✓ Valid</span>' : '<span class="text-danger">✗ ' + row.errors.join(', ') + '</span>'}</td>
         `;

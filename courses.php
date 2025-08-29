@@ -11,17 +11,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     if ($_POST['action'] === 'add') {
         $course_name = $conn->real_escape_string($_POST['course_name']);
         $course_code = $conn->real_escape_string($_POST['course_code']);
-        $department_id = $conn->real_escape_string($_POST['department_id']);
+        $description = $conn->real_escape_string($_POST['description'] ?? '');
         $credits = $conn->real_escape_string($_POST['credits']);
-        $hours_per_week = $conn->real_escape_string($_POST['hours_per_week']);
-        $level = $conn->real_escape_string($_POST['level']);
-        $preferred_room_type = $conn->real_escape_string($_POST['preferred_room_type']);
+        $lecture_hours = $conn->real_escape_string($_POST['lecture_hours'] ?? 0);
+        $tutorial_hours = $conn->real_escape_string($_POST['tutorial_hours'] ?? 0);
+        $practical_hours = $conn->real_escape_string($_POST['practical_hours'] ?? 0);
         $is_active = isset($_POST['is_active']) ? 1 : 0;
         
-        $stream_id = $streamManager->getCurrentStreamId();
-        $sql = "INSERT INTO courses (course_name, course_code, department_id, stream_id, credits, hours_per_week, level, preferred_room_type, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
+        $sql = "INSERT INTO courses (name, code, description, credits, lecture_hours, tutorial_hours, practical_hours, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
         $stmt = $conn->prepare($sql);
-        $stmt->bind_param("ssiissi", $course_name, $course_code, $department_id, $stream_id, $credits, $hours_per_week, $level, $preferred_room_type, $is_active);
+        $stmt->bind_param("sssiiii", $course_name, $course_code, $description, $credits, $lecture_hours, $tutorial_hours, $practical_hours, $is_active);
         
         if ($stmt->execute()) {
             $success_message = "Course added successfully!";
@@ -43,14 +42,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             foreach ($import_data as $row) {
                 $course_name = isset($row['course_name']) ? $conn->real_escape_string($row['course_name']) : '';
                 $course_code = isset($row['course_code']) ? $conn->real_escape_string($row['course_code']) : '';
-                $department_id = isset($row['department_id']) ? (int)$row['department_id'] : 0;
+                $description = isset($row['description']) ? $conn->real_escape_string($row['description']) : '';
                 $credits = isset($row['credits']) ? (int)$row['credits'] : 3;
-                $hours_per_week = isset($row['hours_per_week']) ? (int)$row['hours_per_week'] : 3;
-                $level = isset($row['level']) ? (int)$row['level'] : 100;
-                $preferred_room_type = isset($row['preferred_room_type']) ? $conn->real_escape_string($row['preferred_room_type']) : 'classroom';
+                $lecture_hours = isset($row['lecture_hours']) ? (int)$row['lecture_hours'] : 0;
+                $tutorial_hours = isset($row['tutorial_hours']) ? (int)$row['tutorial_hours'] : 0;
+                $practical_hours = isset($row['practical_hours']) ? (int)$row['practical_hours'] : 0;
                 $is_active = isset($row['is_active']) ? (int)$row['is_active'] : 1;
 
-                if ($course_name === '' || $course_code === '' || $department_id === 0) {
+                if ($course_name === '' || $course_code === '') {
                     $error_count++;
                     continue;
                 }
@@ -66,11 +65,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     }
                 }
 
-                $stream_id = $streamManager->getCurrentStreamId();
-                $sql = "INSERT INTO courses (course_name, course_code, department_id, stream_id, credits, hours_per_week, level, preferred_room_type, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                $sql = "INSERT INTO courses (name, code, description, credits, lecture_hours, tutorial_hours, practical_hours, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
                 $stmt = $conn->prepare($sql);
                 if (!$stmt) { $error_count++; continue; }
-                $stmt->bind_param("ssiissi", $course_name, $course_code, $department_id, $stream_id, $credits, $hours_per_week, $level, $preferred_room_type, $is_active);
+                $stmt->bind_param("sssiiii", $course_name, $course_code, $description, $credits, $lecture_hours, $tutorial_hours, $practical_hours, $is_active);
                 if ($stmt->execute()) {
                     $success_count++;
                 } else {
@@ -105,6 +103,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $error_message = "Error deleting course: " . $conn->error;
         }
         $stmt->close();
+    } elseif ($_POST['action'] === 'edit' && isset($_POST['id'])) {
+        $id = $conn->real_escape_string($_POST['id']);
+        $course_name = $conn->real_escape_string($_POST['course_name']);
+        $course_code = $conn->real_escape_string($_POST['course_code']);
+        $description = $conn->real_escape_string($_POST['description'] ?? '');
+        $credits = $conn->real_escape_string($_POST['credits']);
+        $lecture_hours = $conn->real_escape_string($_POST['lecture_hours'] ?? 0);
+        $tutorial_hours = $conn->real_escape_string($_POST['tutorial_hours'] ?? 0);
+        $practical_hours = $conn->real_escape_string($_POST['practical_hours'] ?? 0);
+        $is_active = isset($_POST['is_active']) ? 1 : 0;
+        
+        // Check if code already exists for other courses
+        $check_sql = "SELECT id FROM courses WHERE code = ? AND id != ? AND is_active = 1";
+        $check_stmt = $conn->prepare($check_sql);
+        $check_stmt->bind_param("si", $course_code, $id);
+        $check_stmt->execute();
+        $check_result = $check_stmt->get_result();
+        
+        if ($check_result->num_rows > 0) {
+            $error_message = "Course code already exists. Please choose a different code.";
+        } else {
+            $sql = "UPDATE courses SET name = ?, code = ?, description = ?, credits = ?, lecture_hours = ?, tutorial_hours = ?, practical_hours = ?, is_active = ? WHERE id = ?";
+            $stmt = $conn->prepare($sql);
+            $stmt->bind_param("sssiiiiii", $course_name, $course_code, $description, $credits, $lecture_hours, $tutorial_hours, $practical_hours, $is_active, $id);
+            
+            if ($stmt->execute()) {
+                $success_message = "Course updated successfully!";
+            } else {
+                $error_message = "Error updating course: " . $conn->error;
+            }
+            $stmt->close();
+        }
+        $check_stmt->close();
     }
 }
 

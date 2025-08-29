@@ -11,7 +11,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $conn->query($clear_sql);
         
         // Get all class-course assignments
-        $assignments_sql = "SELECT cc.id, cc.class_id, cc.course_id, c.name as class_name, co.course_code, co.course_name
+        $assignments_sql = "SELECT cc.id, cc.class_id, cc.course_id, c.name as class_name, co.code as course_code, co.name as course_name
                            FROM class_courses cc
                            JOIN classes c ON cc.class_id = c.id
                            JOIN courses co ON cc.course_id = co.id
@@ -23,7 +23,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $error_count = 0;
             
             // Get available time slots and days
-            $time_slots_sql = "SELECT id, start_time, end_time FROM time_slots WHERE is_mandatory = 1 ORDER BY start_time";
+            $time_slots_sql = "SELECT id, start_time, end_time FROM time_slots ORDER BY start_time";
             $time_slots_result = $conn->query($time_slots_sql);
             $time_slots = [];
             while ($slot = $time_slots_result->fetch_assoc()) {
@@ -62,32 +62,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $check_stmt->close();
                 
                 if (!$occupied) {
-                                    // Get a default lecturer_course_id for this course
-                $lecturer_course_sql = "SELECT lc.id FROM lecturer_courses lc WHERE lc.course_id = ? LIMIT 1";
-                $lecturer_course_stmt = $conn->prepare($lecturer_course_sql);
-                $lecturer_course_stmt->bind_param("i", $assignment['course_id']);
-                $lecturer_course_stmt->execute();
-                $lecturer_course_result = $lecturer_course_stmt->get_result();
-                $lecturer_course = $lecturer_course_result->fetch_assoc();
-                $lecturer_course_stmt->close();
-                
-                if ($lecturer_course) {
-                    // Insert timetable entry with lecturer_course_id
-                    $insert_sql = "INSERT INTO timetable (class_course_id, lecturer_course_id, day_id, time_slot_id, room_id) VALUES (?, ?, ?, ?, ?)";
-                    $insert_stmt = $conn->prepare($insert_sql);
-                    $insert_stmt->bind_param("iiiii", $assignment['id'], $lecturer_course['id'], $day['id'], $time_slot['id'], $room['id']);
-                } else {
-                    // Skip if no lecturer is assigned to this course
-                    $error_count++;
+                    // Get lecturer and course information
+                    $lecturer_sql = "SELECT l.id as lecturer_id FROM lecturers l 
+                                   JOIN lecturer_courses lc ON l.id = lc.lecturer_id 
+                                   WHERE lc.course_id = ? AND l.is_active = 1 LIMIT 1";
+                    $lecturer_stmt = $conn->prepare($lecturer_sql);
+                    $lecturer_stmt->bind_param("i", $assignment['course_id']);
+                    $lecturer_stmt->execute();
+                    $lecturer_result = $lecturer_stmt->get_result();
+                    $lecturer = $lecturer_result->fetch_assoc();
+                    $lecturer_stmt->close();
+                    
+                    if ($lecturer) {
+                        // Insert timetable entry
+                        $insert_sql = "INSERT INTO timetable (class_id, course_id, lecturer_id, room_id, day_id, time_slot_id, semester, academic_year, timetable_type) 
+                                     VALUES (?, ?, ?, ?, ?, ?, 'first', '2024-2025', 'lecture')";
+                        $insert_stmt = $conn->prepare($insert_sql);
+                        $insert_stmt->bind_param("iiiiii", $assignment['class_id'], $assignment['course_id'], $lecturer['lecturer_id'], $room['id'], $day['id'], $time_slot['id']);
+                        
+                        if ($insert_stmt->execute()) {
+                            $success_count++;
+                        } else {
+                            $error_count++;
+                        }
+                        $insert_stmt->close();
+                    } else {
+                        // Skip if no lecturer is assigned to this course
+                        $error_count++;
                         continue;
                     }
-
-                    if ($insert_stmt->execute()) {
-                        $success_count++;
-                    } else {
-                        $error_count++;
-                    }
-                    $insert_stmt->close();
                 }
             }
             
@@ -96,7 +99,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 if ($error_count > 0) {
                     $success_message .= " $error_count entries failed.";
                 }
-    } else {
+            } else {
                 $error_message = "No timetable entries could be generated.";
             }
         } else {
@@ -267,7 +270,7 @@ $total_courses = $conn->query("SELECT COUNT(*) as count FROM courses WHERE is_ac
                                             </thead>
                                             <tbody>
                                                 <?php
-                                                $recent_sql = "SELECT c.name as class_name, co.course_code, co.course_name
+                                                $recent_sql = "SELECT c.name as class_name, co.code as course_code, co.name as course_name
                                                               FROM class_courses cc
                                                               JOIN classes c ON cc.class_id = c.id
                                                               JOIN courses co ON cc.course_id = co.id
