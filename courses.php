@@ -170,7 +170,7 @@ $dept_result = $conn->query($dept_sql);
                             <tr>
                                 <td><strong><?php echo htmlspecialchars($row['name']); ?></strong></td>
                                 <td><span class="badge bg-primary"><?php echo htmlspecialchars($row['code']); ?></span></td>
-                                <td><span class="badge bg-warning"><?php echo htmlspecialchars($row['hours_per_week']); ?> hrs/week</span></td>
+                                <td><span class="badge bg-warning"><?php echo htmlspecialchars($row['hours_per_week'] ?? 'N/A'); ?> hrs/week</span></td>
                                 <td>
                                     <button class="btn btn-sm btn-outline-primary me-1" onclick="editCourse(<?php echo $row['id']; ?>)">
                                         <i class="fas fa-edit"></i>
