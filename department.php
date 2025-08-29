@@ -1,6 +1,43 @@
 <?php
 // Handle bulk import BEFORE any output
 include 'connect.php';
+
+// Enable error reporting for debugging
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
+
+// Function to log errors
+function logError($message, $context = []) {
+    $log_file = 'logs/department_errors.log';
+    $log_dir = dirname($log_file);
+    
+    if (!is_dir($log_dir)) {
+        mkdir($log_dir, 0755, true);
+    }
+    
+    $timestamp = date('Y-m-d H:i:s');
+    $context_str = !empty($context) ? ' | Context: ' . json_encode($context) : '';
+    $log_entry = "[$timestamp] $message$context_str\n";
+    
+    file_put_contents($log_file, $log_entry, FILE_APPEND | LOCK_EX);
+}
+
+// Start session for better security
+if (session_status() == PHP_SESSION_NONE) {
+    session_start();
+}
+
+// Generate CSRF token if not exists
+if (!isset($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
+
+// Verify CSRF token for POST requests
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== $_SESSION['csrf_token']) {
+        die('CSRF token validation failed');
+    }
+}
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'bulk_import') {
     if (isset($_POST['import_data'])) {
         $import_data = json_decode($_POST['import_data'], true);
@@ -11,13 +48,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 if (!empty($row['valid'])) {
                     $name = $conn->real_escape_string($row['name']);
                     $code = $conn->real_escape_string($row['code']);
-                    $short_name = $conn->real_escape_string($row['short_name']);
-                    $head_of_department = $conn->real_escape_string($row['head_of_department']);
-                    $is_active = $row['is_active'];
+                    $description = isset($row['description']) ? $conn->real_escape_string($row['description']) : '';
+                    $is_active = isset($row['is_active']) ? (int)$row['is_active'] : 1;
 
-                    $sql = "INSERT INTO departments (name, code, short_name, head_of_department, is_active) VALUES (?, ?, ?, ?, ?)";
+                    $sql = "INSERT INTO departments (name, code, description, is_active) VALUES (?, ?, ?, ?)";
                     $stmt = $conn->prepare($sql);
-                    $stmt->bind_param("ssssi", $name, $code, $short_name, $head_of_department, $is_active);
+                    $stmt->bind_param("sssi", $name, $code, $description, $is_active);
 
                     if ($stmt->execute()) {
                         $success_count++;
@@ -32,8 +68,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 if ($error_count > 0) {
                     $success_message .= " $error_count records failed to import.";
                 }
+                logError("Bulk import completed", ['success_count' => $success_count, 'error_count' => $error_count]);
             } else {
                 $error_message = "No departments were imported. Please check your data.";
+                logError("Bulk import failed", ['error_count' => $error_count]);
             }
         }
     }
@@ -46,11 +84,18 @@ include 'includes/sidebar.php';
 // Handle form submission for adding/editing department
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     if ($_POST['action'] === 'add') {
-        $name = trim($_POST['name']);
-        $code = strtoupper(trim($_POST['code']));
-        $short_name = trim($_POST['short_name']);
-        $head_of_department = trim($_POST['head_of_department']);
-        $is_active = isset($_POST['is_active']) ? 1 : 0;
+        // Validate and sanitize input
+        $name = trim(htmlspecialchars($_POST['name'], ENT_QUOTES, 'UTF-8'));
+        $code = strtoupper(trim(htmlspecialchars($_POST['code'], ENT_QUOTES, 'UTF-8')));
+        $description = trim(htmlspecialchars($_POST['description'] ?? '', ENT_QUOTES, 'UTF-8'));
+        $is_active = isset($_POST['is_active']) ? (int)$_POST['is_active'] : 1;
+        
+        // Additional validation
+        if (empty($name) || strlen($name) > 100) {
+            $error_message = "Department name is required and must be less than 100 characters.";
+        } elseif (empty($code) || strlen($code) > 20) {
+            $error_message = "Department code is required and must be less than 20 characters.";
+        } else {
 
         // Check if code already exists
         $check_sql = "SELECT id FROM departments WHERE code = ?";
@@ -65,27 +110,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         } else {
             $check_stmt->close();
 
-            $sql = "INSERT INTO departments (name, code, short_name, head_of_department, is_active) VALUES (?, ?, ?, ?, ?)";
+            $sql = "INSERT INTO departments (name, code, description, is_active) VALUES (?, ?, ?, ?)";
             $stmt = $conn->prepare($sql);
-            $stmt->bind_param("ssssi", $name, $code, $short_name, $head_of_department, $is_active);
+            $stmt->bind_param("sssi", $name, $code, $description, $is_active);
 
             if ($stmt->execute()) {
                 $success_message = "Department added successfully!";
+                logError("Department added successfully", ['name' => $name, 'code' => $code, 'description' => $description, 'is_active' => $is_active]);
             } else {
                 $error_message = "Error adding department: " . $conn->error;
+                logError("Failed to add department", ['name' => $name, 'code' => $code, 'description' => $description, 'is_active' => $is_active, 'error' => $conn->error]);
             }
             $stmt->close();
         }
+        }
     } elseif ($_POST['action'] === 'edit' && isset($_POST['id'])) {
-        $id = $conn->real_escape_string($_POST['id']);
-        $name = $conn->real_escape_string($_POST['name']);
-        $code = $conn->real_escape_string($_POST['code']);
-        $short_name = $conn->real_escape_string($_POST['short_name']);
-        $head_of_department = $conn->real_escape_string($_POST['head_of_department']);
-        $is_active = isset($_POST['is_active']) ? 1 : 0;
+        $id = (int)$_POST['id'];
+        
+        // Validate and sanitize input
+        $name = trim(htmlspecialchars($_POST['name'], ENT_QUOTES, 'UTF-8'));
+        $code = strtoupper(trim(htmlspecialchars($_POST['code'], ENT_QUOTES, 'UTF-8')));
+        $description = trim(htmlspecialchars($_POST['description'] ?? '', ENT_QUOTES, 'UTF-8'));
+        $is_active = isset($_POST['is_active']) ? (int)$_POST['is_active'] : 1;
+        
+        // Additional validation
+        if ($id < 1) {
+            $error_message = "Invalid department ID.";
+        } elseif (empty($name) || strlen($name) > 100) {
+            $error_message = "Department name is required and must be less than 100 characters.";
+        } elseif (empty($code) || strlen($code) > 20) {
+            $error_message = "Department code is required and must be less than 20 characters.";
+        } else {
         
         // Check if code already exists for other departments
-        $check_sql = "SELECT id FROM departments WHERE code = ? AND id != ? AND is_active = 1";
+        $check_sql = "SELECT id FROM departments WHERE code = ? AND id != ?";
         $check_stmt = $conn->prepare($check_sql);
         $check_stmt->bind_param("si", $code, $id);
         $check_stmt->execute();
@@ -94,36 +152,72 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         if ($check_result->num_rows > 0) {
             $error_message = "Department code already exists. Please choose a different code.";
         } else {
-            $sql = "UPDATE departments SET name = ?, code = ?, short_name = ?, head_of_department = ?, is_active = ? WHERE id = ?";
+            $sql = "UPDATE departments SET name = ?, code = ?, description = ?, is_active = ? WHERE id = ?";
             $stmt = $conn->prepare($sql);
-            $stmt->bind_param("ssssii", $name, $code, $short_name, $head_of_department, $is_active, $id);
+            $stmt->bind_param("sssii", $name, $code, $description, $is_active, $id);
             
             if ($stmt->execute()) {
                 $success_message = "Department updated successfully!";
+                logError("Department updated successfully", ['id' => $id, 'name' => $name, 'code' => $code, 'description' => $description, 'is_active' => $is_active]);
             } else {
                 $error_message = "Error updating department: " . $conn->error;
+                logError("Failed to update department", ['id' => $id, 'name' => $name, 'code' => $code, 'description' => $description, 'is_active' => $is_active, 'error' => $conn->error]);
             }
             $stmt->close();
         }
+        }
         $check_stmt->close();
     } elseif ($_POST['action'] === 'delete' && isset($_POST['id'])) {
-        $id = $conn->real_escape_string($_POST['id']);
-        $sql = "UPDATE departments SET is_active = 0 WHERE id = ?";
-        $stmt = $conn->prepare($sql);
-        $stmt->bind_param("i", $id);
+        $id = (int)$_POST['id'];
         
-        if ($stmt->execute()) {
-            $success_message = "Department deleted successfully!";
+        // Validate ID
+        if ($id < 1) {
+            $error_message = "Invalid department ID.";
         } else {
-            $error_message = "Error deleting department: " . $conn->error;
+            // Check if department is being used by other tables before deleting
+            $check_sql = "SELECT COUNT(*) as count FROM programs WHERE department_id = ?";
+            $check_stmt = $conn->prepare($check_sql);
+            $check_stmt->bind_param("i", $id);
+            $check_stmt->execute();
+            $check_result = $check_stmt->get_result();
+            $check_row = $check_result->fetch_assoc();
+            $check_stmt->close();
+            
+            if ($check_row['count'] > 0) {
+                $error_message = "Cannot delete department. It is being used by " . $check_row['count'] . " program(s).";
+            } else {
+                // Soft delete by setting is_active to 0
+                $sql = "UPDATE departments SET is_active = 0 WHERE id = ?";
+                $stmt = $conn->prepare($sql);
+                $stmt->bind_param("i", $id);
+                
+                if ($stmt->execute()) {
+                    $success_message = "Department deleted successfully!";
+                    logError("Department deleted successfully", ['id' => $id]);
+                } else {
+                    $error_message = "Error deleting department: " . $conn->error;
+                    logError("Failed to delete department", ['id' => $id, 'error' => $conn->error]);
+                }
+                $stmt->close();
+            }
         }
-        $stmt->close();
     }
 }
 
 // Fetch departments
 $sql = "SELECT * FROM departments WHERE is_active = 1 ORDER BY name";
 $result = $conn->query($sql);
+
+// Get streams for dropdowns (if needed for future use)
+$streams_result = null;
+
+// Get department statistics
+$stats_sql = "SELECT 
+    COUNT(*) as total_departments,
+    (SELECT COUNT(*) FROM programs WHERE department_id IN (SELECT id FROM departments)) as total_programs
+FROM departments WHERE is_active = 1";
+$stats_result = $conn->query($stats_sql);
+$stats = $stats_result ? $stats_result->fetch_assoc() : ['total_departments' => 0, 'total_programs' => 0];
 ?>
 
 <div class="main-content" id="mainContent">
@@ -154,8 +248,42 @@ $result = $conn->query($sql);
             </div>
         <?php endif; ?>
 
+        <!-- Statistics Cards -->
+        <div class="row g-3 mb-3 m-3">
+            <div class="col-md-6">
+                <div class="card bg-primary text-white">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <h4 class="card-title"><?php echo $stats['total_departments']; ?></h4>
+                                <p class="card-text">Total Departments</p>
+                            </div>
+                            <div class="align-self-center">
+                                <i class="fas fa-building fa-2x"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card bg-info text-white">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <h4 class="card-title"><?php echo $stats['total_programs']; ?></h4>
+                                <p class="card-text">Total Programs</p>
+                            </div>
+                            <div class="align-self-center">
+                                <i class="fas fa-graduation-cap fa-2x"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <div class="search-container m-3">
-            <input type="text" class="search-input" placeholder="Search departments...">
+            <input type="text" class="search-input" id="searchInput" placeholder="Search departments...">
         </div>
 
         <div class="table-responsive">
@@ -164,6 +292,8 @@ $result = $conn->query($sql);
                     <tr>
                         <th>Department Name</th>
                         <th>Code</th>
+                        <th>Description</th>
+                        <th>Status</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
@@ -173,12 +303,15 @@ $result = $conn->query($sql);
                             <tr>
                                 <td><strong><?php echo htmlspecialchars($row['name']); ?></strong></td>
                                 <td><span class="badge bg-primary"><?php echo htmlspecialchars($row['code']); ?></span></td>
+                                <td><small class="text-muted"><?php echo htmlspecialchars($row['description'] ?? 'No description'); ?></small></td>
+                                <td><span class="badge <?php echo $row['is_active'] ? 'bg-success' : 'bg-secondary'; ?>"><?php echo $row['is_active'] ? 'Active' : 'Inactive'; ?></span></td>
                                 <td>
-                                    <button class="btn btn-sm btn-outline-primary me-1" onclick="editDepartment(<?php echo $row['id']; ?>, '<?php echo htmlspecialchars(addslashes($row['name'])); ?>', '<?php echo htmlspecialchars(addslashes($row['code'])); ?>', '<?php echo htmlspecialchars(addslashes($row['short_name'] ?? '')); ?>', '<?php echo htmlspecialchars(addslashes($row['head_of_department'] ?? '')); ?>', <?php echo $row['is_active']; ?>)">
+                                    <button class="btn btn-sm btn-outline-primary me-1" onclick="editDepartment(<?php echo $row['id']; ?>, '<?php echo htmlspecialchars(addslashes($row['name'])); ?>', '<?php echo htmlspecialchars(addslashes($row['code'])); ?>', '<?php echo htmlspecialchars(addslashes($row['description'] ?? '')); ?>', <?php echo $row['is_active']; ?>)">
                                         <i class="fas fa-edit"></i>
                                     </button>
                                     <form method="POST" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this department?')">
                                         <input type="hidden" name="action" value="delete">
+                                        <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                                         <input type="hidden" name="id" value="<?php echo $row['id']; ?>">
                                         <button type="submit" class="btn btn-sm btn-outline-danger">
                                             <i class="fas fa-trash"></i>
@@ -189,7 +322,7 @@ $result = $conn->query($sql);
                         <?php endwhile; ?>
                     <?php else: ?>
                         <tr>
-                            <td colspan="3" class="empty-state">
+                            <td colspan="5" class="empty-state">
                                 <i class="fas fa-building"></i>
                                 <p>No departments found. Add your first department to get started!</p>
                             </td>
@@ -212,6 +345,7 @@ $result = $conn->query($sql);
             <form method="POST">
                 <div class="modal-body">
                     <input type="hidden" name="action" value="add">
+                    <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                     
                     <div class="mb-3">
                         <label for="name" class="form-label">Department Name *</label>
@@ -227,24 +361,18 @@ $result = $conn->query($sql);
                         </div>
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label for="short_name" class="form-label">Short Name</label>
-                                <input type="text" class="form-control" id="short_name" name="short_name" placeholder="e.g., CompSci" maxlength="10">
+                                <label for="is_active" class="form-label">Status</label>
+                                <select class="form-control" id="is_active" name="is_active">
+                                    <option value="1">Active</option>
+                                    <option value="0">Inactive</option>
+                                </select>
                             </div>
                         </div>
                     </div>
                     
                     <div class="mb-3">
-                        <label for="head_of_department" class="form-label">Head of Department</label>
-                        <input type="text" class="form-control" id="head_of_department" name="head_of_department" placeholder="e.g., Dr. John Smith">
-                    </div>
-                    
-                    <div class="mb-3">
-                        <div class="form-check">
-                            <input class="form-check-input" type="checkbox" id="is_active" name="is_active" checked>
-                            <label class="form-check-label" for="is_active">
-                                Active Department
-                            </label>
-                        </div>
+                        <label for="description" class="form-label">Description</label>
+                        <textarea class="form-control" id="description" name="description" rows="3" placeholder="Enter department description..."></textarea>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -267,6 +395,7 @@ $result = $conn->query($sql);
             <form method="POST">
                 <div class="modal-body">
                     <input type="hidden" name="action" value="edit">
+                    <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                     <input type="hidden" name="id" id="edit_id">
                     
                     <div class="mb-3">
@@ -283,24 +412,18 @@ $result = $conn->query($sql);
                         </div>
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label for="edit_short_name" class="form-label">Short Name</label>
-                                <input type="text" class="form-control" id="edit_short_name" name="short_name" placeholder="e.g., CompSci" maxlength="10">
+                                <label for="edit_is_active" class="form-label">Status</label>
+                                <select class="form-control" id="edit_is_active" name="is_active">
+                                    <option value="1">Active</option>
+                                    <option value="0">Inactive</option>
+                                </select>
                             </div>
                         </div>
                     </div>
                     
                     <div class="mb-3">
-                        <label for="edit_head_of_department" class="form-label">Head of Department</label>
-                        <input type="text" class="form-control" id="edit_head_of_department" name="head_of_department" placeholder="e.g., Dr. John Smith">
-                    </div>
-                    
-                    <div class="mb-3">
-                        <div class="form-check">
-                            <input class="form-check-input" type="checkbox" id="edit_is_active" name="is_active">
-                            <label class="form-check-label" for="edit_is_active">
-                                Active Department
-                            </label>
-                        </div>
+                        <label for="edit_description" class="form-label">Description</label>
+                        <textarea class="form-control" id="edit_description" name="description" rows="3" placeholder="Enter department description..."></textarea>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -345,9 +468,7 @@ $result = $conn->query($sql);
                                     <th>#</th>
                                     <th>Name</th>
                                     <th>Code</th>
-                                    <th>Short Name</th>
-                                    <th>Head of Department</th>
-                                    <th>Status</th>
+                                    <th>Description</th>
                                     <th>Validation</th>
                                 </tr>
                             </thead>
@@ -397,14 +518,13 @@ include 'includes/footer.php';
 let importData = [];
 let currentStep = 1;
 
-function editDepartment(id, name, code, shortName, headOfDepartment, isActive) {
+function editDepartment(id, name, code, description, isActive) {
     // Populate the edit modal with current values
     document.getElementById('edit_id').value = id;
     document.getElementById('edit_name').value = name;
     document.getElementById('edit_code').value = code;
-    document.getElementById('edit_short_name').value = shortName;
-    document.getElementById('edit_head_of_department').value = headOfDepartment;
-    document.getElementById('edit_is_active').checked = isActive == 1;
+    document.getElementById('edit_description').value = description;
+    document.getElementById('edit_is_active').value = isActive;
     
     // Show the edit modal
     var editModal = new bootstrap.Modal(document.getElementById('editDepartmentModal'));
@@ -473,9 +593,8 @@ function validateData(data) {
         const validated = {
             name: row.name || row.Name || '',
             code: row.code || row.Code || '',
-            short_name: row.short_name || row['short_name'] || row.ShortName || '',
-            head_of_department: row.head_of_department || row['head_of_department'] || row.HeadOfDepartment || '',
-            is_active: (row.is_active || row['is_active'] || row.IsActive || '1') === '1' ? '1' : '0'
+            description: row.description || row.Description || '',
+            is_active: row.is_active || row['is_active'] || row.IsActive || '1'
         };
         
         // Validation
@@ -492,9 +611,19 @@ function validateData(data) {
             validated.errors.push('Code is required');
         }
         
-        if (validated.short_name.length > 10) {
+        if (validated.code.length > 20) {
             validated.valid = false;
-            validated.errors.push('Short name too long');
+            validated.errors.push('Code too long (max 20 chars)');
+        }
+        
+        if (validated.name.length > 100) {
+            validated.valid = false;
+            validated.errors.push('Name too long (max 100 chars)');
+        }
+        
+        // Validate is_active is numeric
+        if (isNaN(validated.is_active) || (validated.is_active !== '0' && validated.is_active !== '1')) {
+            validated.is_active = '1'; // Default to active
         }
         
         return validated;
@@ -516,9 +645,7 @@ function showPreview() {
             <td>${index + 1}</td>
             <td>${row.name}</td>
             <td>${row.code}</td>
-            <td>${row.short_name}</td>
-            <td>${row.head_of_department}</td>
-            <td><span class="badge ${row.is_active === '1' ? 'bg-success' : 'bg-secondary'}">${row.is_active === '1' ? 'Active' : 'Inactive'}</span></td>
+            <td>${row.description}</td>
             <td>${row.valid ? '<span class="text-success">✓ Valid</span>' : '<span class="text-danger">✗ ' + row.errors.join(', ') + '</span>'}</td>
         `;
         
@@ -551,12 +678,18 @@ function executeImport() {
     actionInput.name = 'action';
     actionInput.value = 'bulk_import';
     
+    const csrfInput = document.createElement('input');
+    csrfInput.type = 'hidden';
+    csrfInput.name = 'csrf_token';
+    csrfInput.value = '<?php echo $_SESSION['csrf_token']; ?>';
+    
     const dataInput = document.createElement('input');
     dataInput.type = 'hidden';
     dataInput.name = 'import_data';
     dataInput.value = JSON.stringify(validData);
     
     form.appendChild(actionInput);
+    form.appendChild(csrfInput);
     form.appendChild(dataInput);
     document.body.appendChild(form);
     form.submit();
@@ -583,6 +716,20 @@ document.addEventListener('DOMContentLoaded', function() {
         importData = [];
         document.getElementById('csvFile').value = '';
         document.getElementById('previewBody').innerHTML = '';
+    });
+    
+    // Auto-generate department code from name
+    document.getElementById('name').addEventListener('input', function() {
+        const name = this.value.trim();
+        const codeInput = document.getElementById('code');
+        if (name && !codeInput.value) {
+            // Generate code from first letters of each word
+            const words = name.split(' ').filter(word => word.length > 0);
+            const code = words.map(word => word.charAt(0).toUpperCase()).join('');
+            if (code.length <= 20) {
+                codeInput.value = code;
+            }
+        }
     });
     
     // Setup drag and drop functionality
@@ -627,5 +774,26 @@ document.addEventListener('DOMContentLoaded', function() {
             processFile();
         }
     });
+    
+    // Search functionality
+    const searchInput = document.getElementById('searchInput');
+    if (searchInput) {
+        searchInput.addEventListener('keyup', function() {
+            const searchTerm = this.value.toLowerCase();
+            const tableRows = document.querySelectorAll('#departmentsTable tbody tr');
+            
+            tableRows.forEach(row => {
+                const name = row.cells[0].textContent.toLowerCase();
+                const code = row.cells[1].textContent.toLowerCase();
+                const description = row.cells[2].textContent.toLowerCase();
+                
+                if (name.includes(searchTerm) || code.includes(searchTerm) || description.includes(searchTerm)) {
+                    row.style.display = '';
+                } else {
+                    row.style.display = 'none';
+                }
+            });
+        });
+    }
 });
 </script>
