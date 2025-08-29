@@ -3,6 +3,7 @@
  * Stream Manager - Handles stream selection and filtering throughout the application
  */
 
+if (!class_exists('StreamManager')) {
 class StreamManager {
     private $conn;
     private $current_stream_id;
@@ -168,10 +169,12 @@ class StreamManager {
         return '<span class="badge bg-primary">' . htmlspecialchars($this->current_stream_name) . '</span>';
     }
 }
+}
 
 /**
  * Global function to get stream manager instance
  */
+if (!function_exists('getStreamManager')) {
 function getStreamManager() {
     global $conn;
     static $streamManager = null;
@@ -182,20 +185,25 @@ function getStreamManager() {
     
     return $streamManager;
 }
+}
 
 /**
  * Helper function to add stream filter to SQL
  */
+if (!function_exists('addStreamFilter')) {
 function addStreamFilter($sql, $table_alias = '') {
     $streamManager = getStreamManager();
     return $streamManager->addStreamFilter($sql, $table_alias);
+}
 }
 
 /**
  * Helper function to get stream filter condition
  */
+if (!function_exists('getStreamFilterCondition')) {
 function getStreamFilterCondition($table_alias = '') {
     $streamManager = getStreamManager();
     return $streamManager->getStreamFilterCondition($table_alias);
+}
 }
 ?>
