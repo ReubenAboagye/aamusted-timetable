@@ -5,11 +5,14 @@ include 'connect.php';
 $class_filter = isset($_GET['class_id']) ? (int)$_GET['class_id'] : 0;
 $day_filter = isset($_GET['day_id']) ? (int)$_GET['day_id'] : 0;
 $room_filter = isset($_GET['room_id']) ? (int)$_GET['room_id'] : 0;
+$stream_filter = isset($_GET['stream_id']) ? (int)$_GET['stream_id'] : 0;
 
-// Build the main query
+// Build the main query for timetable data
 $main_query = "
     SELECT 
         t.id,
+        t.day_id,
+        t.time_slot_id,
         c.name as class_name,
         co.course_code,
         co.course_name,
@@ -18,15 +21,18 @@ $main_query = "
         ts.end_time,
         r.name as room_name,
         r.capacity,
-        l.name as lecturer_name
+        l.name as lecturer_name,
+        l.id as lecturer_id,
+        cc.id as class_course_id,
+        lc.id as lecturer_course_id
     FROM timetable t
     JOIN class_courses cc ON t.class_course_id = cc.id
     JOIN classes c ON cc.class_id = c.id
     JOIN courses co ON cc.course_id = co.id
-    JOIN working_days d ON t.day_id = d.id
+    JOIN days d ON t.day_id = d.id
     JOIN time_slots ts ON t.time_slot_id = ts.id
     JOIN rooms r ON t.room_id = r.id
-    LEFT JOIN lecturer_courses lc ON co.id = lc.course_id
+    LEFT JOIN lecturer_courses lc ON t.lecturer_course_id = lc.id
     LEFT JOIN lecturers l ON lc.lecturer_id = l.id
     WHERE 1=1
 ";
@@ -52,6 +58,12 @@ if ($room_filter > 0) {
     $types .= "i";
 }
 
+if ($stream_filter > 0) {
+    $main_query .= " AND co.stream_id = ?";
+    $params[] = $stream_filter;
+    $types .= "i";
+}
+
 $main_query .= " ORDER BY d.id, ts.start_time, c.name";
 
 // Execute the main query
@@ -64,13 +76,62 @@ $timetable_result = $stmt->get_result();
 
 // Get filter options
 $classes_result = $conn->query("SELECT id, name FROM classes WHERE is_active = 1 ORDER BY name");
-$days_result = $conn->query("SELECT id, name FROM working_days WHERE is_active = 1 ORDER BY id");
+$days_result = $conn->query("SELECT id, name FROM days ORDER BY id");
 $rooms_result = $conn->query("SELECT id, name FROM rooms WHERE is_active = 1 ORDER BY name");
+$streams_result = $conn->query("SELECT id, name FROM streams WHERE is_active = 1 ORDER BY name");
+$time_slots_result = $conn->query("SELECT id, start_time, end_time FROM time_slots WHERE is_mandatory = 1 ORDER BY start_time");
 
 // Get statistics
 $total_entries = $conn->query("SELECT COUNT(*) as count FROM timetable")->fetch_assoc()['count'];
 $total_classes = $conn->query("SELECT COUNT(DISTINCT c.id) as count FROM timetable t JOIN class_courses cc ON t.class_course_id = cc.id JOIN classes c ON cc.class_id = c.id")->fetch_assoc()['count'];
 $total_courses = $conn->query("SELECT COUNT(DISTINCT co.id) as count FROM timetable t JOIN class_courses cc ON t.class_course_id = cc.id JOIN courses co ON cc.course_id = co.id")->fetch_assoc()['count'];
+
+// Get statistics about multiple classes and overlapping courses
+$multiple_classes_count = 0;
+$overlapping_courses_count = 0;
+
+foreach ($timetable_grid as $day_id => $day_slots) {
+    foreach ($day_slots as $time_slot_id => $entries) {
+        if (count($entries) > 1) {
+            $multiple_classes_count++;
+            
+            // Check for overlapping courses
+            $course_codes = array_column($entries, 'course_code');
+            if (count(array_unique($course_codes)) < count($course_codes)) {
+                $overlapping_courses_count++;
+            }
+        }
+    }
+}
+
+// Organize timetable data by day and time slot
+$timetable_grid = [];
+$days = [];
+$time_slots = [];
+
+while ($day = $days_result->fetch_assoc()) {
+    $days[$day['id']] = $day['name'];
+}
+
+while ($slot = $time_slots_result->fetch_assoc()) {
+    $time_slots[$slot['id']] = $slot;
+}
+
+// Reset result sets for reuse
+$days_result->data_seek(0);
+$time_slots_result->data_seek(0);
+
+// Populate timetable grid
+while ($entry = $timetable_result->fetch_assoc()) {
+    $day_id = $entry['day_id'];
+    $time_slot_id = $entry['time_slot_id'];
+    
+    if (!isset($timetable_grid[$day_id][$time_slot_id])) {
+        $timetable_grid[$day_id][$time_slot_id] = [];
+    }
+    
+    $timetable_grid[$day_id][$time_slot_id][] = $entry;
+}
 ?>
 
 <!DOCTYPE html>
@@ -85,6 +146,12 @@ $total_courses = $conn->query("SELECT COUNT(DISTINCT co.id) as count FROM timeta
         .card {
             box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
             border: 1px solid rgba(0, 0, 0, 0.125);
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+        .card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
         }
         .stat-card {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -97,25 +164,108 @@ $total_courses = $conn->query("SELECT COUNT(DISTINCT co.id) as count FROM timeta
             font-size: 2.5rem;
             font-weight: bold;
         }
-        .timetable-table {
-            font-size: 0.9rem;
+        .timetable-grid {
+            overflow-x: auto;
         }
-        .timetable-table th {
+        .timetable-header {
             background-color: #f8f9fa;
             position: sticky;
             top: 0;
             z-index: 10;
         }
-        .time-slot {
+        .time-slot-header {
+            background-color: #e9ecef;
             font-weight: bold;
-            color: #495057;
+            text-align: center;
+            padding: 0.5rem;
+            border: 1px solid #dee2e6;
         }
-        .course-info {
-            font-size: 0.85rem;
+        .day-header {
+            background-color: #495057;
+            color: white;
+            font-weight: bold;
+            text-align: center;
+            padding: 1rem;
+            border: 1px solid #dee2e6;
         }
-        .room-info {
+        .timetable-cell {
+            min-height: 120px;
+            padding: 0.5rem;
+            border: 1px solid #dee2e6;
+            background-color: #f8f9fa;
+        }
+        .course-card {
+            background: linear-gradient(135deg, #007bff 0%, #0056b3 100%);
+            color: white;
+            margin-bottom: 0.5rem;
             font-size: 0.8rem;
+            padding: 0.5rem;
+            border-radius: 0.375rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .course-card:hover {
+            transform: scale(1.02);
+            box-shadow: 0 0.25rem 0.5rem rgba(0, 0, 0, 0.2);
+        }
+        .course-card.multiple {
+            background: linear-gradient(135deg, #28a745 0%, #1e7e34 100%);
+        }
+        .course-card.overlapping {
+            background: linear-gradient(135deg, #ffc107 0%, #e0a800 100%);
+            color: #212529;
+        }
+        .course-card.overlapping .lecturer-name {
+            color: #212529;
+        }
+        .timetable-cell {
+            min-height: 120px;
+            padding: 0.5rem;
+            border: 1px solid #dee2e6;
+            background-color: #f8f9fa;
+            position: relative;
+        }
+        .timetable-cell.has-multiple {
+            background-color: #fff3cd;
+        }
+        .timetable-cell.has-overlap {
+            background-color: #f8d7da;
+        }
+        .course-card .class-name {
+            font-weight: bold;
+            font-size: 0.9rem;
+        }
+        .course-card .course-code {
+            font-size: 0.8rem;
+            opacity: 0.9;
+        }
+        .course-card .lecturer-name {
+            font-size: 0.75rem;
+            opacity: 0.8;
+            font-style: italic;
+        }
+        .empty-cell {
+            background-color: #f8f9fa;
             color: #6c757d;
+            text-align: center;
+            padding: 2rem 0;
+            font-style: italic;
+        }
+        .filters-section {
+            background-color: #f8f9fa;
+            border-radius: 0.375rem;
+            padding: 1rem;
+            margin-bottom: 1rem;
+        }
+        .view-toggle {
+            margin-bottom: 1rem;
+        }
+        .view-toggle .btn {
+            margin-right: 0.5rem;
+        }
+        .view-toggle .btn.active {
+            background-color: #007bff;
+            border-color: #007bff;
         }
     </style>
 </head>
@@ -171,84 +321,219 @@ $total_courses = $conn->query("SELECT COUNT(DISTINCT co.id) as count FROM timeta
                                 <div class="card stat-card">
                                     <div class="card-body text-center">
                                         <i class="fas fa-clock fa-2x mb-2"></i>
-                                        <div class="stat-number"><?php echo $days_result->num_rows; ?></div>
+                                        <div class="stat-number"><?php echo count($days); ?></div>
                                         <div>Working Days</div>
                                     </div>
                                 </div>
                             </div>
                         </div>
-
-                        <!-- Filters -->
-                        <div class="card mb-4">
-                            <div class="card-header">
-                                <h6 class="mb-0">Filters</h6>
+                        
+                        <!-- Additional Statistics Row -->
+                        <div class="row mb-4">
+                            <div class="col-md-4">
+                                <div class="card stat-card" style="background: linear-gradient(135deg, #28a745 0%, #1e7e34 100%);">
+                                    <div class="card-body text-center">
+                                        <i class="fas fa-layer-group fa-2x mb-2"></i>
+                                        <div class="stat-number"><?php echo $multiple_classes_count; ?></div>
+                                        <div>Multiple Class Slots</div>
+                                    </div>
+                                </div>
                             </div>
-                            <div class="card-body">
-                                <form method="GET" class="row g-3">
-                                    <div class="col-md-3">
-                                        <label for="class_id" class="form-label">Class</label>
-                                        <select name="class_id" id="class_id" class="form-select">
-                                            <option value="">All Classes</option>
-                                            <?php while ($class = $classes_result->fetch_assoc()): ?>
-                                                <option value="<?php echo $class['id']; ?>" 
-                                                        <?php echo $class_filter == $class['id'] ? 'selected' : ''; ?>>
-                                                    <?php echo htmlspecialchars($class['name']); ?>
-                                                </option>
-                                            <?php endwhile; ?>
-                                        </select>
+                            <div class="col-md-4">
+                                <div class="card stat-card" style="background: linear-gradient(135deg, #ffc107 0%, #e0a800 100%); color: #212529;">
+                                    <div class="card-body text-center">
+                                        <i class="fas fa-copy fa-2x mb-2"></i>
+                                        <div class="stat-number"><?php echo $overlapping_courses_count; ?></div>
+                                        <div>Overlapping Courses</div>
                                     </div>
-                                    <div class="col-md-3">
-                                        <label for="day_id" class="form-label">Day</label>
-                                        <select name="day_id" id="day_id" class="form-select">
-                                            <option value="">All Days</option>
-                                            <?php while ($day = $days_result->fetch_assoc()): ?>
-                                                <option value="<?php echo $day['id']; ?>" 
-                                                        <?php echo $day_filter == $day['id'] ? 'selected' : ''; ?>>
-                                                    <?php echo htmlspecialchars($day['name']); ?>
-                                                </option>
-                                            <?php endwhile; ?>
-                                        </select>
-                                    </div>
-                                    <div class="col-md-3">
-                                        <label for="room_id" class="form-label">Room</label>
-                                        <select name="room_id" id="room_id" class="form-select">
-                                            <option value="">All Rooms</option>
-                                            <?php while ($room = $rooms_result->fetch_assoc()): ?>
-                                                <option value="<?php echo $room['id']; ?>" 
-                                                        <?php echo $room_filter == $room['id'] ? 'selected' : ''; ?>>
-                                                    <?php echo htmlspecialchars($room['name']); ?>
-                                                </option>
-                                            <?php endwhile; ?>
-                                        </select>
-                                    </div>
-                                    <div class="col-md-3 d-flex align-items-end">
-                                        <div class="d-flex gap-2 w-100">
-                                            <button type="submit" class="btn btn-primary flex-fill">
-                                                <i class="fas fa-filter me-2"></i>Apply Filters
-                                            </button>
-                                            <a href="view_timetable.php" class="btn btn-outline-secondary">
-                                                <i class="fas fa-times me-2"></i>Clear
-                                            </a>
-                                        </div>
-                                    </div>
-                                </form>
+                                </div>
                             </div>
+                            <div class="col-md-4">
+                                <div class="card stat-card" style="background: linear-gradient(135deg, #17a2b8 0%, #138496 100%);">
+                                    <div class="card-body text-center">
+                                        <i class="fas fa-users fa-2x mb-2"></i>
+                                        <div class="stat-number"><?php echo count($time_slots); ?></div>
+                                        <div>Time Periods</div>
+                                    </div>
+                                </div>
                         </div>
 
-                        <!-- Timetable Display -->
-                        <?php if ($timetable_result->num_rows > 0): ?>
+                        <!-- View Toggle -->
+                        <div class="view-toggle">
+                            <button class="btn btn-outline-primary active" onclick="showGridView()">
+                                <i class="fas fa-th me-2"></i>Grid View
+                            </button>
+                            <button class="btn btn-outline-secondary" onclick="showListView()">
+                                <i class="fas fa-list me-2"></i>List View
+                            </button>
+                        </div>
+
+                        <!-- Filters -->
+                        <div class="filters-section">
+                            <h6 class="mb-3">Filters</h6>
+                            <form method="GET" class="row g-3">
+                                <div class="col-md-2">
+                                    <label for="class_id" class="form-label">Class</label>
+                                    <select name="class_id" id="class_id" class="form-select">
+                                        <option value="">All Classes</option>
+                                        <?php while ($class = $classes_result->fetch_assoc()): ?>
+                                            <option value="<?php echo $class['id']; ?>" 
+                                                    <?php echo $class_filter == $class['id'] ? 'selected' : ''; ?>>
+                                                <?php echo htmlspecialchars($class['name']); ?>
+                                            </option>
+                                        <?php endwhile; ?>
+                                    </select>
+                                </div>
+                                <div class="col-md-2">
+                                    <label for="day_id" class="form-label">Day</label>
+                                    <select name="day_id" id="day_id" class="form-select">
+                                        <option value="">All Days</option>
+                                        <?php while ($day = $days_result->fetch_assoc()): ?>
+                                            <option value="<?php echo $day['id']; ?>" 
+                                                    <?php echo $day_filter == $day['id'] ? 'selected' : ''; ?>>
+                                                <?php echo htmlspecialchars($day['name']); ?>
+                                            </option>
+                                        <?php endwhile; ?>
+                                    </select>
+                                </div>
+                                <div class="col-md-2">
+                                    <label for="room_id" class="form-label">Room</label>
+                                    <select name="room_id" id="room_id" class="form-select">
+                                        <option value="">All Rooms</option>
+                                        <?php while ($room = $rooms_result->fetch_assoc()): ?>
+                                            <option value="<?php echo $room['id']; ?>" 
+                                                    <?php echo $room_filter == $room['id'] ? 'selected' : ''; ?>>
+                                                <?php echo htmlspecialchars($room['name']); ?>
+                                            </option>
+                                        <?php endwhile; ?>
+                                    </select>
+                                </div>
+                                <div class="col-md-2">
+                                    <label for="stream_id" class="form-label">Stream</label>
+                                    <select name="stream_id" id="stream_id" class="form-select">
+                                        <option value="">All Streams</option>
+                                        <?php while ($stream = $streams_result->fetch_assoc()): ?>
+                                            <option value="<?php echo $stream['id']; ?>" 
+                                                    <?php echo $stream_filter == $stream['id'] ? 'selected' : ''; ?>>
+                                                <?php echo htmlspecialchars($stream['name']); ?>
+                                            </option>
+                                        <?php endwhile; ?>
+                                    </select>
+                                </div>
+                                <div class="col-md-4 d-flex align-items-end">
+                                    <div class="d-flex gap-2 w-100">
+                                        <button type="submit" class="btn btn-primary flex-fill">
+                                            <i class="fas fa-filter me-2"></i>Apply Filters
+                                        </button>
+                                        <a href="view_timetable.php" class="btn btn-outline-secondary">
+                                            <i class="fas fa-times me-2"></i>Clear
+                                        </a>
+                                    </div>
+                                </div>
+                            </form>
+                        </div>
+
+                        <!-- Grid View -->
+                        <div id="grid-view">
                             <div class="card">
                                 <div class="card-header">
                                     <h6 class="mb-0">
-                                        Timetable Entries (<?php echo $timetable_result->num_rows; ?>)
-                                        <?php if ($class_filter || $day_filter || $room_filter): ?>
+                                        <i class="fas fa-th me-2"></i>Timetable Grid View
+                                        <?php if ($class_filter || $day_filter || $room_filter || $stream_filter): ?>
+                                            <span class="badge bg-info ms-2">Filtered</span>
+                                        <?php endif; ?>
+                                    </h6>
+                                </div>
+                                <div class="card-body">
+                                    <div class="timetable-grid">
+                                        <table class="table table-bordered">
+                                            <thead class="timetable-header">
+                                                <tr>
+                                                    <th class="time-slot-header">Time</th>
+                                                    <?php foreach ($days as $day_id => $day_name): ?>
+                                                        <th class="day-header"><?php echo htmlspecialchars($day_name); ?></th>
+                                                    <?php endforeach; ?>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <?php foreach ($time_slots as $time_slot_id => $time_slot): ?>
+                                                <tr>
+                                                    <td class="time-slot-header">
+                                                        <?php echo htmlspecialchars(substr($time_slot['start_time'], 0, 5) . ' - ' . substr($time_slot['end_time'], 0, 5)); ?>
+                                                    </td>
+                                                    <?php foreach ($days as $day_id => $day_name): ?>
+                                                        <td class="timetable-cell <?php 
+                                                            if (isset($timetable_grid[$day_id][$time_slot_id]) && !empty($timetable_grid[$day_id][$time_slot_id])) {
+                                                                $entries = $timetable_grid[$day_id][$time_slot_id];
+                                                                if (count($entries) > 1) {
+                                                                    echo 'has-multiple';
+                                                                }
+                                                                // Check for overlapping courses (same course in multiple classes)
+                                                                $course_ids = array_column($entries, 'course_code');
+                                                                if (count(array_unique($course_ids)) < count($course_ids)) {
+                                                                    echo ' has-overlap';
+                                                                }
+                                                            }
+                                                        ?>">
+                                                            <?php 
+                                                            if (isset($timetable_grid[$day_id][$time_slot_id]) && !empty($timetable_grid[$day_id][$time_slot_id])): 
+                                                                $entries = $timetable_grid[$day_id][$time_slot_id];
+                                                                $course_counts = array_count_values(array_column($entries, 'course_code'));
+                                                                foreach ($entries as $entry): 
+                                                                    $is_overlapping = $course_counts[$entry['course_code']] > 1;
+                                                            ?>
+                                                                <div class="course-card <?php 
+                                                                    if (count($entries) > 1) echo 'multiple';
+                                                                    if ($is_overlapping) echo ' overlapping';
+                                                                ?>" 
+                                                                     onclick="editTimetableEntry(<?php echo $entry['id']; ?>)"
+                                                                     title="Click to edit - <?php echo htmlspecialchars($entry['class_name'] . ' - ' . $entry['course_code']); ?>">
+                                                                    <div class="class-name"><?php echo htmlspecialchars($entry['class_name']); ?></div>
+                                                                    <div class="course-code"><?php echo htmlspecialchars($entry['course_code']); ?></div>
+                                                                    <?php if ($entry['lecturer_name']): ?>
+                                                                        <div class="lecturer-name"><?php echo htmlspecialchars($entry['lecturer_name']); ?></div>
+                                                                    <?php endif; ?>
+                                                                    <?php if (count($entries) > 1): ?>
+                                                                        <div class="badge bg-warning text-dark">Multiple Classes</div>
+                                                                    <?php endif; ?>
+                                                                    <?php if ($is_overlapping): ?>
+                                                                        <div class="badge bg-info text-dark">Same Course</div>
+                                                                    <?php endif; ?>
+                                                                </div>
+                                                            <?php 
+                                                                endforeach;
+                                                            else: 
+                                                            ?>
+                                                                <div class="empty-cell">
+                                                                    <i class="fas fa-plus text-muted"></i><br>
+                                                                    <small>No classes</small>
+                                                                </div>
+                                                            <?php endif; ?>
+                                                        </td>
+                                                    <?php endforeach; ?>
+                                                </tr>
+                                                <?php endforeach; ?>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- List View (Hidden by default) -->
+                        <div id="list-view" style="display: none;">
+                            <div class="card">
+                                <div class="card-header">
+                                    <h6 class="mb-0">
+                                        <i class="fas fa-list me-2"></i>Timetable List View
+                                        <?php if ($class_filter || $day_filter || $room_filter || $stream_filter): ?>
                                             <span class="badge bg-info ms-2">Filtered</span>
                                         <?php endif; ?>
                                     </h6>
                                 </div>
                                 <div class="card-body">
                                     <div class="table-responsive">
-                                        <table class="table table-striped table-hover timetable-table">
+                                        <table class="table table-striped table-hover">
                                             <thead>
                                                 <tr>
                                                     <th>Day</th>
@@ -261,44 +546,37 @@ $total_courses = $conn->query("SELECT COUNT(DISTINCT co.id) as count FROM timeta
                                                 </tr>
                                             </thead>
                                             <tbody>
-                                                <?php while ($entry = $timetable_result->fetch_assoc()): ?>
+                                                <?php 
+                                                // Reset result set for list view
+                                                $stmt->execute();
+                                                $list_result = $stmt->get_result();
+                                                while ($entry = $list_result->fetch_assoc()): 
+                                                ?>
                                                 <tr>
+                                                    <td><strong><?php echo htmlspecialchars($entry['day_name']); ?></strong></td>
                                                     <td>
-                                                        <strong><?php echo htmlspecialchars($entry['day_name']); ?></strong>
-                                                    </td>
-                                                    <td>
-                                                        <span class="time-slot">
+                                                        <span class="text-primary">
                                                             <?php echo htmlspecialchars(substr($entry['start_time'], 0, 5) . ' - ' . substr($entry['end_time'], 0, 5)); ?>
                                                         </span>
                                                     </td>
+                                                    <td><?php echo htmlspecialchars($entry['class_name']); ?></td>
                                                     <td>
-                                                        <div class="course-info">
-                                                            <?php echo htmlspecialchars($entry['class_name']); ?>
-                                                        </div>
+                                                        <strong><?php echo htmlspecialchars($entry['course_code']); ?></strong><br>
+                                                        <small><?php echo htmlspecialchars($entry['course_name']); ?></small>
                                                     </td>
                                                     <td>
-                                                        <div class="course-info">
-                                                            <strong><?php echo htmlspecialchars($entry['course_code']); ?></strong><br>
-                                                            <small><?php echo htmlspecialchars($entry['course_name']); ?></small>
-                                                        </div>
+                                                        <?php echo htmlspecialchars($entry['room_name']); ?><br>
+                                                        <small>Capacity: <?php echo $entry['capacity']; ?></small>
                                                     </td>
                                                     <td>
-                                                        <div class="room-info">
-                                                            <?php echo htmlspecialchars($entry['room_name']); ?><br>
-                                                            <small>Capacity: <?php echo $entry['capacity']; ?></small>
-                                                        </div>
-                                                    </td>
-                                                    <td>
-                                                        <div class="course-info">
-                                                            <?php echo $entry['lecturer_name'] ? htmlspecialchars($entry['lecturer_name']) : '<span class="text-muted">Not assigned</span>'; ?>
-                                                        </div>
+                                                        <?php echo $entry['lecturer_name'] ? htmlspecialchars($entry['lecturer_name']) : '<span class="text-muted">Not assigned</span>'; ?>
                                                     </td>
                                                     <td>
                                                         <div class="btn-group btn-group-sm">
-                                                            <a href="update_timetable.php?id=<?php echo $entry['id']; ?>" 
-                                                               class="btn btn-outline-primary btn-sm" title="Edit">
+                                                            <button type="button" class="btn btn-outline-primary btn-sm" 
+                                                                    onclick="editTimetableEntry(<?php echo $entry['id']; ?>)" title="Edit">
                                                                 <i class="fas fa-edit"></i>
-                                                            </a>
+                                                            </button>
                                                             <button type="button" class="btn btn-outline-danger btn-sm" 
                                                                     onclick="deleteEntry(<?php echo $entry['id']; ?>)" title="Delete">
                                                                 <i class="fas fa-trash"></i>
@@ -312,22 +590,7 @@ $total_courses = $conn->query("SELECT COUNT(DISTINCT co.id) as count FROM timeta
                                     </div>
                                 </div>
                             </div>
-                        <?php else: ?>
-                            <div class="card">
-                                <div class="card-body text-center py-5">
-                                    <i class="fas fa-calendar-times fa-3x text-muted mb-3"></i>
-                                    <h5 class="text-muted">No Timetable Entries Found</h5>
-                                    <p class="text-muted">
-                                        <?php if ($class_filter || $day_filter || $room_filter): ?>
-                                            No entries match the current filters. Try adjusting your filters.
-                                        <?php else: ?>
-                                            No timetable entries have been generated yet. 
-                                            <a href="generate_timetable.php">Generate a timetable</a> to get started.
-                                        <?php endif; ?>
-                                    </p>
-                                </div>
-                            </div>
-                        <?php endif; ?>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -336,9 +599,26 @@ $total_courses = $conn->query("SELECT COUNT(DISTINCT co.id) as count FROM timeta
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
+        function showGridView() {
+            document.getElementById('grid-view').style.display = 'block';
+            document.getElementById('list-view').style.display = 'none';
+            document.querySelectorAll('.view-toggle .btn').forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+        }
+
+        function showListView() {
+            document.getElementById('grid-view').style.display = 'none';
+            document.getElementById('list-view').style.display = 'block';
+            document.querySelectorAll('.view-toggle .btn').forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+        }
+
+        function editTimetableEntry(id) {
+            window.location.href = 'update_timetable.php?id=' + id;
+        }
+
         function deleteEntry(id) {
             if (confirm('Are you sure you want to delete this timetable entry? This action cannot be undone.')) {
-                // Create a form to submit the delete request
                 const form = document.createElement('form');
                 form.method = 'POST';
                 form.action = 'update_timetable.php';

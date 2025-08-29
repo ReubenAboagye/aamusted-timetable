@@ -332,10 +332,59 @@ if (!isset($pageTitle)) {
         <img src="images/aamustedLog.png" alt="AAMUSTED Logo">University Timetable Generator
       </a>
       <div class="mx-auto text-white" id="currentStream">
-        <i class="fas fa-clock me-2"></i>Current Stream: <span id="streamName">Morning</span>
+        <i class="fas fa-clock me-2"></i>Current Stream: 
+        <select id="streamSelect" class="form-select form-select-sm d-inline-block w-auto" style="background: transparent; color: white; border: 1px solid rgba(255,255,255,0.3);">
+          <option value="1">Regular</option>
+          <option value="2">Weekend</option>
+          <option value="3">Evening</option>
+        </select>
       </div>
       <div class="ms-auto text-white" id="currentTime">12:00:00 PM</div>
     </div>
   </nav>
+
+  <!-- Stream Change JavaScript -->
+  <script>
+  function changeStream(streamId) {
+    fetch('change_stream.php', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: 'stream_id=' + streamId
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (data.success) {
+        // Reload the page to show filtered data
+        window.location.reload();
+      } else {
+        alert('Error changing stream: ' + data.message);
+      }
+    })
+    .catch(error => {
+      console.error('Error:', error);
+      alert('Error changing stream. Please try again.');
+    });
+  }
+
+  // Set the current stream based on session
+  document.addEventListener('DOMContentLoaded', function() {
+    // This will be populated by PHP when the page loads
+    const currentStreamId = '<?php 
+      if (isset($conn)) {
+        include_once "includes/stream_manager.php";
+        $streamManager = getStreamManager();
+        echo $streamManager->getCurrentStreamId();
+      } else {
+        echo "1";
+      }
+    ?>';
+    
+    if (currentStreamId && document.getElementById('streamSelect')) {
+      document.getElementById('streamSelect').value = currentStreamId;
+    }
+  });
+  </script>
 
 

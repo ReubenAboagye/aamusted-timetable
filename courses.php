@@ -18,9 +18,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $preferred_room_type = $conn->real_escape_string($_POST['preferred_room_type']);
         $is_active = isset($_POST['is_active']) ? 1 : 0;
         
-        $sql = "INSERT INTO courses (name, code, department_id, credits, hours_per_week, level, preferred_room_type, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+        $stream_id = $streamManager->getCurrentStreamId();
+        $sql = "INSERT INTO courses (name, code, department_id, stream_id, credits, hours_per_week, level, preferred_room_type, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
         $stmt = $conn->prepare($sql);
-        $stmt->bind_param("sssiissi", $name, $code, $department_id, $credits, $hours_per_week, $level, $preferred_room_type, $is_active);
+        $stmt->bind_param("ssiissi", $name, $code, $department_id, $stream_id, $credits, $hours_per_week, $level, $preferred_room_type, $is_active);
         
         if ($stmt->execute()) {
             $success_message = "Course added successfully!";
@@ -65,10 +66,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     }
                 }
 
-                $sql = "INSERT INTO courses (name, code, department_id, credits, hours_per_week, level, preferred_room_type, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+                $stream_id = $streamManager->getCurrentStreamId();
+                $sql = "INSERT INTO courses (name, code, department_id, stream_id, credits, hours_per_week, level, preferred_room_type, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
                 $stmt = $conn->prepare($sql);
                 if (!$stmt) { $error_count++; continue; }
-                $stmt->bind_param("sssiissi", $name, $code, $department_id, $credits, $hours_per_week, $level, $preferred_room_type, $is_active);
+                $stmt->bind_param("ssiissi", $name, $code, $department_id, $stream_id, $credits, $hours_per_week, $level, $preferred_room_type, $is_active);
                 if ($stmt->execute()) {
                     $success_count++;
                 } else {
@@ -106,16 +108,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     }
 }
 
+// Include stream manager
+include 'includes/stream_manager.php';
+$streamManager = getStreamManager();
+
 // Fetch courses with department names
 $sql = "SELECT c.*, d.name as department_name 
         FROM courses c 
         LEFT JOIN departments d ON c.department_id = d.id 
-        WHERE c.is_active = 1 
+        WHERE c.is_active = 1 AND c.stream_id = " . $streamManager->getCurrentStreamId() . "
         ORDER BY c.name";
 $result = $conn->query($sql);
 
-// Fetch departments for dropdown
-$dept_sql = "SELECT id, name FROM departments WHERE is_active = 1 ORDER BY name";
+// Fetch departments for dropdown (filtered by stream)
+$dept_sql = "SELECT id, name FROM departments WHERE is_active = 1 AND stream_id = " . $streamManager->getCurrentStreamId() . " ORDER BY name";
 $dept_result = $conn->query($dept_sql);
 ?>
 
@@ -371,7 +377,7 @@ $dept_result = $conn->query($dept_sql);
 <?php 
 // Embed existing course codes for client-side duplicate checks
 $existing_codes = [];
-$codes_res = $conn->query("SELECT code FROM courses WHERE is_active = 1");
+$codes_res = $conn->query("SELECT code FROM courses WHERE is_active = 1 AND stream_id = " . $streamManager->getCurrentStreamId());
 if ($codes_res) {
     while ($r = $codes_res->fetch_assoc()) {
         $existing_codes[] = $r['code'];

@@ -99,18 +99,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     }
 }
 
+// Include stream manager
+include 'includes/stream_manager.php';
+$streamManager = getStreamManager();
+
 // Fetch classes with department and stream information
 $sql = "SELECT c.*, d.name as department_name, d.short_name as department_short, 
                s.name as stream_name, s.code as stream_code
         FROM classes c 
         LEFT JOIN departments d ON c.department_id = d.id 
         LEFT JOIN streams s ON c.stream_id = s.id
-        WHERE c.is_active = 1 
+        WHERE c.is_active = 1 AND c.stream_id = " . $streamManager->getCurrentStreamId() . "
         ORDER BY c.name";
 $result = $conn->query($sql);
 
-// Fetch departments for dropdown
-$dept_sql = "SELECT id, name, short_name FROM departments WHERE is_active = 1 ORDER BY name";
+// Fetch departments for dropdown (filtered by stream)
+$dept_sql = "SELECT id, name, short_name FROM departments WHERE is_active = 1 AND stream_id = " . $streamManager->getCurrentStreamId() . " ORDER BY name";
 $dept_result = $conn->query($dept_sql);
 
 // Fetch levels for dropdown
