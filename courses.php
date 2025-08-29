@@ -11,7 +11,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     if ($_POST['action'] === 'add') {
         $course_name = $conn->real_escape_string($_POST['course_name']);
         $course_code = $conn->real_escape_string($_POST['course_code']);
-        $department_id = $conn->real_escape_string($_POST['department_id']);
         $credits = $conn->real_escape_string($_POST['credits']);
         $hours_per_week = $conn->real_escape_string($_POST['hours_per_week']);
         $level = $conn->real_escape_string($_POST['level']);
@@ -19,9 +18,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $is_active = isset($_POST['is_active']) ? 1 : 0;
         
         $stream_id = $streamManager->getCurrentStreamId();
-        $sql = "INSERT INTO courses (course_name, course_code, department_id, stream_id, credits, hours_per_week, level, preferred_room_type, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
+        $sql = "INSERT INTO courses (name, code, stream_id, credits, hours_per_week, level, preferred_room_type, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
         $stmt = $conn->prepare($sql);
-        $stmt->bind_param("ssiissi", $course_name, $course_code, $department_id, $stream_id, $credits, $hours_per_week, $level, $preferred_room_type, $is_active);
+        $stmt->bind_param("ssiiiisi", $course_name, $course_code, $stream_id, $credits, $hours_per_week, $level, $preferred_room_type, $is_active);
         
         if ($stmt->execute()) {
             $success_message = "Course added successfully!";
@@ -43,14 +42,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             foreach ($import_data as $row) {
                 $course_name = isset($row['course_name']) ? $conn->real_escape_string($row['course_name']) : '';
                 $course_code = isset($row['course_code']) ? $conn->real_escape_string($row['course_code']) : '';
-                $department_id = isset($row['department_id']) ? (int)$row['department_id'] : 0;
                 $credits = isset($row['credits']) ? (int)$row['credits'] : 3;
                 $hours_per_week = isset($row['hours_per_week']) ? (int)$row['hours_per_week'] : 3;
                 $level = isset($row['level']) ? (int)$row['level'] : 100;
                 $preferred_room_type = isset($row['preferred_room_type']) ? $conn->real_escape_string($row['preferred_room_type']) : 'classroom';
                 $is_active = isset($row['is_active']) ? (int)$row['is_active'] : 1;
 
-                if ($course_name === '' || $course_code === '' || $department_id === 0) {
+                if ($course_name === '' || $course_code === '') {
                     $error_count++;
                     continue;
                 }
@@ -67,10 +65,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 }
 
                 $stream_id = $streamManager->getCurrentStreamId();
-                $sql = "INSERT INTO courses (course_name, course_code, department_id, stream_id, credits, hours_per_week, level, preferred_room_type, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                $sql = "INSERT INTO courses (name, code, stream_id, credits, hours_per_week, level, preferred_room_type, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
                 $stmt = $conn->prepare($sql);
                 if (!$stmt) { $error_count++; continue; }
-                $stmt->bind_param("ssiissi", $course_name, $course_code, $department_id, $stream_id, $credits, $hours_per_week, $level, $preferred_room_type, $is_active);
+                $stmt->bind_param("ssiiiisi", $course_name, $course_code, $stream_id, $credits, $hours_per_week, $level, $preferred_room_type, $is_active);
                 if ($stmt->execute()) {
                     $success_count++;
                 } else {
@@ -108,14 +106,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     }
 }
 
-// Include stream manager
-include 'includes/stream_manager.php';
+// Include stream manager (use include_once to avoid redeclaration)
+include_once 'includes/stream_manager.php';
 $streamManager = getStreamManager();
 
 // Fetch courses with department names
-$sql = "SELECT c.*, d.name as department_name 
+$sql = "SELECT c.* 
         FROM courses c 
-        LEFT JOIN departments d ON c.department_id = d.id 
         WHERE c.is_active = 1 AND c.stream_id = " . $streamManager->getCurrentStreamId() . "
         ORDER BY c.name";
 $result = $conn->query($sql);
@@ -232,13 +229,7 @@ $dept_result = $conn->query($dept_sql);
                     <div class="row">
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label for="department_id" class="form-label">Department *</label>
-                                <select class="form-select" id="department_id" name="department_id" required>
-                                    <option value="">Select Department</option>
-                                    <?php while ($dept = $dept_result->fetch_assoc()): ?>
-                                        <option value="<?php echo $dept['id']; ?>"><?php echo htmlspecialchars($dept['name']); ?></option>
-                                    <?php endwhile; ?>
-                                </select>
+                                <!-- Department field removed: courses are not department-scoped -->
                             </div>
                         </div>
                         <div class="col-md-6">
@@ -337,7 +328,7 @@ $dept_result = $conn->query($dept_sql);
                     <div class="upload-area" id="uploadArea" style="border: 2px dashed #ccc; border-radius: 8px; padding: 40px; text-align: center; background: #f8f9fa; cursor: pointer;">
                         <i class="fas fa-cloud-upload-alt fa-2x text-muted mb-3"></i>
                         <p class="mb-2">Drop CSV file here or <strong>click to browse</strong></p>
-                        <small class="text-muted">Supported format: CSV (headers: name,code,department_id,credits,hours_per_week,level,preferred_room_type,is_active)</small>
+                        <small class="text-muted">Supported format: CSV (headers: name,code,credits,hours_per_week,level,preferred_room_type,is_active)</small>
                     </div>
                     <input type="file" class="form-control d-none" id="csvFile" accept=",.csv">
                 </div>
@@ -426,7 +417,8 @@ function validateCoursesData(data) {
         const validated = {
             course_name: row.course_name || row.courseName || row.name || row.Name || '',
             course_code: row.course_code || row.courseCode || row.code || row.Code || '',
-            department_id: row.department_id || row.departmentId || row.department_id || '',
+            // department_id removed: courses are not department-scoped
+            department_id: '',
             credits: row.credits || row.Credits || '3',
             hours_per_week: row.hours_per_week || row.hoursPerWeek || row.hours_per_week || '3',
             level: row.level || row.Level || '100',
@@ -437,7 +429,7 @@ function validateCoursesData(data) {
         validated.errors = [];
         if (!validated.course_name.trim()) { validated.valid = false; validated.errors.push('Course name required'); }
         if (!validated.course_code.trim()) { validated.valid = false; validated.errors.push('Course code required'); }
-        if (!validated.department_id.toString().trim()) { validated.valid = false; validated.errors.push('Department ID required'); }
+        // department_id validation removed
 
         // Check for duplicate code
         if (existingCourseCodesSet[validated.code.trim().toUpperCase()]) {
@@ -476,7 +468,7 @@ function showPreviewCourses() {
             <td>${idx+1}</td>
             <td>${row.course_name}</td>
             <td>${row.course_code}</td>
-            <td>${row.department_id}</td>
+            <!-- department_id removed -->
             <td>${row.credits}</td>
             <td>${row.hours_per_week}</td>
             <td>${row.level}</td>

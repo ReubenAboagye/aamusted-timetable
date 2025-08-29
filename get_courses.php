@@ -2,7 +2,7 @@
 header('Content-Type: application/json');
 include 'connect.php';
 
-$department_id = isset($_GET['department_id']) ? (int)$_GET['department_id'] : 0;
+$department_id = isset($_GET['department_id']) ? (int)$_GET['department_id'] : 0; // still supported but optional
 $level = isset($_GET['level']) ? (int)$_GET['level'] : 0;
 
 $query = "SELECT id, code, name FROM courses WHERE is_active = 1";

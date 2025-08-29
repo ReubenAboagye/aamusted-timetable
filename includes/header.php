@@ -2,6 +2,11 @@
 if (!isset($pageTitle)) {
   $pageTitle = 'University Timetable Generator';
 }
+
+// Ensure session is started early (before any output) so StreamManager can use sessions
+if (session_status() == PHP_SESSION_NONE) {
+  session_start();
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
