@@ -242,37 +242,40 @@ if (!isset($_POST['semester'])) {
           var xhr = new XMLHttpRequest();
           xhr.open('POST', 'Timetable.php', true);
           
-          var uploadProgress = 0, downloadProgress = 0;
-          
-          function updateLoadingPercentage(){
-            var overall = uploadProgress + downloadProgress;
-            document.getElementById('loadingPercentage').innerText = overall + '%';
+          // Generate a progress token for this request and start polling server progress
+          var progressToken = Math.random().toString(36).slice(2) + Date.now().toString(36);
+          var pollId = null;
+          function startPolling(){
+            var endpoint = 'get_progress.php?token=' + encodeURIComponent(progressToken);
+            pollId = setInterval(function(){
+              fetch(endpoint, { cache: 'no-store' })
+                .then(function(r){ return r.json(); })
+                .then(function(data){
+                  if (data && typeof data.percent === 'number') {
+                    var pct = Math.max(0, Math.min(100, Math.round(data.percent)));
+                    document.getElementById('loadingPercentage').innerText = pct + '%';
+                  }
+                  if (data && data.done) {
+                    clearInterval(pollId);
+                  }
+                })
+                .catch(function(){ /* ignore polling errors */ });
+            }, 700);
           }
-          
-          xhr.upload.addEventListener('progress', function(e) {
-            if(e.lengthComputable){
-              uploadProgress = Math.round((e.loaded / e.total) * 50);
-              updateLoadingPercentage();
-            }
-          });
-          
-          xhr.addEventListener('progress', function(e) {
-            if(e.lengthComputable){
-              downloadProgress = Math.round((e.loaded / e.total) * 50);
-              updateLoadingPercentage();
-            }
-          });
+          startPolling();
           
           xhr.onreadystatechange = function() {
             if(xhr.readyState == 4 && xhr.status == 200) {
               document.getElementById('timetableContainer').innerHTML = xhr.responseText;
               // In AJAX response, you may already include an Edit button if needed.
+              if (pollId) { clearInterval(pollId); }
               loadingOverlay.style.display = 'none';
             }
           };
           
           var formData = new FormData(document.getElementById('generateTimetableForm'));
           formData.append('ajax', 'true'); // flag for AJAX response
+          formData.append('progress_token', progressToken);
           xhr.send(formData);
         });
         
@@ -408,6 +411,29 @@ include 'ga_timetable_generator.php';
 
 // Create an instance of the GA using classes, courses, rooms, and lecturers.
 $ga = new GeneticAlgorithm($classes, $courses, $rooms, $lecturers);
+
+// Pass through progress token if provided (for AJAX polling)
+if (isset($_POST['progress_token'])) {
+    $token = preg_replace('/[^a-zA-Z0-9_-]/', '', $_POST['progress_token']);
+    if ($token) {
+        // Ensure uploads directory exists
+        $dir = __DIR__ . DIRECTORY_SEPARATOR . 'uploads';
+        if (!is_dir($dir)) { @mkdir($dir, 0777, true); }
+        // Seed an initial progress file
+        @file_put_contents($dir . DIRECTORY_SEPARATOR . 'progress_' . $token . '.json', json_encode([
+            'generation' => 0,
+            'total' => 0,
+            'percent' => 0,
+            'bestFitness' => 0,
+            'done' => false,
+            'timestamp' => time()
+        ]), LOCK_EX);
+        // Set token into GA to write progress during evolve()
+        if (method_exists($ga, 'setProgressToken')) {
+            $ga->setProgressToken($token);
+        }
+    }
+}
 
 // Initialize with a larger population for better results
 $ga->initializePopulation(100);

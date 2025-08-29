@@ -11,6 +11,7 @@ class GeneticAlgorithm {
     private $populationSize;    // Size of the population
     private $constraints;       // Constraint definitions
     private $fitnessCache;      // Cache for fitness calculations
+    private $progressToken;     // Token to report progress across requests
 
     public function __construct($classes, $courses, $rooms, $lecturers = []) {
         $this->classes = $classes;
@@ -488,6 +489,8 @@ class GeneticAlgorithm {
     public function evolve($generations = 100) {
         $bestFitness = 0;
         $bestTimetable = null;
+        // Report initial progress
+        $this->reportProgress(0, $generations, $bestFitness, false);
         
         for ($generation = 0; $generation < $generations; $generation++) {
             // Sort population by fitness (best first)
@@ -501,6 +504,8 @@ class GeneticAlgorithm {
                 $bestFitness = $currentBestFitness;
                 $bestTimetable = $this->population[0];
             }
+            // Report progress after evaluating this generation
+            $this->reportProgress($generation + 1, $generations, $bestFitness, false);
             
             // Elitism: keep top 10% of solutions
             $eliteCount = max(1, intval($this->populationSize * 0.1));
@@ -524,7 +529,10 @@ class GeneticAlgorithm {
         }
         
         // Return the best timetable found during evolution
-        return $bestTimetable ?: $this->population[0];
+        $result = $bestTimetable ?: $this->population[0];
+        // Final progress update (done)
+        $this->reportProgress($generations, $generations, $bestFitness, true);
+        return $result;
     }
 
     /**
@@ -542,6 +550,36 @@ class GeneticAlgorithm {
             'total_penalty' => $totalPenalty,
             'fitness_score' => $this->fitness($timetable)
         ];
+    }
+
+    /**
+     * Set a token to enable cross-request progress reporting
+     */
+    public function setProgressToken($token) {
+        $this->progressToken = $token;
+    }
+
+    /**
+     * Write progress to a tokenized file for polling by the client
+     */
+    private function reportProgress($currentGeneration, $totalGenerations, $bestFitness, $done) {
+        if (!$this->progressToken) {
+            return;
+        }
+        $file = __DIR__ . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . 'progress_' . $this->progressToken . '.json';
+        $percent = ($totalGenerations > 0)
+            ? max(0, min(100, ($currentGeneration / $totalGenerations) * 100))
+            : 0;
+        $payload = [
+            'generation' => $currentGeneration,
+            'total' => $totalGenerations,
+            'percent' => $percent,
+            'bestFitness' => $bestFitness,
+            'done' => (bool)$done,
+            'timestamp' => time()
+        ];
+        // Silently ignore write failures
+        @file_put_contents($file, json_encode($payload), LOCK_EX);
     }
 }
 ?>
