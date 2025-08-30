@@ -101,25 +101,72 @@ foreach ($streams as $s) {
     backdrop-filter: blur(2px);
   }
   .stream-select { margin: 15px 0; }
+
+  /* Page header: Dashboard title on left, stream switch aligned right */
+  .page-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 18px;
+  }
+  .page-header h2 { margin: 0; font-size: 1.35rem; font-weight: 700; }
+  .stream-select { margin: 0; }
+
+  /* Responsive: stack header elements on small screens */
+  @media (max-width: 576px) {
+    .page-header {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 8px;
+    }
+    .page-header h2 { font-size: 1.2rem; }
+    .stream-select { width: 100%; }
+    .stream-select form { width: 100%; }
+    .stream-select select { width: 100%; min-width: 0; box-sizing: border-box; }
+  }
+
+  /* Stream selector styling */
+  .stream-select label {
+    display: inline-block;
+    margin-right: 8px;
+    font-weight: 700;
+    color: #333;
+    font-size: 0.95rem;
+  }
+  .stream-select select {
+    padding: 8px 12px;
+    border: 1px solid #e9ecef;
+    border-radius: 8px;
+    background: #fff;
+    color: #333;
+    font-size: 0.95rem;
+    min-width: 220px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  .stream-select select:focus {
+    border-color: var(--primary-color);
+    box-shadow: 0 4px 12px rgba(128,0,32,0.08);
+    outline: none;
+  }
 </style>
 
 <div class="main-content" id="mainContent">
-  <h2>Dashboard</h2>
-
- 
-
-  <!-- Stream Selector -->
-  <div class="stream-select">
-    <form method="get" id="streamForm">
-      <label for="stream_id"><strong>Switch Stream:</strong></label>
-      <select name="stream_id" id="stream_id" onchange="document.getElementById('streamForm').submit();">
-        <?php foreach ($streams as $s): ?>
-          <option value="<?= $s['id'] ?>" <?= ($active_stream == $s['id'] ? 'selected' : '') ?>>
-            <?= htmlspecialchars($s['name']) ?>
-          </option>
-        <?php endforeach; ?>
-      </select>
-    </form>
+  <div class="page-header">
+    <h2>Dashboard</h2>
+    <div class="stream-select">
+      <form method="get" id="streamForm">
+        <label for="stream_id"><strong>Switch Stream:</strong></label>
+        <select name="stream_id" id="stream_id" onchange="document.getElementById('streamForm').submit();">
+          <?php foreach ($streams as $s): ?>
+            <option value="<?= $s['id'] ?>" <?= ($active_stream == $s['id'] ? 'selected' : '') ?>>
+              <?= htmlspecialchars($s['name']) ?>
+            </option>
+          <?php endforeach; ?>
+        </select>
+      </form>
+    </div>
   </div>
 
   <!-- Dashboard Search Bar -->
