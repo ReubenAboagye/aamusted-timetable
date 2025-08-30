@@ -11,7 +11,14 @@ include 'includes/stream_manager.php';
 $streamManager = getStreamManager();
 
 // Test queries to verify stream filtering
-$current_stream_id = $streamManager->getCurrentStreamId();
+$current_stream_id = null;
+// Ensure session is available and prefer the header's session keys (active_stream / stream_id)
+if (session_status() == PHP_SESSION_NONE) {
+    session_start();
+}
+$current_stream_id = isset($_SESSION['active_stream']) ? intval($_SESSION['active_stream']) : (isset($_SESSION['stream_id']) ? intval($_SESSION['stream_id']) : $streamManager->getCurrentStreamId());
+// Sync the StreamManager instance to the resolved id so name/resolution is consistent
+$streamManager->setCurrentStream($current_stream_id);
 $current_stream_name = $streamManager->getCurrentStreamName();
 
 // Get counts for each stream
@@ -48,9 +55,20 @@ foreach ($streams as $stream) {
     ];
 }
 
-// Get sample data for current stream
-$sample_classes = $conn->query("SELECT name, level FROM classes WHERE stream_id = " . $current_stream_id . " AND is_active = 1 LIMIT 5");
 $sample_courses = $conn->query("SELECT name, code FROM courses WHERE is_active = 1 LIMIT 5");
+
+// Get sample data for current stream
+// Some schemas store level directly on `classes.level`, others use `classes.level_id` referencing `levels`.
+$col = $conn->query("SHOW COLUMNS FROM classes LIKE 'level'");
+$has_level_col = ($col && $col->num_rows > 0);
+if ($has_level_col) {
+    // If `classes.level` exists, select it directly
+    $sample_classes = $conn->query("SELECT name, level FROM classes WHERE stream_id = " . $current_stream_id . " AND is_active = 1 LIMIT 5");
+} else {
+    // Otherwise join to `levels` and return the human-readable level name
+    $sample_classes = $conn->query("SELECT c.name, COALESCE(l.name, '') AS level FROM classes c LEFT JOIN levels l ON c.level_id = l.id WHERE c.stream_id = " . $current_stream_id . " AND c.is_active = 1 LIMIT 5");
+}
+$col->close();
 $sample_lecturers = $conn->query("SELECT name FROM lecturers WHERE is_active = 1 LIMIT 5");
 ?>
 
@@ -191,3 +209,25 @@ $sample_lecturers = $conn->query("SELECT name FROM lecturers WHERE is_active = 1
 $conn->close();
 include 'includes/footer.php'; 
 ?>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    try {
+        var select = document.getElementById('streamSelect');
+        if (!select) return;
+        var serverStreamId = '<?php echo $current_stream_id; ?>';
+        // If the header's selected stream differs from server-side stream, sync it
+        if (select.value && select.value !== serverStreamId) {
+            if (typeof changeStream === 'function') {
+                changeStream(select.value);
+            } else {
+                fetch('change_stream.php', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: 'stream_id=' + encodeURIComponent(select.value)
+                }).then(function(){ window.location.reload(); }).catch(function(){ /* ignore */ });
+            }
+        }
+    } catch (e) { /* ignore errors */ }
+});
+</script>
