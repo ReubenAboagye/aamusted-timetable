@@ -23,7 +23,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $stmt->bind_param("ssiiisi", $course_name, $course_code, $credits, $hours_per_week, $level, $preferred_room_type, $is_active);
         
         if ($stmt->execute()) {
-            $success_message = "Course added successfully!";
+            $stmt->close();
+            redirect_with_flash('courses.php', 'success', 'Course added successfully!');
         } else {
             $error_message = "Error adding course: " . $conn->error;
         }
@@ -79,9 +80,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             if ($check_stmt) $check_stmt->close();
 
             if ($success_count > 0) {
-                $success_message = "Successfully imported $success_count courses!";
-                if ($ignored_count > 0) $success_message .= " $ignored_count duplicates ignored.";
-                if ($error_count > 0) $success_message .= " $error_count records failed to import.";
+                $msg = "Successfully imported $success_count courses!";
+                if ($ignored_count > 0) $msg .= " $ignored_count duplicates ignored.";
+                if ($error_count > 0) $msg .= " $error_count records failed to import.";
+                redirect_with_flash('courses.php', 'success', $msg);
             } else {
                 if ($ignored_count > 0 && $error_count === 0) {
                     $success_message = "No new courses imported. $ignored_count duplicates ignored.";
@@ -97,7 +99,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $stmt->bind_param("i", $id);
         
         if ($stmt->execute()) {
-            $success_message = "Course deleted successfully!";
+            $stmt->close();
+            redirect_with_flash('courses.php', 'success', 'Course deleted successfully!');
         } else {
             $error_message = "Error deleting course: " . $conn->error;
         }

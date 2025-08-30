@@ -17,7 +17,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $stmt->execute();
             }
             $stmt->close();
-            $success_message = "Courses assigned to class successfully!";
+            redirect_with_flash('assign_courses.php', 'success', 'Courses assigned to class successfully!');
         } else {
             $error_message = "Please select both class and courses.";
         }

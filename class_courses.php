@@ -11,7 +11,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $stmt->bind_param('ii', $class_id, $course_id);
         
         if ($stmt->execute()) {
-            $success_message = "Course assigned to class successfully!";
+            $stmt->close();
+            redirect_with_flash('class_courses.php', 'success', 'Course assigned to class successfully!');
         } else {
             $error_message = "Error assigning course to class.";
         }
@@ -36,7 +37,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             }
         }
         $stmt->close();
-        $success_message = "Bulk assignment completed successfully!";
+        redirect_with_flash('class_courses.php', 'success', 'Bulk assignment completed successfully!');
     } else {
         $error_message = "Please select both classes and courses.";
     }
@@ -49,7 +50,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     $stmt->bind_param('i', $class_course_id);
     
     if ($stmt->execute()) {
-        $success_message = "Assignment deleted successfully!";
+        $stmt->close();
+        redirect_with_flash('class_courses.php', 'success', 'Assignment deleted successfully!');
     } else {
         $error_message = "Error deleting assignment.";
     }

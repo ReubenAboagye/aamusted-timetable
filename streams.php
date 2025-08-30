@@ -1,10 +1,25 @@
 <?php
+ob_start();
 $pageTitle = 'Stream Management';
 include 'includes/header.php';
 include 'includes/sidebar.php';
 
 // Database connection
 include 'connect.php';
+
+// Helper to normalize a time string like "07:00" into "HH:MM:SS" (time-only)
+function format_time_to_time($time)
+{
+    if (empty($time)) {
+        return null;
+    }
+    // Ensure seconds are present for consistent storage
+    if (preg_match('/^\d{2}:\d{2}$/', $time)) {
+        return $time . ':00';
+    }
+    // If already includes seconds or is another form, return as-is
+    return $time;
+}
 
 // Fetch streams from database
 $sql = "SELECT * FROM streams WHERE is_active = 1 ORDER BY name";
@@ -14,23 +29,24 @@ $result = $conn->query($sql);
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     if ($_POST['action'] === 'add') {
         $name = $conn->real_escape_string($_POST['name']);
-        $period_start = $conn->real_escape_string($_POST['period_start']);
-        $period_end = $conn->real_escape_string($_POST['period_end']);
-        $break_start = $conn->real_escape_string($_POST['break_start']);
-        $break_end = $conn->real_escape_string($_POST['break_end']);
-        $active_days = isset($_POST['active_days']) ? implode(',', $_POST['active_days']) : '';
+        $period_start = format_time_to_time($conn->real_escape_string($_POST['period_start']));
+        $period_end = format_time_to_time($conn->real_escape_string($_POST['period_end']));
+        $break_start = format_time_to_time($conn->real_escape_string($_POST['break_start']));
+        $break_end = format_time_to_time($conn->real_escape_string($_POST['break_end']));
+        $active_days = isset($_POST['active_days']) ? json_encode(array_values($_POST['active_days'])) : null;
         $is_active = isset($_POST['is_active']) ? 1 : 0;
         
         $sql = "INSERT INTO streams (name, period_start, period_end, break_start, break_end, active_days, is_active) VALUES (?, ?, ?, ?, ?, ?, ?)";
         $stmt = $conn->prepare($sql);
+        // Use s for strings and i for integer; nullable datetime fields should be passed as strings or null
         $stmt->bind_param("ssssssi", $name, $period_start, $period_end, $break_start, $break_end, $active_days, $is_active);
         
         if ($stmt->execute()) {
-            $success_message = "Stream added successfully!";
+            $stmt->close();
+            redirect_with_flash('streams.php', 'success', 'Stream added successfully!');
         } else {
             $error_message = "Error adding stream: " . $conn->error;
         }
-        $stmt->close();
     } elseif ($_POST['action'] === 'delete' && isset($_POST['id'])) {
         $id = $conn->real_escape_string($_POST['id']);
         $sql = "UPDATE streams SET is_active = 0 WHERE id = ?";
@@ -38,7 +54,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $stmt->bind_param("i", $id);
         
         if ($stmt->execute()) {
-            $success_message = "Stream deleted successfully!";
+            $stmt->close();
+            redirect_with_flash('streams.php', 'success', 'Stream deleted successfully!');
         } else {
             $error_message = "Error deleting stream: " . $conn->error;
         }
@@ -46,11 +63,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     } elseif ($_POST['action'] === 'edit' && isset($_POST['id'])) {
         $id = $conn->real_escape_string($_POST['id']);
         $name = $conn->real_escape_string($_POST['name']);
-        $period_start = $conn->real_escape_string($_POST['period_start']);
-        $period_end = $conn->real_escape_string($_POST['period_end']);
-        $break_start = $conn->real_escape_string($_POST['break_start']);
-        $break_end = $conn->real_escape_string($_POST['break_end']);
-        $active_days = isset($_POST['active_days']) ? implode(',', $_POST['active_days']) : '';
+        $period_start = format_time_to_time($conn->real_escape_string($_POST['period_start']));
+        $period_end = format_time_to_time($conn->real_escape_string($_POST['period_end']));
+        $break_start = format_time_to_time($conn->real_escape_string($_POST['break_start']));
+        $break_end = format_time_to_time($conn->real_escape_string($_POST['break_end']));
+        $active_days = isset($_POST['active_days']) ? json_encode(array_values($_POST['active_days'])) : null;
         $is_active = isset($_POST['is_active']) ? 1 : 0;
         
         $sql = "UPDATE streams SET name = ?, period_start = ?, period_end = ?, break_start = ?, break_end = ?, active_days = ?, is_active = ? WHERE id = ?";
@@ -58,11 +75,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $stmt->bind_param("ssssssii", $name, $period_start, $period_end, $break_start, $break_end, $active_days, $is_active, $id);
         
         if ($stmt->execute()) {
-            $success_message = "Stream updated successfully!";
+            $stmt->close();
+            redirect_with_flash('streams.php', 'success', 'Stream updated successfully!');
         } else {
             $error_message = "Error updating stream: " . $conn->error;
         }
         $stmt->close();
+    }
+}
+
+// Show success messages after PRG redirect
+if (isset($_GET['success'])) {
+    $msgs = [
+        'added' => 'Stream added successfully!',
+        'updated' => 'Stream updated successfully!',
+        'deleted' => 'Stream deleted successfully!'
+    ];
+    if (isset($msgs[$_GET['success']])) {
+        $success_message = $msgs[$_GET['success']];
     }
 }
 
@@ -133,9 +163,13 @@ if (isset($_GET['edit']) && is_numeric($_GET['edit'])) {
                                 <td>
                                     <?php 
                                     if (!empty($row['active_days'])) {
-                                        $days = explode(',', $row['active_days']);
-                                        foreach ($days as $day) {
-                                            echo '<span class="badge bg-success me-1">' . htmlspecialchars(trim($day)) . '</span>';
+                                        $decoded_days = json_decode($row['active_days'], true);
+                                        if (is_array($decoded_days) && count($decoded_days) > 0) {
+                                            foreach ($decoded_days as $day) {
+                                                echo '<span class="badge bg-success me-1">' . htmlspecialchars(trim($day)) . '</span>';
+                                            }
+                                        } else {
+                                            echo '<span class="text-muted">No days set</span>';
                                         }
                                     } else {
                                         echo '<span class="text-muted">No days set</span>';
@@ -144,12 +178,12 @@ if (isset($_GET['edit']) && is_numeric($_GET['edit'])) {
                                 </td>
                                 <td>
                                     <span class="badge bg-warning">
-                                        <?php echo htmlspecialchars($row['period_start'] ?? 'N/A'); ?> - <?php echo htmlspecialchars($row['period_end'] ?? 'N/A'); ?>
+                                        <?php echo htmlspecialchars($row['period_start'] ? date('g:i A', strtotime($row['period_start'])) : 'N/A'); ?> - <?php echo htmlspecialchars($row['period_end'] ? date('g:i A', strtotime($row['period_end'])) : 'N/A'); ?>
                                     </span>
                                 </td>
                                 <td>
                                     <span class="badge bg-info">
-                                        <?php echo htmlspecialchars($row['break_start'] ?? 'N/A'); ?> - <?php echo htmlspecialchars($row['break_end'] ?? 'N/A'); ?>
+                                        <?php echo htmlspecialchars($row['break_start'] ? date('g:i A', strtotime($row['break_start'])) : 'N/A'); ?> - <?php echo htmlspecialchars($row['break_end'] ? date('g:i A', strtotime($row['break_end'])) : 'N/A'); ?>
                                     </span>
                                 </td>
                                 <td>
@@ -206,7 +240,7 @@ if (isset($_GET['edit']) && is_numeric($_GET['edit'])) {
                         <div class="row">
                             <?php 
                             $days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-                            $edit_days = $edit_stream ? explode(',', $edit_stream['active_days']) : [];
+                            $edit_days = $edit_stream && !empty($edit_stream['active_days']) ? json_decode($edit_stream['active_days'], true) : [];
                             foreach ($days as $day): 
                                 $checked = in_array($day, $edit_days) ? 'checked' : '';
                             ?>
@@ -225,29 +259,15 @@ if (isset($_GET['edit']) && is_numeric($_GET['edit'])) {
                         <div class="col-md-6">
                             <div class="mb-3">
                                 <label for="period_start" class="form-label">Period Start Time *</label>
-                                <select class="form-control" id="period_start" name="period_start" required>
-                                    <option value="">Select Start Time</option>
-                                    <?php for ($hour = 6; $hour <= 22; $hour++): 
-                                        $time = sprintf('%02d:00', $hour);
-                                        $selected = ($edit_stream && $edit_stream['period_start'] == $time) ? 'selected' : '';
-                                    ?>
-                                        <option value="<?php echo $time; ?>" <?php echo $selected; ?>><?php echo $time; ?></option>
-                                    <?php endfor; ?>
-                                </select>
+                                <input type="time" class="form-control" id="period_start" name="period_start" required
+                                       value="<?php echo $edit_stream && !empty($edit_stream['period_start']) ? substr($edit_stream['period_start'], 0, 5) : ''; ?>">
                             </div>
                         </div>
                         <div class="col-md-6">
                             <div class="mb-3">
                                 <label for="period_end" class="form-label">Period End Time *</label>
-                                <select class="form-control" id="period_end" name="period_end" required>
-                                    <option value="">Select End Time</option>
-                                    <?php for ($hour = 7; $hour <= 23; $hour++): 
-                                        $time = sprintf('%02d:00', $hour);
-                                        $selected = ($edit_stream && $edit_stream['period_end'] == $time) ? 'selected' : '';
-                                    ?>
-                                        <option value="<?php echo $time; ?>" <?php echo $selected; ?>><?php echo $time; ?></option>
-                                    <?php endfor; ?>
-                                </select>
+                                <input type="time" class="form-control" id="period_end" name="period_end" required
+                                       value="<?php echo $edit_stream && !empty($edit_stream['period_end']) ? substr($edit_stream['period_end'], 0, 5) : ''; ?>">
                             </div>
                         </div>
                     </div>
@@ -256,29 +276,15 @@ if (isset($_GET['edit']) && is_numeric($_GET['edit'])) {
                         <div class="col-md-6">
                             <div class="mb-3">
                                 <label for="break_start" class="form-label">Break Start Time</label>
-                                <select class="form-control" id="break_start" name="break_start">
-                                    <option value="">Select Break Start</option>
-                                    <?php for ($hour = 6; $hour <= 22; $hour++): 
-                                        $time = sprintf('%02d:00', $hour);
-                                        $selected = ($edit_stream && $edit_stream['break_start'] == $time) ? 'selected' : '';
-                                    ?>
-                                        <option value="<?php echo $time; ?>" <?php echo $selected; ?>><?php echo $time; ?></option>
-                                    <?php endfor; ?>
-                                </select>
+                                <input type="time" class="form-control" id="break_start" name="break_start"
+                                       value="<?php echo $edit_stream && !empty($edit_stream['break_start']) ? substr($edit_stream['break_start'], 0, 5) : ''; ?>">
                             </div>
                         </div>
                         <div class="col-md-6">
                             <div class="mb-3">
                                 <label for="break_end" class="form-label">Break End Time</label>
-                                <select class="form-control" id="break_end" name="break_end">
-                                    <option value="">Select Break End</option>
-                                    <?php for ($hour = 7; $hour <= 23; $hour++): 
-                                        $time = sprintf('%02d:00', $hour);
-                                        $selected = ($edit_stream && $edit_stream['break_end'] == $time) ? 'selected' : '';
-                                    ?>
-                                        <option value="<?php echo $time; ?>" <?php echo $selected; ?>><?php echo $time; ?></option>
-                                    <?php endfor; ?>
-                                </select>
+                                <input type="time" class="form-control" id="break_end" name="break_end"
+                                       value="<?php echo $edit_stream && !empty($edit_stream['break_end']) ? substr($edit_stream['break_end'], 0, 5) : ''; ?>">
                             </div>
                         </div>
                     </div>

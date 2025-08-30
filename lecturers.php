@@ -22,7 +22,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $stmt->bind_param("sii", $name, $department_id, $is_active);
 
         if ($stmt->execute()) {
-            $success_message = "Lecturer added successfully!";
+            $stmt->close();
+            redirect_with_flash('lecturers.php', 'success', 'Lecturer added successfully!');
         } else {
             $error_message = "Error adding lecturer: " . $conn->error;
         }
@@ -39,7 +40,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $stmt->bind_param("siii", $name, $department_id, $is_active, $id);
 
         if ($stmt->execute()) {
-            $success_message = "Lecturer updated successfully!";
+            $stmt->close();
+            redirect_with_flash('lecturers.php', 'success', 'Lecturer updated successfully!');
         } else {
             $error_message = "Error updating lecturer: " . $conn->error;
         }
@@ -164,7 +166,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $stmt = $conn->prepare($sql);
         $stmt->bind_param("i", $id);
         if ($stmt->execute()) {
-            $success_message = "Lecturer deleted.";
+            $stmt->close();
+            redirect_with_flash('lecturers.php', 'success', 'Lecturer deleted.');
         } else {
             $error_message = "Error deleting lecturer: " . $conn->error;
         }

@@ -3,6 +3,8 @@
 
 $pageTitle = 'Saved Timetable';
 include 'connect.php';
+// Ensure flash helper available
+if (file_exists(__DIR__ . '/includes/flash.php')) include_once __DIR__ . '/includes/flash.php';
 include 'includes/header.php';
 include 'includes/sidebar.php';
 
@@ -84,17 +86,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $delete_stmt->bind_param('i', $session_id);
         
         if ($delete_stmt->execute()) {
-            $success_message = "Timetable for the selected session has been deleted successfully.";
+            $delete_stmt->close();
+            $location = 'saved_timetable.php';
+            $params = [];
+            if ($selected_stream) $params['stream_id'] = $selected_stream;
+            if ($selected_department) $params['department_id'] = $selected_department;
+            if (!empty($params)) $location .= '?' . http_build_query($params);
+            redirect_with_flash($location, 'success', 'Timetable for the selected session has been deleted successfully.');
         } else {
             $error_message = "Error deleting timetable: " . $conn->error;
         }
         $delete_stmt->close();
-        
-        // Redirect to refresh the page
-        header("Location: saved_timetable.php" . 
-               ($selected_stream ? "?stream_id=$selected_stream" : "") .
-               ($selected_department ? ($selected_stream ? "&" : "?") . "department_id=$selected_department" : ""));
-        exit();
     }
 }
 

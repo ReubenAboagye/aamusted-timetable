@@ -8,6 +8,12 @@ if (session_status() == PHP_SESSION_NONE) {
   session_start();
 }
 
+// Include flash helper so pages can set redirect flashes
+$flashFile = __DIR__ . '/flash.php';
+if (file_exists($flashFile)) {
+    include_once $flashFile;
+}
+
 // --- Handle stream switching (keep session key consistent with index.php) ---
 if (isset($_GET['stream_id'])) {
     $_SESSION['active_stream'] = intval($_GET['stream_id']);
@@ -50,6 +56,19 @@ if (!isset($current_stream_name) || $current_stream_name === '') {
         if ($s['id'] == $active_stream) {
             $current_stream_name = $s['name'];
             break;
+        }
+    }
+}
+
+// Render any flash message (if included by pages)
+if (function_exists('flash_get')) {
+    $flash = flash_get();
+    if ($flash) {
+        // Make available to the page templates; assign to the conventional variables
+        if (isset($flash['type']) && in_array($flash['type'], ['error', 'danger'])) {
+            $error_message = $flash['message'];
+        } else {
+            $success_message = $flash['message'];
         }
     }
 }

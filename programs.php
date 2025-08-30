@@ -102,9 +102,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             if ($check_code_stmt) $check_code_stmt->close();
 
             if ($success_count > 0) {
-                $success_message = "Successfully imported $success_count programs!";
-                if ($ignored_count > 0) $success_message .= " $ignored_count duplicates ignored.";
-                if ($error_count > 0) $success_message .= " $error_count records failed to import.";
+                $msg = "Successfully imported $success_count programs!";
+                if ($ignored_count > 0) $msg .= " $ignored_count duplicates ignored.";
+                if ($error_count > 0) $msg .= " $error_count records failed to import.";
+                redirect_with_flash('programs.php', 'success', $msg);
             } else {
                 if ($ignored_count > 0 && $error_count === 0) {
                     $success_message = "No new programs imported. $ignored_count duplicates ignored.";
@@ -139,7 +140,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             if ($stmt) {
                 $stmt->bind_param("sisii", $name, $department_id, $code, $duration, $is_active);
                 if ($stmt->execute()) {
-                    $success_message = "Program added successfully!";
+                    $stmt->close();
+                    redirect_with_flash('programs.php', 'success', 'Program added successfully!');
                 } else {
                     $error_message = "Error adding program: " . $conn->error;
                 }
@@ -175,7 +177,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             if ($stmt) {
                 $stmt->bind_param("ssisii", $name, $department_id, $code, $duration, $is_active, $id);
                 if ($stmt->execute()) {
-                    $success_message = "Program updated successfully!";
+                    $stmt->close();
+                    redirect_with_flash('programs.php', 'success', 'Program updated successfully!');
                 } else {
                     $error_message = "Error updating program: " . $conn->error;
                 }
@@ -192,7 +195,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $stmt = $conn->prepare($sql);
         $stmt->bind_param("i", $id);
         if ($stmt->execute()) {
-            $success_message = "Program deleted.";
+            $stmt->close();
+            redirect_with_flash('programs.php', 'success', 'Program deleted.');
         } else {
             $error_message = "Error deleting program: " . $conn->error;
         }

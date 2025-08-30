@@ -44,7 +44,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             $stmt->bind_param("ii", $course_id, $room_type_id);
 
             if ($stmt->execute()) {
-                $success_message = "Course room type preference added successfully!";
+                $stmt->close();
+                redirect_with_flash('course_roomtype.php', 'success', 'Course room type preference added successfully!');
             } else {
                 $error_message = "Error adding course room type preference.";
             }
@@ -71,7 +72,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             $stmt->execute();
         }
         $stmt->close();
-        $success_message = "All selected courses have been assigned room type preferences!";
+        redirect_with_flash('course_roomtype.php', 'success', 'All selected courses have been assigned room type preferences!');
     }
 }
 
@@ -83,7 +84,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     $stmt->bind_param("i", $course_id);
 
     if ($stmt->execute()) {
-        $success_message = "Course room type preference deleted successfully!";
+        $stmt->close();
+        redirect_with_flash('course_roomtype.php', 'success', 'Course room type preference deleted successfully!');
     } else {
         $error_message = "Error deleting course room type preference.";
     }
@@ -104,7 +106,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $stmt->bind_param("ii", $room_type_id, $course_id);
 
         if ($stmt->execute()) {
-            $success_message = "Course room type preference updated successfully!";
+            $stmt->close();
+            redirect_with_flash('course_roomtype.php', 'success', 'Course room type preference updated successfully!');
         } else {
             $error_message = "Error updating course room type preference.";
         }

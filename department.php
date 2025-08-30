@@ -64,11 +64,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 }
             }
             if ($success_count > 0) {
-                $success_message = "Successfully imported $success_count departments!";
+                $msg = "Successfully imported $success_count departments!";
                 if ($error_count > 0) {
-                    $success_message .= " $error_count records failed to import.";
+                    $msg .= " $error_count records failed to import.";
                 }
                 logError("Bulk import completed", ['success_count' => $success_count, 'error_count' => $error_count]);
+                redirect_with_flash('department.php', 'success', $msg);
             } else {
                 $error_message = "No departments were imported. Please check your data.";
                 logError("Bulk import failed", ['error_count' => $error_count]);
@@ -115,8 +116,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $stmt->bind_param("sssi", $name, $code, $description, $is_active);
 
             if ($stmt->execute()) {
-                $success_message = "Department added successfully!";
+                $stmt->close();
+                $msg = 'Department added successfully!';
                 logError("Department added successfully", ['name' => $name, 'code' => $code, 'description' => $description, 'is_active' => $is_active]);
+                redirect_with_flash('department.php', 'success', $msg);
             } else {
                 $error_message = "Error adding department: " . $conn->error;
                 logError("Failed to add department", ['name' => $name, 'code' => $code, 'description' => $description, 'is_active' => $is_active, 'error' => $conn->error]);
@@ -157,8 +160,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $stmt->bind_param("sssii", $name, $code, $description, $is_active, $id);
             
             if ($stmt->execute()) {
-                $success_message = "Department updated successfully!";
+                $stmt->close();
+                $msg = 'Department updated successfully!';
                 logError("Department updated successfully", ['id' => $id, 'name' => $name, 'code' => $code, 'description' => $description, 'is_active' => $is_active]);
+                redirect_with_flash('department.php', 'success', $msg);
             } else {
                 $error_message = "Error updating department: " . $conn->error;
                 logError("Failed to update department", ['id' => $id, 'name' => $name, 'code' => $code, 'description' => $description, 'is_active' => $is_active, 'error' => $conn->error]);

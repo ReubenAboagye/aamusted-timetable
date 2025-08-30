@@ -72,10 +72,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             }
 
             if ($success_count > 0) {
-                $success_message = "Successfully created $success_count classes!";
+                $msg = "Successfully created $success_count classes!";
                 if ($error_count > 0) {
-                    $success_message .= " ($error_count classes failed to create)";
+                    $msg .= " ($error_count classes failed to create)";
                 }
+                redirect_with_flash('classes.php', 'success', $msg);
             } else {
                 $error_message = "Failed to create any classes. Please check your input.";
             }
@@ -89,7 +90,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $stmt->bind_param("i", $id);
         
         if ($stmt->execute()) {
-            $success_message = "Class deleted successfully!";
+            $stmt->close();
+            redirect_with_flash('classes.php', 'success', 'Class deleted successfully!');
         } else {
             $error_message = "Error deleting class: " . $conn->error;
         }

@@ -307,9 +307,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             if ($check_stmt) $check_stmt->close();
 
             if ($success_count > 0) {
-                $success_message = "Successfully imported $success_count rooms!";
-                if ($ignored_count > 0) $success_message .= " $ignored_count duplicates ignored.";
-                if ($error_count > 0) $success_message .= " $error_count records failed to import.";
+                $msg = "Successfully imported $success_count rooms!";
+                if ($ignored_count > 0) $msg .= " $ignored_count duplicates ignored.";
+                if ($error_count > 0) $msg .= " $error_count records failed to import.";
+                redirect_with_flash('rooms.php', 'success', $msg);
             } else {
                 if ($ignored_count > 0 && $error_count === 0) {
                     $success_message = "No new rooms imported. $ignored_count duplicates ignored.";
@@ -425,7 +426,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                             error_log("Single Add - Binding: name='$name', building='$building', room_type='$db_room_type', capacity=$capacity, stream_availability='$stream_availability', facilities='$facilities', accessibility_features='$accessibility_features', is_active=$is_active");
 
                             if ($stmt->execute()) {
-                                $success_message = "Room added successfully!";
+                                $stmt->close();
+                                redirect_with_flash('rooms.php', 'success', 'Room added successfully!');
                             } else {
                                 error_log("ERROR: Single Add - Insert failed: " . $stmt->error);
                                 error_log("ERROR: Single Add - Failed values: name='$name', building='$building', room_type='$db_room_type', capacity=$capacity, stream_availability='$stream_availability', facilities='$facilities', accessibility_features='$accessibility_features', is_active=$is_active");
@@ -505,7 +507,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                         error_log("Edit - Binding: name='$name', building='$building', room_type='$db_room_type', capacity=$capacity, stream_availability='$stream_availability', facilities='$facilities', accessibility_features='$accessibility_features', is_active=$is_active, id=$id");
 
                         if ($stmt->execute()) {
-                            $success_message = "Room updated successfully!";
+                            $stmt->close();
+                            redirect_with_flash('rooms.php', 'success', 'Room updated successfully!');
                         } else {
                             error_log("ERROR: Edit - Update failed: " . $stmt->error);
                             error_log("ERROR: Edit - Failed values: name='$name', building='$building', room_type='$db_room_type', capacity=$capacity, stream_availability='$stream_availability', facilities='$facilities', accessibility_features='$accessibility_features', is_active=$is_active, id=$id");
@@ -641,7 +644,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $stmt = $conn->prepare($sql);
         $stmt->bind_param("i", $id);
         if ($stmt->execute()) {
-            $success_message = "Room deleted.";
+            $stmt->close();
+            redirect_with_flash('rooms.php', 'success', 'Room deleted.');
         } else {
             error_log("ERROR: Delete - Update failed: " . $stmt->error);
             $error_message = "Error deleting room: " . $conn->error;

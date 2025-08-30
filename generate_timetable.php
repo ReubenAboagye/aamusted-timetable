@@ -1,5 +1,7 @@
 <?php
 include 'connect.php';
+// Ensure flash helper is available for PRG redirects
+if (file_exists(__DIR__ . '/includes/flash.php')) include_once __DIR__ . '/includes/flash.php';
 
 $success_message = '';
 $error_message = '';
@@ -92,10 +94,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             }
             
             if ($success_count > 0) {
-                $success_message = "Timetable generated successfully! $success_count entries created.";
+                $msg = "Timetable generated successfully! $success_count entries created.";
                 if ($error_count > 0) {
-                    $success_message .= " $error_count entries failed.";
+                    $msg .= " $error_count entries failed.";
                 }
+                redirect_with_flash('generate_timetable.php', 'success', $msg);
             } else {
                 $error_message = "No timetable entries could be generated.";
             }

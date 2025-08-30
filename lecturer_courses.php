@@ -15,7 +15,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $stmt = $conn->prepare("INSERT IGNORE INTO lecturer_courses (lecturer_id, course_id) VALUES (?, ?)");
             if ($stmt) {
                 $stmt->bind_param('ii', $lecturer_id, $course_id);
-                if ($stmt->execute()) { $success_message = 'Mapping added.'; } else { $error_message = 'Insert failed: ' . $conn->error; }
+                if ($stmt->execute()) { $stmt->close(); redirect_with_flash('lecturer_courses.php', 'success', 'Mapping added.'); } else { $error_message = 'Insert failed: ' . $conn->error; }
                 $stmt->close();
             } else { $error_message = 'Prepare failed: ' . $conn->error; }
         }
@@ -30,7 +30,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     $stmt->execute();
                 }
                 $stmt->close();
-                $success_message = 'Bulk mappings added.';
+                redirect_with_flash('lecturer_courses.php', 'success', 'Bulk mappings added.');
             } else { $error_message = 'Prepare failed: ' . $conn->error; }
         }
     }

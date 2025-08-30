@@ -16,7 +16,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt->bind_param('i', $id);
             
             if ($stmt->execute()) {
-                $success_message = "Timetable entry deleted successfully!";
+                $stmt->close();
+                redirect_with_flash('update_timetable.php', 'success', 'Timetable entry deleted successfully!');
             } else {
                 $error_message = "Error deleting timetable entry.";
             }
@@ -49,7 +50,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt->bind_param('iiiiii', $day_id, $time_slot_id, $room_id, $class_course_id, $lecturer_course_id, $id);
                 
                 if ($stmt->execute()) {
-                    $success_message = "Timetable entry updated successfully!";
+                    $stmt->close();
+                    redirect_with_flash('update_timetable.php?id=' . $id, 'success', 'Timetable entry updated successfully!');
                 } else {
                     $error_message = "Error updating timetable entry.";
                 }
@@ -82,7 +84,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt->bind_param('iiiii', $day_id, $time_slot_id, $room_id, $class_course_id, $lecturer_course_id);
                 
                 if ($stmt->execute()) {
-                    $success_message = "Timetable entry created successfully!";
+                    $stmt->close();
+                    redirect_with_flash('update_timetable.php', 'success', 'Timetable entry created successfully!');
                 } else {
                     $error_message = "Error creating timetable entry.";
                 }
