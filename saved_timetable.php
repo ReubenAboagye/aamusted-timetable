@@ -27,6 +27,7 @@ $param_types = "";
 
 // Stream filtering for saved timetables is optional; keep ability but do not force stream on other tables
 $join_programs = '';
+// Keep stream filter but apply it by joining classes (already done via cc->c) so the class filter remains valid
 if ($selected_stream > 0) {
     $where_conditions[] = "c.stream_id = ?";
     $params[] = $selected_stream;
