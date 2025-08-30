@@ -163,9 +163,9 @@ if ($class_has_stream) {
 $sql = "SELECT " . $select_clause . "\n        " . $from_clause . "\n        " . $where_clause . "\n        ORDER BY c.name";
 $result = $conn->query($sql);
 
-// Fetch departments for dropdown (filtered by stream)
 $dept_select_cols = $dept_short_exists ? "id, name, short_name" : "id, name";
-$dept_sql = "SELECT " . $dept_select_cols . " FROM departments WHERE is_active = 1 AND stream_id = " . $streamManager->getCurrentStreamId() . " ORDER BY name";
+// Departments are global; do not filter by stream here
+$dept_sql = "SELECT " . $dept_select_cols . " FROM departments WHERE is_active = 1 ORDER BY name";
 $dept_result = $conn->query($dept_sql);
 
 // Fetch levels for dropdown
