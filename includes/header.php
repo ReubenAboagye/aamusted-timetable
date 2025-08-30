@@ -8,6 +8,74 @@ if (session_status() == PHP_SESSION_NONE) {
   session_start();
 }
 
+// Suppress direct PHP error output so raw error dumps don't break the page layout
+ini_set('display_errors', '0');
+ini_set('display_startup_errors', '0');
+error_reporting(E_ALL);
+
+// Convert warnings/notices to exceptions so they can be handled uniformly
+set_error_handler(function($severity, $message, $file, $line) {
+    if (!(error_reporting() & $severity)) {
+        // This error code is not included in error_reporting
+        return false;
+    }
+    throw new \ErrorException($message, 0, $severity, $file, $line);
+});
+
+// Handle uncaught exceptions and display the same friendly error card
+set_exception_handler(function($ex) {
+    $msg = $ex->getMessage() . " in " . $ex->getFile() . ':' . $ex->getLine();
+    $escaped = htmlspecialchars($msg, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+
+    // Render a visible HTML error card immediately (avoid complex JS string interpolation)
+    echo "<div id=\"mainContent\" class=\"main-content\">";
+    echo "<div class=\"card border-danger mb-3\"><div class=\"card-body\">";
+    echo "<div style=\"display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;\">";
+    echo "<h5 class=\"card-title text-danger\" style=\"margin:0;\">An error occurred</h5>";
+    echo "<div><button class=\"btn btn-sm btn-outline-secondary copyErrorBtn\" title=\"Copy error\"><i class=\"fas fa-copy\"></i></button></div>";
+    echo "</div>";
+    echo "<pre class=\"error-pre\" style=\"white-space:pre-wrap;color:#a00;margin:0;\">" . $escaped . "</pre>";
+    echo "</div></div></div>";
+
+    // Inline script to wire the copy button; copies textContent of the <pre>
+    echo "<script>(function(){var btn=document.querySelector('#mainContent .copyErrorBtn'); if(btn){btn.addEventListener('click',function(){var t=document.querySelector('#mainContent .error-pre').textContent||''; if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t).then(function(){btn.innerHTML='';var chk=document.createElement('i');chk.className='fas fa-check';btn.appendChild(chk);setTimeout(function(){btn.innerHTML='';var ic=document.createElement('i');ic.className='fas fa-copy';btn.appendChild(ic);},1500);});}else{var ta=document.createElement('textarea');ta.value=t;document.body.appendChild(ta);ta.select();try{document.execCommand('copy');btn.innerHTML='';var chk2=document.createElement('i');chk2.className='fas fa-check';btn.appendChild(chk2);setTimeout(function(){btn.innerHTML='';var ic2=document.createElement('i');ic2.className='fas fa-copy';btn.appendChild(ic2);},1500);}catch(e){}document.body.removeChild(ta);}});} })();</script>";
+    exit(1);
+});
+
+// Shutdown handler: if a fatal error occurred, inject a friendly error box into the page
+register_shutdown_function(function() {
+    $err = error_get_last();
+    if (!$err) return;
+    $msg = $err['message'] . " in " . $err['file'] . ':' . $err['line'];
+    $jsmsg = json_encode($msg);
+
+    // Insert a small JS snippet that adds an error card into #mainContent so layout remains intact
+    // The injected card includes a copy button so users can copy the error text for support
+    echo '<script>document.addEventListener("DOMContentLoaded", function(){'
+        . 'var main = document.getElementById("mainContent");'
+        . 'if (!main) { main = document.createElement("div"); main.id = "mainContent"; main.className = "main-content"; document.body.appendChild(main); }'
+        . 'var errBox = document.createElement("div");'
+        . 'errBox.className = "card border-danger mb-3";'
+        . 'errBox.innerHTML = "<div class=\"card-body\">'
+            . '<div style=\"display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;\">'
+            . '<h5 class=\\"card-title text-danger\\" style=\\"margin:0;\\">An error occurred</h5>'
+            . '<div><button class=\\"btn btn-sm btn-outline-secondary copyErrorBtn\\" title=\\"Copy error\\"><i class=\\"fas fa-copy\\"></i></button></div>'
+            . '</div>'
+            . '<pre class=\\"error-pre\\" style=\\"white-space:pre-wrap;color:#a00;margin:0;\\">' . $jsmsg . '</pre>'
+            . '</div>";'
+        . 'if (main.firstChild) main.insertBefore(errBox, main.firstChild); else main.appendChild(errBox);'
+        . 'var btn = errBox.querySelector(".copyErrorBtn");'
+        . 'if (btn) { btn.addEventListener("click", function(){'
+        . '  var text = errBox.querySelector(".error-pre").textContent || "";'
+        . '  if (navigator.clipboard && navigator.clipboard.writeText) {'
+        . '    navigator.clipboard.writeText(text).then(function(){ btn.innerHTML = "<i class=\\\"fas fa-check\\\"></i>"; setTimeout(function(){ btn.innerHTML = "<i class=\\\"fas fa-copy\\\"></i>"; },1500); });'
+        . '  } else {'
+        . '    var ta = document.createElement("textarea"); ta.value = text; document.body.appendChild(ta); ta.select(); try { document.execCommand("copy"); btn.innerHTML = "<i class=\\\"fas fa-check\\\"></i>"; setTimeout(function(){ btn.innerHTML = "<i class=\\\"fas fa-copy\\\"></i>"; },1500); } catch(e){} document.body.removeChild(ta);'
+        . '  }'
+        . '}); }'
+        . '});</script>';
+});
+
 // Include flash helper so pages can set redirect flashes
 $flashFile = __DIR__ . '/flash.php';
 if (file_exists($flashFile)) {
@@ -116,8 +184,8 @@ if (!function_exists('getCount')) {
       font-size: 14px;
     }
     .navbar { background-color: var(--primary-color); position: fixed; top: 0; width: 100%; z-index: 1050; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-    .navbar-brand { font-weight: 600; font-size: 1.75rem; display: flex; align-items: center; }
-    .navbar-brand img { height: 40px; margin-right: 10px; }
+    .navbar-brand { font-weight: 600; font-size: 1.25rem; display: flex; align-items: center; letter-spacing: 0.4px; }
+    .navbar-brand img { height: 32px; margin-right: 10px; }
     #sidebarToggle { 
       border: none; 
       background: transparent; 
@@ -404,6 +472,19 @@ if (!function_exists('getCount')) {
       margin-bottom: 15px;
       opacity: 0.5;
     }
+
+    /* Theme-specific card colors matching logo: red, gold, green */
+    :root {
+      --theme-red: #800020; /* primary maroon */
+      --theme-gold: #B8860B; /* dark gold accent */
+      --theme-green: #2E7D32; /* deep green */
+    }
+
+    .bg-theme-primary { background-color: var(--theme-red) !important; color: #fff !important; }
+    .bg-theme-accent { background-color: var(--theme-gold) !important; color: #222 !important; }
+    .bg-theme-green { background-color: var(--theme-green) !important; color: #fff !important; }
+
+    .theme-card { border-radius: 8px; box-shadow: 0 6px 18px rgba(0,0,0,0.08); }
   </style>
 </head>
 <body>
@@ -418,11 +499,28 @@ if (!function_exists('getCount')) {
         <i class="fas fa-clock me-2"></i>Current Stream: 
         <span class="me-2"><strong><?= htmlspecialchars($current_stream_name) ?></strong></span>
       </div>
-      <div class="ms-auto text-white" id="currentTime">12:00:00 PM</div>
+      <div class="ms-auto text-white" id="currentTime"></div>
     </div>
   </nav>
   
   <script>
+  // Dynamic clock for header: updates every second
+  document.addEventListener('DOMContentLoaded', function() {
+    function updateTime() {
+      var now = new Date();
+      var timeString = now.toLocaleTimeString('en-US', {
+        hour12: true,
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+      });
+      var el = document.getElementById('currentTime');
+      if (el) el.textContent = timeString;
+    }
+    updateTime();
+    setInterval(updateTime, 1000);
+  });
+
   (function(){
     var storageKey = 'sidebarCollapsed';
     function getEl(id){ try { return document.getElementById(id); } catch(e) { return null; } }
@@ -467,6 +565,16 @@ if (!function_exists('getCount')) {
       applyState(stored === 'true');
     } catch (e) { /* ignore storage errors */ }
 
+    // Also ensure state is applied after DOM content loads (in case sidebar wasn't present yet)
+    try {
+      document.addEventListener('DOMContentLoaded', function(){
+        try {
+          var storedAfter = localStorage.getItem(storageKey);
+          applyState(storedAfter === 'true');
+        } catch (e) { }
+      });
+    } catch (e) { }
+
     // Attach click handler (safe)
     try {
       sidebarToggle.addEventListener('click', function(e) {
@@ -486,6 +594,85 @@ if (!function_exists('getCount')) {
     } catch (e) { /* silent */ }
   })();
   </script>
+
+  <script>
+  document.addEventListener('DOMContentLoaded', function(){
+    // Animated collapse open/close helpers
+    function animateOpen(el){
+      el.style.display = 'block';
+      var height = el.scrollHeight + 'px';
+      el.style.overflow = 'hidden';
+      el.style.maxHeight = '0';
+      // force reflow
+      el.offsetHeight;
+      el.style.transition = 'max-height 300ms ease';
+      el.style.maxHeight = height;
+      el.classList.add('show');
+      setTimeout(function(){
+        el.style.maxHeight = '';
+        el.style.overflow = '';
+        el.style.transition = '';
+      }, 300);
+    }
+
+    function animateClose(el){
+      el.style.overflow = 'hidden';
+      el.style.maxHeight = el.scrollHeight + 'px';
+      // force reflow
+      el.offsetHeight;
+      el.style.transition = 'max-height 300ms ease';
+      el.style.maxHeight = '0';
+      setTimeout(function(){
+        el.classList.remove('show');
+        el.style.display = 'none';
+        el.style.maxHeight = '';
+        el.style.overflow = '';
+        el.style.transition = '';
+      }, 300);
+    }
+
+    // Initialize collapse elements visibility to avoid jump
+    document.querySelectorAll('.collapse').forEach(function(c){
+      if (c.classList.contains('show')) {
+        c.style.display = 'block';
+      } else {
+        c.style.display = 'none';
+      }
+    });
+
+    // Wire dropdown headers to toggle their target collapses with animation
+    document.querySelectorAll('.dropdown-header').forEach(function(header){
+      header.addEventListener('click', function(e){
+        e.preventDefault();
+        var targetSelector = header.getAttribute('data-bs-target');
+        if (!targetSelector) return;
+        var target = document.querySelector(targetSelector);
+        if (!target) return;
+
+        var isOpen = target.classList.contains('show');
+        // Close other open collapses first (exclusive behavior)
+        document.querySelectorAll('.collapse.show').forEach(function(open){
+          if (open !== target) {
+            animateClose(open);
+            var associatedHeader = document.querySelector('[data-bs-target="#' + open.id + '"]');
+            if (associatedHeader) associatedHeader.setAttribute('aria-expanded', 'false');
+          }
+        });
+
+        if (isOpen) {
+          animateClose(target);
+          header.setAttribute('aria-expanded', 'false');
+        } else {
+          animateOpen(target);
+          header.setAttribute('aria-expanded', 'true');
+        }
+      });
+    });
+  });
+  </script>
+
+  <!-- Bootstrap JS Bundle (includes Popper) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.2/js/bootstrap.bundle.min.js"></script>
 
   <!-- Stream Change JavaScript -->
   <script>
