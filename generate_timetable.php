@@ -3,6 +3,53 @@ include 'connect.php';
 // Ensure flash helper is available for PRG redirects
 if (file_exists(__DIR__ . '/includes/flash.php')) include_once __DIR__ . '/includes/flash.php';
 
+// Register application-wide error/exception handlers (match includes/header.php style)
+set_error_handler(function($severity, $message, $file, $line) {
+    if (!(error_reporting() & $severity)) {
+        return false;
+    }
+    throw new \ErrorException($message, 0, $severity, $file, $line);
+});
+
+set_exception_handler(function($ex) {
+    $msg = $ex->getMessage() . " in " . $ex->getFile() . ':' . $ex->getLine();
+    $escaped = htmlspecialchars($msg, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+    echo "<div id=\"mainContent\" class=\"main-content\">";
+    echo "<div class=\"card border-danger mb-3\"><div class=\"card-body\">";
+    echo "<div style=\"display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;\">";
+    echo "<h5 class=\"card-title text-danger\" style=\"margin:0;\">An error occurred</h5>";
+    echo "<div><button class=\"btn btn-sm btn-outline-secondary copyErrorBtn\" title=\"Copy error\"><i class=\"fas fa-copy\"></i></button></div>";
+    echo "</div>";
+    echo "<pre class=\"error-pre\" style=\"white-space:pre-wrap;color:#a00;margin:0;\">" . $escaped . "</pre>";
+    echo "</div></div></div>";
+    echo "<script>(function(){var btn=document.querySelector('#mainContent .copyErrorBtn'); if(btn){btn.addEventListener('click',function(){var t=document.querySelector('#mainContent .error-pre').textContent||''; if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t).then(function(){btn.innerHTML='';var chk=document.createElement('i');chk.className='fas fa-check';btn.appendChild(chk);setTimeout(function(){btn.innerHTML='';var ic=document.createElement('i');ic.className='fas fa-copy';btn.appendChild(ic);},1500);});}else{var ta=document.createElement('textarea');ta.value=t;document.body.appendChild(ta);ta.select();try{document.execCommand('copy');btn.innerHTML='';var chk2=document.createElement('i');chk2.className='fas fa-check';btn.appendChild(chk2);setTimeout(function(){btn.innerHTML='';var ic2=document.createElement('i');ic2.className='fas fa-copy';btn.appendChild(ic2);},1500);}catch(e){}document.body.removeChild(ta);}});} })();</script>";
+    exit(1);
+});
+
+register_shutdown_function(function() {
+    $err = error_get_last();
+    if (!$err) return;
+    $msg = $err['message'] . " in " . $err['file'] . ':' . $err['line'];
+    $jsmsg = json_encode($msg);
+    echo '<script>document.addEventListener("DOMContentLoaded", function(){'
+        . 'var main = document.getElementById("mainContent"); if (!main) { main = document.createElement("div"); main.id = "mainContent"; main.className = "main-content"; document.body.appendChild(main); }'
+        . 'var errBox = document.createElement("div"); errBox.className = "card border-danger mb-3"; errBox.innerHTML = "<div class=\"card-body\">'
+            . '<div style=\"display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;\">'
+            . '<h5 class=\\\"card-title text-danger\\\" style=\\\"margin:0;\\\">An error occurred</h5>'
+            . '<div><button class=\\\"btn btn-sm btn-outline-secondary copyErrorBtn\\\" title=\\\"Copy error\\\"><i class=\\\"fas fa-copy\\\"></i></button></div>'
+            . '</div>'
+            . '<pre class=\\\"error-pre\\\" style=\\\"white-space:pre-wrap;color:#a00;margin:0;\\\">' . $jsmsg . '</pre>'
+            . '</div>";'
+        . 'if (main.firstChild) main.insertBefore(errBox, main.firstChild); else main.appendChild(errBox);'
+        . 'var btn = errBox.querySelector(".copyErrorBtn"); if (btn) { btn.addEventListener("click", function(){ var text = errBox.querySelector(".error-pre").textContent || ""; if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(text).then(function(){ btn.innerHTML = "<i class=\\\"fas fa-check\\\"></i>"; setTimeout(function(){ btn.innerHTML = "<i class=\\\"fas fa-copy\\\"></i>"; },1500); }); } else { var ta = document.createElement("textarea"); ta.value = text; document.body.appendChild(ta); ta.select(); try { document.execCommand("copy"); btn.innerHTML = "<i class=\\\"fas fa-check\\\"></i>"; setTimeout(function(){ btn.innerHTML = "<i class=\\\"fas fa-copy\\\"></i>"; },1500); } catch(e){} document.body.removeChild(ta); } }); }'
+        . '});</script>';
+});
+
+// Include stream manager so generation respects currently selected stream
+if (file_exists(__DIR__ . '/includes/stream_manager.php')) include_once __DIR__ . '/includes/stream_manager.php';
+$streamManager = getStreamManager();
+$current_stream_id = $streamManager->getCurrentStreamId();
+
 $success_message = '';
 $error_message = '';
 
@@ -36,8 +83,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $rooms[] = $room;
         }
 
-        // Get active streams to generate per-stream
-        $streams_sql = "SELECT id, name FROM streams WHERE is_active = 1 ORDER BY id";
+        // Get active streams to generate per-stream. Respect currently selected stream if set.
+        if (!empty($current_stream_id) && is_numeric($current_stream_id)) {
+            $streams_sql = "SELECT id, name FROM streams WHERE is_active = 1 AND id = " . intval($current_stream_id) . " ORDER BY id";
+        } else {
+            $streams_sql = "SELECT id, name FROM streams WHERE is_active = 1 ORDER BY id";
+        }
         $streams_result = $conn->query($streams_sql);
 
         if ($streams_result && $streams_result->num_rows > 0) {
@@ -195,198 +246,215 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 }
 
 // Get statistics
-$total_assignments = $conn->query("SELECT COUNT(*) as count FROM class_courses WHERE is_active = 1")->fetch_assoc()['count'];
-$total_timetable_entries = $conn->query("SELECT COUNT(*) as count FROM timetable")->fetch_assoc()['count'];
-$total_classes = $conn->query("SELECT COUNT(*) as count FROM classes WHERE is_active = 1")->fetch_assoc()['count'];
+$total_assignments = 0;
+// Count assignments; respect stream when classes.stream_id exists
+$col = $conn->query("SHOW COLUMNS FROM classes LIKE 'stream_id'");
+$has_stream_col = ($col && $col->num_rows > 0);
+if ($has_stream_col && !empty($current_stream_id)) {
+    // Count class_courses where the class belongs to the selected stream
+    $sql = "SELECT COUNT(*) as count FROM class_courses cc JOIN classes c ON cc.class_id = c.id WHERE cc.is_active = 1 AND c.stream_id = " . intval($current_stream_id);
+    $total_assignments = $conn->query($sql)->fetch_assoc()['count'];
+} else {
+    $total_assignments = $conn->query("SELECT COUNT(*) as count FROM class_courses WHERE is_active = 1")->fetch_assoc()['count'];
+}
+if ($col) $col->close();
+$total_timetable_entries = 0;
+// Respect stream: count timetable entries for the selected stream when possible
+// Support both timetable schema variants: (1) timetable.class_course_id -> class_courses -> classes
+// and (2) timetable.class_id -> classes
+$total_timetable_entries = 0;
+$tcol = $conn->query("SHOW COLUMNS FROM timetable LIKE 'class_course_id'");
+$has_t_class_course = ($tcol && $tcol->num_rows > 0);
+$col = $conn->query("SHOW COLUMNS FROM classes LIKE 'stream_id'");
+$has_stream_col = ($col && $col->num_rows > 0);
+
+if ($has_stream_col && !empty($current_stream_id)) {
+    if ($has_t_class_course) {
+        // New schema: join via class_course_id -> class_courses -> classes
+        $sql = "SELECT COUNT(*) as count FROM timetable t JOIN class_courses cc ON t.class_course_id = cc.id JOIN classes c ON cc.class_id = c.id WHERE c.stream_id = " . intval($current_stream_id);
+    } else {
+        // Old schema: timetable stores class_id directly
+        $sql = "SELECT COUNT(*) as count FROM timetable t JOIN classes c ON t.class_id = c.id WHERE c.stream_id = " . intval($current_stream_id);
+    }
+    $res = $conn->query($sql);
+    $total_timetable_entries = $res ? $res->fetch_assoc()['count'] : 0;
+} else {
+    // Fallback to global count
+    $total_timetable_entries = $conn->query("SELECT COUNT(*) as count FROM timetable")->fetch_assoc()['count'];
+}
+
+if ($tcol) $tcol->close();
+if ($col) $col->close();
+$total_classes = 0;
+// Respect selected stream when counting classes if the classes table has a stream_id column
+$col = $conn->query("SHOW COLUMNS FROM classes LIKE 'stream_id'");
+$has_stream_col = ($col && $col->num_rows > 0);
+if ($has_stream_col && !empty($current_stream_id)) {
+    $total_classes = $conn->query("SELECT COUNT(*) as count FROM classes WHERE is_active = 1 AND stream_id = " . intval($current_stream_id))->fetch_assoc()['count'];
+} else {
+    $total_classes = $conn->query("SELECT COUNT(*) as count FROM classes WHERE is_active = 1")->fetch_assoc()['count'];
+}
+if ($col) $col->close();
 $total_courses = $conn->query("SELECT COUNT(*) as count FROM courses WHERE is_active = 1")->fetch_assoc()['count'];
 ?>
 
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Generate Timetable</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <style>
-        .card {
-            box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
-            border: 1px solid rgba(0, 0, 0, 0.125);
-        }
-        .stat-card {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-        }
-        .stat-card .card-body {
-            padding: 1.5rem;
-        }
-        .stat-number {
-            font-size: 2.5rem;
-            font-weight: bold;
-        }
-    </style>
-</head>
-<body>
-    <div class="container-fluid mt-4">
-        <div class="row">
-            <div class="col-12">
+<?php include 'includes/header.php'; ?>
+<?php include 'includes/sidebar.php'; ?>
+
+<div class="main-content" id="mainContent">
+    <div class="table-container">
+        <div class="table-header d-flex justify-content-between align-items-center">
+            <h4><i class="fas fa-calendar-alt me-2"></i>Generate Timetable</h4>
+        </div>
+
+        <div class="m-3">
+            <?php if ($success_message): ?>
+                <div class="alert alert-success alert-dismissible fade show" role="alert">
+                    <i class="fas fa-check-circle me-2"></i><?php echo $success_message; ?>
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            <?php endif; ?>
+
+            <?php if ($error_message): ?>
+                <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                    <i class="fas fa-exclamation-circle me-2"></i><?php echo $error_message; ?>
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            <?php endif; ?>
+        </div>
+
+        <div class="row m-3">
+            <div class="col-md-8">
                 <div class="card">
                     <div class="card-header">
-                        <h5 class="mb-0">
-                            <i class="fas fa-calendar-alt me-2"></i>Generate Timetable
-                        </h5>
+                        <h6 class="mb-0">Timetable Generation</h6>
                     </div>
                     <div class="card-body">
-                        <?php if ($success_message): ?>
-                            <div class="alert alert-success alert-dismissible fade show" role="alert">
-                                <i class="fas fa-check-circle me-2"></i><?php echo $success_message; ?>
-                                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                            </div>
-                        <?php endif; ?>
-                        
-                        <?php if ($error_message): ?>
-                            <div class="alert alert-danger alert-dismissible fade show" role="alert">
-                                <i class="fas fa-exclamation-circle me-2"></i><?php echo $error_message; ?>
-                                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                            </div>
-                        <?php endif; ?>
+                        <p class="text-muted">This will generate a new timetable based on current class-course assignments. Any existing timetable entries will be cleared.</p>
 
-                        <!-- Statistics Cards -->
-                        <div class="row mb-4">
+                        <form method="POST">
+                            <input type="hidden" name="action" value="generate_timetable">
+                            <button type="submit" class="btn btn-primary btn-lg" onclick="return confirm('This will clear the existing timetable and generate a new one. Continue?')">
+                                <i class="fas fa-magic me-2"></i>Generate New Timetable
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-header">
+                        <h6 class="mb-0">Quick Actions</h6>
+                    </div>
+                    <div class="card-body">
+                        <div class="d-grid gap-2">
+                            <a href="class_courses.php" class="btn btn-outline-primary"><i class="fas fa-link me-2"></i>Manage Assignments</a>
+                            <a href="view_timetable.php" class="btn btn-outline-success"><i class="fas fa-eye me-2"></i>View Timetable</a>
+                            <a href="export_timetable.php" class="btn btn-outline-info"><i class="fas fa-download me-2"></i>Export Timetable</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row m-3">
+            <div class="col-12">
+                <div class="card mt-3">
+                    <div class="card-header">
+                        <h6 class="mb-0">Overview</h6>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
                             <div class="col-md-3">
-                                <div class="card stat-card">
-                                    <div class="card-body text-center">
-                                        <i class="fas fa-users fa-2x mb-2"></i>
+                                <div class="card theme-card bg-theme-primary text-white text-center mb-2">
+                                    <div class="card-body">
                                         <div class="stat-number"><?php echo $total_classes; ?></div>
                                         <div>Total Classes</div>
                                     </div>
                                 </div>
                             </div>
                             <div class="col-md-3">
-                                <div class="card stat-card">
-                                    <div class="card-body text-center">
-                                        <i class="fas fa-book fa-2x mb-2"></i>
+                                <div class="card theme-card bg-theme-accent text-dark text-center mb-2">
+                                    <div class="card-body">
                                         <div class="stat-number"><?php echo $total_courses; ?></div>
                                         <div>Total Courses</div>
                                     </div>
                                 </div>
                             </div>
                             <div class="col-md-3">
-                                <div class="card stat-card">
-                                    <div class="card-body text-center">
-                                        <i class="fas fa-link fa-2x mb-2"></i>
+                                <div class="card theme-card bg-theme-green text-white text-center mb-2">
+                                    <div class="card-body">
                                         <div class="stat-number"><?php echo $total_assignments; ?></div>
                                         <div>Assignments</div>
                                     </div>
                                 </div>
                             </div>
                             <div class="col-md-3">
-                                <div class="card stat-card">
-                                    <div class="card-body text-center">
-                                        <i class="fas fa-calendar-check fa-2x mb-2"></i>
+                                <div class="card theme-card bg-theme-primary text-white text-center mb-2">
+                                    <div class="card-body">
                                         <div class="stat-number"><?php echo $total_timetable_entries; ?></div>
                                         <div>Timetable Entries</div>
                                     </div>
                                 </div>
                             </div>
                         </div>
-
-                        <!-- Generation Controls -->
-                        <div class="row">
-                            <div class="col-md-8">
-                                <div class="card">
-                                    <div class="card-header">
-                                        <h6 class="mb-0">Timetable Generation</h6>
-                                    </div>
-                                    <div class="card-body">
-                                        <p class="text-muted">
-                                            This will generate a new timetable based on current class-course assignments.
-                                            Any existing timetable entries will be cleared.
-                                        </p>
-                                        
-                                        <form method="POST">
-                                            <input type="hidden" name="action" value="generate_timetable">
-                                            <button type="submit" class="btn btn-primary btn-lg" 
-                                                    onclick="return confirm('This will clear the existing timetable and generate a new one. Continue?')">
-                                                <i class="fas fa-magic me-2"></i>Generate New Timetable
-                                            </button>
-                                        </form>
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <div class="col-md-4">
-                                <div class="card">
-                                    <div class="card-header">
-                                        <h6 class="mb-0">Quick Actions</h6>
-                                    </div>
-                                    <div class="card-body">
-                                        <div class="d-grid gap-2">
-                                            <a href="class_courses.php" class="btn btn-outline-primary">
-                                                <i class="fas fa-link me-2"></i>Manage Assignments
-                                            </a>
-                                            <a href="view_timetable.php" class="btn btn-outline-success">
-                                                <i class="fas fa-eye me-2"></i>View Timetable
-                                            </a>
-                                            <a href="export_timetable.php" class="btn btn-outline-info">
-                                                <i class="fas fa-download me-2"></i>Export Timetable
-                                            </a>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Recent Assignments -->
-                        <?php if ($total_assignments > 0): ?>
-                            <div class="card mt-4">
-                                <div class="card-header">
-                                    <h6 class="mb-0">Recent Class-Course Assignments</h6>
-                                </div>
-                                <div class="card-body">
-                                    <div class="table-responsive">
-                                        <table class="table table-sm">
-                                            <thead>
-                                                <tr>
-                                                    <th>Class</th>
-                                                    <th>Course</th>
-                                                    <th>Status</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                <?php
-                                                $recent_sql = "SELECT c.name as class_name, co.course_code, co.course_name
-                                                              FROM class_courses cc
-                                                              JOIN classes c ON cc.class_id = c.id
-                                                              JOIN courses co ON cc.course_id = co.id
-                                                              WHERE cc.is_active = 1
-                                                              ORDER BY cc.created_at DESC
-                                                              LIMIT 10";
-                                                $recent_result = $conn->query($recent_sql);
-                                                while ($row = $recent_result->fetch_assoc()):
-                                                ?>
-                                                <tr>
-                                                    <td><?php echo htmlspecialchars($row['class_name']); ?></td>
-                                                    <td><?php echo htmlspecialchars($row['course_code'] . ' - ' . $row['course_name']); ?></td>
-                                                    <td>
-                                                        <span class="badge bg-success">Active</span>
-                                                    </td>
-                                                </tr>
-                                                <?php endwhile; ?>
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                </div>
-                            </div>
-                        <?php endif; ?>
                     </div>
                 </div>
             </div>
         </div>
-    </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
-</body>
-</html>
+        <?php if ($total_assignments > 0): ?>
+            <div class="row m-3">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-header"><h6 class="mb-0">Recent Class-Course Assignments</h6></div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table table-sm">
+                                    <thead>
+                                        <tr>
+                                            <th>Class</th>
+                                            <th>Course</th>
+                                            <th>Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php
+                                        // Build recent assignments query; respect selected stream if classes.stream_id exists
+                                        $recent_where = "cc.is_active = 1";
+                                        $col = $conn->query("SHOW COLUMNS FROM classes LIKE 'stream_id'");
+                                        $has_stream_col = ($col && $col->num_rows > 0);
+                                        if ($has_stream_col && !empty($current_stream_id)) {
+                                            $recent_where .= " AND c.stream_id = " . intval($current_stream_id);
+                                        }
+                                        if ($col) $col->close();
+
+                                        $recent_sql = "SELECT c.name as class_name, co.`code` AS course_code, co.`name` AS course_name
+                                                      FROM class_courses cc
+                                                      JOIN classes c ON cc.class_id = c.id
+                                                      JOIN courses co ON cc.course_id = co.id
+                                                      WHERE " . $recent_where . "
+                                                      ORDER BY cc.created_at DESC
+                                                      LIMIT 10";
+                                        $recent_result = $conn->query($recent_sql);
+                                        while ($row = $recent_result->fetch_assoc()):
+                                        ?>
+                                        <tr>
+                                            <td><?php echo htmlspecialchars($row['class_name']); ?></td>
+                                            <td><?php echo htmlspecialchars($row['course_code'] . ' - ' . $row['course_name']); ?></td>
+                                            <td><span class="badge bg-success">Active</span></td>
+                                        </tr>
+                                        <?php endwhile; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        <?php endif; ?>
+
+    </div>
+</div>
 
