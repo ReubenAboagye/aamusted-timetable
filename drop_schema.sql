@@ -1,7 +1,5 @@
 -- Example: drop (edit constraint names to match your DB)
-ALTER TABLE class_courses DROP FOREIGN KEY fk_class_courses_stream;
-ALTER TABLE class_courses DROP INDEX idx_class_courses_stream_id;
-ALTER TABLE class_courses DROP COLUMN stream_id;
+ (iterate streams, restrict days using stream_days, filter rooms by stream_availability).
 
 ALTER TABLE course_room_types DROP FOREIGN KEY fk_course_room_types_stream;
 ALTER TABLE course_room_types DROP INDEX idx_course_room_types_stream_id;
