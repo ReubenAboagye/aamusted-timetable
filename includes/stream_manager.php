@@ -104,13 +104,19 @@ class StreamManager {
      */
     public function addStreamFilter($sql, $table_alias = '') {
         $alias = $table_alias ? $table_alias . '.' : '';
-        
+        // Only apply stream filter for the classes table (alias 'c' or 'classes').
+        // Other tables are considered global and should not be filtered by stream.
+        $aliasTrim = rtrim($table_alias, '.');
+        if (!in_array(strtolower($aliasTrim), ['c', 'classes'])) {
+            return $sql;
+        }
+
         if (strpos($sql, 'WHERE') !== false) {
             $sql .= " AND {$alias}stream_id = " . $this->current_stream_id;
         } else {
             $sql .= " WHERE {$alias}stream_id = " . $this->current_stream_id;
         }
-        
+
         return $sql;
     }
     
@@ -118,6 +124,11 @@ class StreamManager {
      * Get stream filter condition for manual queries
      */
     public function getStreamFilterCondition($table_alias = '') {
+        // Only return a condition for the classes table alias; otherwise return empty string
+        $aliasTrim = rtrim($table_alias, '.');
+        if (!in_array(strtolower($aliasTrim), ['c', 'classes'])) {
+            return '';
+        }
         $alias = $table_alias ? $table_alias . '.' : '';
         return "{$alias}stream_id = " . $this->current_stream_id;
     }
@@ -126,18 +137,24 @@ class StreamManager {
      * Check if a record belongs to current stream
      */
     public function isRecordInCurrentStream($table_name, $record_id) {
+        // Only valid for tables that have a stream_id column (we treat 'classes' as canonical here).
+        if (strtolower($table_name) !== 'classes') {
+            // Non-classes are considered global; return true so checks relying on this don't block.
+            return true;
+        }
+
         $sql = "SELECT stream_id FROM {$table_name} WHERE id = ?";
         $stmt = $this->conn->prepare($sql);
         $stmt->bind_param("i", $record_id);
         $stmt->execute();
         $result = $stmt->get_result();
-        
+
         if ($result->num_rows > 0) {
             $row = $result->fetch_assoc();
             $stmt->close();
             return $row['stream_id'] == $this->current_stream_id;
         }
-        
+
         $stmt->close();
         return false;
     }
