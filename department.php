@@ -256,7 +256,7 @@ $stats = $stats_result ? $stats_result->fetch_assoc() : ['total_departments' => 
         <!-- Statistics Cards -->
         <div class="row g-3 mb-3 m-3">
             <div class="col-md-6">
-                <div class="card bg-primary text-white">
+                <div class="card theme-card bg-theme-primary text-white">
                     <div class="card-body">
                         <div class="d-flex justify-content-between">
                             <div>
@@ -271,7 +271,7 @@ $stats = $stats_result ? $stats_result->fetch_assoc() : ['total_departments' => 
                 </div>
             </div>
             <div class="col-md-6">
-                <div class="card bg-info text-white">
+                <div class="card theme-card bg-theme-accent text-dark">
                     <div class="card-body">
                         <div class="d-flex justify-content-between">
                             <div>
