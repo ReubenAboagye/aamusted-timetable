@@ -26,6 +26,14 @@ class StreamManager {
         // Check if stream is set in session
         if (isset($_SESSION['current_stream_id'])) {
             $this->current_stream_id = $_SESSION['current_stream_id'];
+        } elseif (isset($_SESSION['active_stream'])) {
+            // Backwards compatibility with older session key
+            $this->current_stream_id = $_SESSION['active_stream'];
+            $_SESSION['current_stream_id'] = $this->current_stream_id;
+        } elseif (isset($_SESSION['stream_id'])) {
+            // Backwards compatibility with alternative session key
+            $this->current_stream_id = $_SESSION['stream_id'];
+            $_SESSION['current_stream_id'] = $this->current_stream_id;
         } else {
             // Set default stream (Regular)
             $this->current_stream_id = 1;
@@ -75,7 +83,10 @@ class StreamManager {
     public function setCurrentStream($stream_id) {
         if (is_numeric($stream_id)) {
             $this->current_stream_id = $stream_id;
+            // Store in the canonical session key and keep legacy keys in sync
             $_SESSION['current_stream_id'] = $stream_id;
+            $_SESSION['active_stream'] = $stream_id;
+            $_SESSION['stream_id'] = $stream_id;
             $this->loadStreamName();
             return true;
         }
