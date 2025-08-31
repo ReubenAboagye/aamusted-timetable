@@ -9,7 +9,122 @@ include 'connect.php';
 // Handle bulk import and form submissions
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? null;
-    // Bulk import removed
+    // Bulk import
+    if ($action === 'bulk_import') {
+        $raw = $_POST['import_data'] ?? '';
+        if (trim($raw) === '') {
+            $error_message = 'No import data provided.';
+        } else {
+            $import_data = json_decode($raw, true);
+            if (json_last_error() !== JSON_ERROR_NONE) {
+                $error_message = 'Invalid JSON import data: ' . json_last_error_msg();
+            } elseif (!is_array($import_data) || empty($import_data)) {
+                $error_message = 'No rows found in import data.';
+            } else {
+                $success_count = 0;
+                $ignored_count = 0;
+                $error_count = 0;
+
+                // Prepare check statements to detect existing programs
+                $check_name_dept_sql = "SELECT id FROM programs WHERE name = ? AND department_id = ?";
+                $check_code_sql = "SELECT id FROM programs WHERE code = ?";
+                $check_name_dept_stmt = $conn->prepare($check_name_dept_sql);
+                $check_code_stmt = $conn->prepare($check_code_sql);
+                // Prepared statement to verify department exists
+                $check_dept_stmt = $conn->prepare("SELECT id FROM departments WHERE id = ?");
+
+                foreach ($import_data as $row) {
+                    $name = isset($row['name']) ? $conn->real_escape_string($row['name']) : '';
+                    $department_id = isset($row['department_id']) ? (int)$row['department_id'] : 0;
+                    $code = isset($row['code']) ? $conn->real_escape_string($row['code']) : '';
+                    $duration = isset($row['duration']) ? (int)$row['duration'] : 0;
+                    $is_active = isset($row['is_active']) ? (int)$row['is_active'] : 1;
+
+                    if ($name === '' || $department_id === 0) {
+                        $error_count++;
+                        continue;
+                    }
+
+                    // Verify department exists
+                    if ($check_dept_stmt) {
+                        $check_dept_stmt->bind_param("i", $department_id);
+                        $check_dept_stmt->execute();
+                        $dept_res = $check_dept_stmt->get_result();
+                        if (!$dept_res || $dept_res->num_rows === 0) {
+                            $error_count++;
+                            continue;
+                        }
+                    }
+
+                    // Generate a code if not provided
+                    if (empty($code)) {
+                        $base_code = strtoupper(substr(preg_replace('/[^a-zA-Z0-9]/', '', $name), 0, 6));
+                        if (strlen($base_code) < 3) {
+                            $base_code = 'PRG' . $base_code;
+                        }
+                        $code = $base_code;
+                        $counter = 1;
+                        while (true) {
+                            $check_code_stmt->bind_param("s", $code);
+                            $check_code_stmt->execute();
+                            $existing_code = $check_code_stmt->get_result();
+                            if ($existing_code && $existing_code->num_rows > 0) {
+                                $code = $base_code . $counter;
+                                $counter++;
+                                if ($counter > 999) { $code = $base_code . time() % 1000; break; }
+                            } else { break; }
+                        }
+                    }
+
+                    // Skip if program with same name and department exists
+                    if ($check_name_dept_stmt) {
+                        $check_name_dept_stmt->bind_param("si", $name, $department_id);
+                        $check_name_dept_stmt->execute();
+                        $existing_name_dept = $check_name_dept_stmt->get_result();
+                        if ($existing_name_dept && $existing_name_dept->num_rows > 0) {
+                            $ignored_count++;
+                            continue;
+                        }
+                    }
+
+                    // Skip if program with same code exists
+                    if ($check_code_stmt) {
+                        $check_code_stmt->bind_param("s", $code);
+                        $check_code_stmt->execute();
+                        $existing_code = $check_code_stmt->get_result();
+                        if ($existing_code && $existing_code->num_rows > 0) {
+                            $ignored_count++;
+                            continue;
+                        }
+                    }
+
+                    $sql = "INSERT INTO programs (name, department_id, code, duration_years, is_active) VALUES (?, ?, ?, ?, ?)";
+                    $stmt = $conn->prepare($sql);
+                    if (!$stmt) { $error_count++; continue; }
+                    $stmt->bind_param("sisii", $name, $department_id, $code, $duration, $is_active);
+                    if ($stmt->execute()) { $success_count++; } else { $error_count++; }
+                    $stmt->close();
+                }
+
+                if ($check_name_dept_stmt) $check_name_dept_stmt->close();
+                if ($check_code_stmt) $check_code_stmt->close();
+                if ($check_dept_stmt) $check_dept_stmt->close();
+
+                if ($success_count > 0) {
+                    $msg = "Successfully imported $success_count programs!";
+                    if ($ignored_count > 0) $msg .= " $ignored_count duplicates ignored.";
+                    if ($error_count > 0) $msg .= " $error_count records failed to import.";
+                    redirect_with_flash('programs.php', 'success', $msg);
+                } else {
+                    if ($ignored_count > 0 && $error_count === 0) {
+                        $success_message = "No new programs imported. $ignored_count duplicates ignored.";
+                    } else {
+                        $error_message = "No programs were imported. Please check your data.";
+                    }
+                }
+            }
+        }
+    }
 
     // Single add
     if ($action === 'add') {
@@ -144,7 +259,9 @@ $dept_result = $conn->query($dept_sql);
         <div class="table-header d-flex justify-content-between align-items-center">
             <h4><i class="fas fa-graduation-cap me-2"></i>Programs Management</h4>
             <div class="d-flex gap-2">
-                <!-- Import removed -->
+                <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#importModal">
+                    <i class="fas fa-upload me-2"></i>Import
+                </button>
             <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addProgramModal">
                 <i class="fas fa-plus me-2"></i>Add New Program
             </button>
@@ -339,7 +456,41 @@ $dept_result = $conn->query($dept_sql);
     </div>
 </div>
 
-<!-- Import removed -->
+<!-- Import Modal -->
+<div class="modal fade" id="importModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Import Programs (CSV)</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <div id="uploadArea" class="upload-area p-4 text-center border rounded" style="cursor:pointer;">
+                        <i class="fas fa-cloud-upload-alt fa-2x text-muted mb-2"></i>
+                        <p class="mb-1">Drop CSV file here or <strong>click to browse</strong></p>
+                        <small class="text-muted">Expected headers: name,department_id,code,duration,is_active</small>
+                    </div>
+                    <input type="file" class="form-control d-none" id="csvFile" accept=".csv,text/csv">
+                </div>
+
+                <div class="mb-3">
+                    <h6>Preview (first 10 rows)</h6>
+                    <div class="table-responsive" style="max-height:300px;overflow:auto">
+                        <table class="table table-sm table-bordered">
+                            <thead class="table-light"><tr><th>#</th><th>Name</th><th>Code</th><th>Dept ID</th><th>Duration</th><th>Status</th><th>Validation</th></tr></thead>
+                            <tbody id="previewBody"><tr><td colspan="7" class="text-center text-muted">Upload a CSV file to preview</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="processBtn" disabled>Process File</button>
+            </div>
+        </div>
+    </div>
+</div>
 
 <?php 
 // Embed existing program data for client-side duplicate checks
@@ -526,7 +677,7 @@ function validateProgramsData(data) {
 function showPreviewPrograms() {
     const tbody = document.getElementById('previewBody');
     if (!tbody) {
-        // preview removed; silently return
+        console.error('previewBody missing');
         return;
     }
     tbody.innerHTML = '';
@@ -572,12 +723,58 @@ function showPreviewPrograms() {
 }
 
 function processProgramsFile(file) {
-    // removed
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const data = parseCSVPrograms(e.target.result);
+        importDataPrograms = validateProgramsData(data);
+        showPreviewPrograms();
+    };
+    reader.readAsText(file);
 }
 
 // Set up drag/drop and file input
 document.addEventListener('DOMContentLoaded', function() {
-    // upload handlers removed
+    const uploadArea = document.getElementById('uploadArea');
+    const fileInput = document.getElementById('csvFile');
+    const processBtn = document.getElementById('processBtn');
+
+    if (uploadArea && fileInput) {
+        uploadArea.addEventListener('click', function(e){
+            e.preventDefault();
+            try {
+                fileInput.click();
+            } catch(err) {
+                // fallback: temporarily show input and click
+                fileInput.style.display = 'block';
+                fileInput.click();
+                fileInput.style.display = 'none';
+            }
+            return false;
+        });
+
+        uploadArea.addEventListener('dragover', function(e){ e.preventDefault(); e.stopPropagation(); this.style.borderColor='#007bff'; this.style.background='#e3f2fd'; });
+        uploadArea.addEventListener('dragleave', function(e){ e.preventDefault(); e.stopPropagation(); this.style.borderColor=''; this.style.background=''; });
+        uploadArea.addEventListener('drop', function(e){
+            e.preventDefault(); e.stopPropagation();
+            this.style.borderColor=''; this.style.background='';
+            const files = e.dataTransfer.files; 
+            if (files && files.length) { fileInput.files = files; processProgramsFile(files[0]); }
+        });
+    } else {
+        console.debug('Import: uploadArea or csvFile not found in DOM');
+    }
+    if (fileInput) fileInput.addEventListener('change', function(){ if (this.files.length) processProgramsFile(this.files[0]); });
+
+    if (processBtn) {
+        processBtn.addEventListener('click', function(){
+            const validData = importDataPrograms.filter(r => r.valid);
+            if (validData.length === 0) { alert('No valid records to import'); return; }
+            const form = document.createElement('form'); form.method='POST'; form.style.display='none';
+            const actionInput = document.createElement('input'); actionInput.type='hidden'; actionInput.name='action'; actionInput.value='bulk_import';
+            const dataTextarea = document.createElement('textarea'); dataTextarea.name='import_data'; dataTextarea.style.display='none'; dataTextarea.textContent = JSON.stringify(validData);
+            form.appendChild(actionInput); form.appendChild(dataTextarea); document.body.appendChild(form); form.submit();
+        });
+    }
     
     // Import modal removed; nothing to initialize
 });
