@@ -168,14 +168,14 @@ $error_message = $_GET['error'] ?? '';
         <div class="table-header d-flex justify-content-between align-items-center">
             <h4><i class="fas fa-save me-2"></i>Saved Timetables</h4>
             <div class="d-flex gap-2">
-                <a class="btn btn-outline-primary" href="generate_timetable.php">
+                <a class="btn btn-primary" href="generate_timetable.php">
                     <i class="fas fa-cogs me-2"></i>Generate New Timetable
                 </a>
-                <a class="btn btn-outline-secondary" href="view_timetable.php">
+                <a class="btn btn-success" href="view_timetable.php">
                     <i class="fas fa-eye me-2"></i>View Timetable
                 </a>
-                <button class="btn btn-outline-info" data-bs-toggle="modal" data-bs-target="#editSessionModal">
-                    <i class="fas fa-edit me-2"></i>Edit Session
+                <button class="btn btn-warning" data-bs-toggle="modal" data-bs-target="#editSessionModal">
+                    <i class="fas fa-edit me-2"></i>Edit Stream
                 </button>
             </div>
         </div>
@@ -299,7 +299,7 @@ $error_message = $_GET['error'] ?? '';
                                         <td>
                                             <div class="btn-group btn-group-sm" role="group">
                                                 <div class="btn-group" role="group" aria-label="Actions">
-                                                    <a href="view_timetable.php?stream_id=<?php echo $timetable['stream_id']; ?>" class="btn btn-sm btn-outline-primary" title="View Timetable">
+                                                    <a href="view_timetable.php?stream_id=<?php echo $timetable['stream_id']; ?>" class="btn btn-sm btn-primary" title="View Timetable">
                                                         <i class="fas fa-eye"></i>
                                                     </a>
                                                     <a href="export_timetable.php?stream_id=<?php echo $timetable['stream_id']; ?>" class="btn btn-sm btn-outline-success" title="Export" target="_blank">
