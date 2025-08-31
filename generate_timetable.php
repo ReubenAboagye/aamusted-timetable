@@ -351,7 +351,7 @@ $total_courses = $conn->query("SELECT COUNT(*) as count FROM courses WHERE is_ac
                     <div class="card-body">
                         <div class="d-grid gap-2">
                             <a href="class_courses.php" class="btn btn-outline-primary"><i class="fas fa-link me-2"></i>Manage Assignments</a>
-                            <a href="view_timetable.php" class="btn btn-outline-success"><i class="fas fa-eye me-2"></i>View Timetable</a>
+                            <a href="view_timetable.php" class="btn btn-success"><i class="fas fa-eye me-2"></i>View Timetable</a>
                             <a href="export_timetable.php" class="btn btn-outline-info"><i class="fas fa-download me-2"></i>Export Timetable</a>
                         </div>
                     </div>
