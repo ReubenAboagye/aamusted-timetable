@@ -24,8 +24,19 @@ function redirect_with_flash($location, $type, $message)
     if (!preg_match('/^https?:\/\//', $location) && strpos($location, '/') !== 0) {
         $location = $location;
     }
-    header('Location: ' . $location);
-    exit;
+    // If headers already sent, render a JS-based redirect as a safe fallback
+    if (!headers_sent()) {
+        header('Location: ' . $location);
+        exit;
+    } else {
+        // Attempt a safe client-side redirect while preserving the flash in session
+        $escaped = htmlspecialchars($location, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        echo '<!doctype html><html><head><meta charset="utf-8"><title>Redirecting</title>';
+        echo '<meta http-equiv="refresh" content="0;url=' . $escaped . '">';
+        echo '<script>try{window.location.replace(' . json_encode($location) . ');}catch(e){window.location.href=' . json_encode($location) . ';}</script>';
+        echo '</head><body><p>Redirecting... If you are not redirected, <a href="' . $escaped . '">click here</a>.</p></body></html>';
+        exit;
+    }
 }
 
 
