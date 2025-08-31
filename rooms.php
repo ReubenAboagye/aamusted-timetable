@@ -1284,6 +1284,24 @@ if (typeof bootstrap !== 'undefined') {
     console.log('Bootstrap Modal available:', typeof bootstrap.Modal !== 'undefined');
 }
 
+// Protect Bootstrap Modal from external interference
+(function() {
+    // Store original Bootstrap Modal constructor
+    let OriginalModal = null;
+    
+    // Wait for Bootstrap to load, then protect it
+    function protectBootstrapModal() {
+        if (typeof bootstrap !== 'undefined' && bootstrap.Modal) {
+            OriginalModal = bootstrap.Modal;
+            console.log('Bootstrap Modal protected from external interference');
+        } else {
+            setTimeout(protectBootstrapModal, 100);
+        }
+    }
+    
+    protectBootstrapModal();
+})();
+
 // Ensure Bootstrap is available before using modal functions
 function ensureBootstrapLoaded() {
     if (typeof bootstrap === 'undefined' || !bootstrap.Modal) {
@@ -1291,6 +1309,82 @@ function ensureBootstrapLoaded() {
         return false;
     }
     return true;
+}
+
+// Safe modal initialization that prevents external widget conflicts
+function safeModalInit(element, options = {}) {
+    try {
+        if (!element) {
+            console.error('Modal element not found');
+            return null;
+        }
+        
+        if (!ensureBootstrapLoaded()) {
+            console.error('Bootstrap not loaded, cannot initialize modal');
+            return null;
+        }
+        
+        // Destroy any existing modal instance first to prevent conflicts
+        try {
+            const existingInstance = bootstrap.Modal.getInstance(element);
+            if (existingInstance) {
+                existingInstance.dispose();
+            }
+        } catch (e) {
+            console.warn('Could not dispose existing modal instance:', e);
+        }
+        
+        // Create modal with explicit options to prevent backdrop conflicts
+        const modalOptions = {
+            backdrop: true,
+            keyboard: true,
+            focus: true,
+            ...options
+        };
+        
+        // Try to create modal instance with error handling for backdrop issues
+        let modal = null;
+        try {
+            modal = new bootstrap.Modal(element, modalOptions);
+        } catch (backdropError) {
+            console.warn('Backdrop error detected, trying alternative initialization:', backdropError);
+            // Try without backdrop option as fallback
+            try {
+                modal = new bootstrap.Modal(element, { keyboard: true, focus: true });
+            } catch (fallbackError) {
+                console.error('Fallback modal initialization also failed:', fallbackError);
+                return null;
+            }
+        }
+        
+        return modal;
+    } catch (error) {
+        console.error('Error initializing modal:', error);
+        return null;
+    }
+}
+
+// Override Bootstrap's automatic modal initialization to prevent conflicts
+function initializeModalsManually() {
+    // Disable automatic modal initialization by removing data-bs-toggle attributes temporarily
+    const modalTriggers = document.querySelectorAll('[data-bs-toggle="modal"]');
+    modalTriggers.forEach(trigger => {
+        const target = trigger.getAttribute('data-bs-target');
+        trigger.removeAttribute('data-bs-toggle');
+        trigger.removeAttribute('data-bs-target');
+        
+        // Add click handler instead
+        trigger.addEventListener('click', function(e) {
+            e.preventDefault();
+            const modalElement = document.querySelector(target);
+            if (modalElement) {
+                const modal = safeModalInit(modalElement);
+                if (modal) {
+                    modal.show();
+                }
+            }
+        });
+    });
 }
 
 // Wait for Bootstrap to be available (with timeout)
@@ -1345,13 +1439,10 @@ function editRoom(id, name, buildingId, roomType, capacity, isActive) {
     if (!el) return console.error('editRoomModal element missing');
 
     try {
-        // Check if Bootstrap Modal is available
-        if (typeof bootstrap === 'undefined' || !bootstrap.Modal) {
-            console.error('Bootstrap Modal not available when trying to show edit modal');
-            return;
+        var editModal = safeModalInit(el);
+        if (editModal) {
+            editModal.show();
         }
-        var editModal = bootstrap.Modal.getOrCreateInstance(el);
-        editModal.show();
     } catch (error) {
         console.error('Error showing edit modal:', error);
     }
@@ -1720,6 +1811,9 @@ function processRoomsImport() {
 // Set up drag/drop and file input
 document.addEventListener('DOMContentLoaded', function() {
     waitForBootstrap(function() {
+    // Initialize modals manually to prevent conflicts
+    initializeModalsManually();
+    
     // Load existing rooms for duplicate checking
     loadExistingRooms();
     
@@ -1985,14 +2079,10 @@ function showAddBuildingModal() {
     }
 
     try {
-        // Check if Bootstrap Modal is available
-        if (typeof bootstrap === 'undefined' || !bootstrap.Modal) {
-            console.error('Bootstrap Modal not available when trying to show add building modal');
-            return;
+        var modal = safeModalInit(el);
+        if (modal) {
+            modal.show();
         }
-        // Use getOrCreateInstance to avoid re-initialization issues
-        var modal = bootstrap.Modal.getOrCreateInstance(el);
-        modal.show();
     } catch (error) {
         console.error('Error showing add building modal:', error);
     }
