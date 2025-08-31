@@ -29,7 +29,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         }
         $stmt->close();
 
-    } elseif ($_POST['action'] === 'edit' && isset($_POST['id'])) {
+    } elseif ($action === 'edit' && isset($_POST['id'])) {
         $id = (int)$_POST['id'];
         $name = $conn->real_escape_string($_POST['name']);
         $department_id = (int)$_POST['department_id'];
@@ -47,7 +47,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         }
         $stmt->close();
 
-    } elseif ($_POST['action'] === 'delete' && isset($_POST['id'])) {
+    } elseif ($action === 'delete' && isset($_POST['id'])) {
         $id = $conn->real_escape_string($_POST['id']);
         $sql = "UPDATE lecturers SET is_active = 0 WHERE id = ?";
         $stmt = $conn->prepare($sql);
@@ -449,14 +449,19 @@ function editLecturer(id, name, departmentId, isActive) {
     document.getElementById('edit_department_id').value = departmentId;
     document.getElementById('edit_is_active').checked = isActive == 1;
 
-    var editModal = new bootstrap.Modal(document.getElementById('editLecturerModal'));
-    editModal.show();
+    var el = document.getElementById('editLecturerModal');
+    if (!el) return console.error('editLecturerModal element missing');
+    if (typeof bootstrap === 'undefined' || !bootstrap.Modal) return console.error('Bootstrap Modal not available');
+    bootstrap.Modal.getOrCreateInstance(el).show();
 }
 
 // Auto-show preview modal if preview data exists
 <?php if (!empty($import_preview)): ?>
-var importPreviewModal = new bootstrap.Modal(document.getElementById('importPreviewModal'));
-importPreviewModal.show();
+var el2 = document.getElementById('importPreviewModal');
+if (el2) {
+    if (typeof bootstrap === 'undefined' || !bootstrap.Modal) return console.error('Bootstrap Modal not available');
+    bootstrap.Modal.getOrCreateInstance(el2).show();
+}
 <?php endif; ?>
 
 // Import functionality

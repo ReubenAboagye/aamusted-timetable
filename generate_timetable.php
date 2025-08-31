@@ -53,8 +53,9 @@ $current_stream_id = $streamManager->getCurrentStreamId();
 $success_message = '';
 $error_message = '';
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
-    if ($_POST['action'] === 'generate_timetable') {
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $action = $_POST['action'] ?? null;
+    if ($action === 'generate_timetable') {
         // Clear existing timetable
         $clear_sql = "DELETE FROM timetable";
         $conn->query($clear_sql);

@@ -18,8 +18,9 @@ $streams_sql = "SELECT id, name, code FROM streams WHERE is_active = 1 ORDER BY 
 $streams_result = $conn->query($streams_sql);
 
 // Handle form submission for adding new class
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
-    if ($_POST['action'] === 'add') {
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $action = $_POST['action'] ?? null;
+    if ($action === 'add') {
         // Current schema: classes has program_id and level_id
         $program_id = $conn->real_escape_string($_POST['program_code'] ?? '');
         $level_id = $conn->real_escape_string($_POST['level_id'] ?? '');
@@ -83,7 +84,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         } else {
             $error_message = "Invalid program or level selected.";
         }
-    } elseif ($_POST['action'] === 'delete' && isset($_POST['id'])) {
+    } elseif ($action === 'delete' && isset($_POST['id'])) {
         $id = $conn->real_escape_string($_POST['id']);
         $sql = "UPDATE classes SET is_active = 0 WHERE id = ?";
         $stmt = $conn->prepare($sql);

@@ -26,8 +26,9 @@ $sql = "SELECT * FROM streams WHERE is_active = 1 ORDER BY name";
 $result = $conn->query($sql);
 
 // Handle form submission for adding new stream
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
-    if ($_POST['action'] === 'add') {
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $action = $_POST['action'] ?? null;
+    if ($action === 'add') {
         $name = $conn->real_escape_string($_POST['name']);
         $period_start = format_time_to_time($conn->real_escape_string($_POST['period_start']));
         $period_end = format_time_to_time($conn->real_escape_string($_POST['period_end']));
@@ -47,7 +48,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         } else {
             $error_message = "Error adding stream: " . $conn->error;
         }
-    } elseif ($_POST['action'] === 'delete' && isset($_POST['id'])) {
+    } elseif ($action === 'delete' && isset($_POST['id'])) {
         $id = $conn->real_escape_string($_POST['id']);
         $sql = "UPDATE streams SET is_active = 0 WHERE id = ?";
         $stmt = $conn->prepare($sql);
@@ -60,7 +61,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $error_message = "Error deleting stream: " . $conn->error;
         }
         $stmt->close();
-    } elseif ($_POST['action'] === 'edit' && isset($_POST['id'])) {
+    } elseif ($action === 'edit' && isset($_POST['id'])) {
         $id = $conn->real_escape_string($_POST['id']);
         $name = $conn->real_escape_string($_POST['name']);
         $period_start = format_time_to_time($conn->real_escape_string($_POST['period_start']));
@@ -317,8 +318,10 @@ include 'includes/footer.php';
 // Auto-open modal if editing
 <?php if ($edit_stream): ?>
 document.addEventListener('DOMContentLoaded', function() {
-    var modal = new bootstrap.Modal(document.getElementById('addStreamModal'));
-    modal.show();
+    var el = document.getElementById('addStreamModal');
+    if (!el) return console.error('addStreamModal element missing');
+    if (typeof bootstrap === 'undefined' || !bootstrap.Modal) return console.error('Bootstrap Modal not available');
+    bootstrap.Modal.getOrCreateInstance(el).show();
 });
 <?php endif; ?>
 

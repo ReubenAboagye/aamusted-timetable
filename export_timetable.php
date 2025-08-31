@@ -1,6 +1,10 @@
 <?php
 include 'connect.php';
 
+// Page title and layout includes
+$pageTitle = 'Export Timetable';
+include 'includes/header.php';
+
 // Get filter parameters
 $class_filter = isset($_GET['class_id']) ? (int)$_GET['class_id'] : 0;
 $day_filter = isset($_GET['day_id']) ? (int)$_GET['day_id'] : 0;
@@ -164,14 +168,8 @@ $total_classes = $conn->query("SELECT COUNT(DISTINCT c.id) as count FROM timetab
 $total_courses = $conn->query("SELECT COUNT(DISTINCT co.id) as count FROM timetable t JOIN class_courses cc ON t.class_course_id = cc.id JOIN courses co ON cc.course_id = co.id")->fetch_assoc()['count'];
 ?>
 
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Export Timetable</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+<!-- Bootstrap CSS and JS are included globally in includes/header.php -->
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         .card {
             box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
@@ -423,6 +421,5 @@ $total_courses = $conn->query("SELECT COUNT(DISTINCT co.id) as count FROM timeta
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>

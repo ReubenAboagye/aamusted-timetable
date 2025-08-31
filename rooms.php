@@ -1,4 +1,17 @@
 <?php
+session_start();
+// Normalize action early to avoid undefined index notices
+$action = $_POST['action'] ?? null;
+// Collect PHP warnings/notices so we can show them in the custom error card
+$php_errors = [];
+set_error_handler(function($errno, $errstr, $errfile, $errline) use (&$php_errors) {
+    // Only capture warnings and notices (you can adjust levels as needed)
+    if (in_array($errno, [E_WARNING, E_NOTICE, E_USER_WARNING, E_USER_NOTICE])) {
+        $php_errors[] = ['errno' => $errno, 'errstr' => $errstr, 'errfile' => $errfile, 'errline' => $errline];
+        return true; // prevent PHP internal handler from also outputting
+    }
+    return false;
+});
 // Handle AJAX requests for existing rooms data FIRST, before any HTML output
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['action'] === 'get_existing_rooms') {
     // Prevent any output before JSON response
@@ -44,6 +57,141 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
     exit;
 }
 
+// Include necessary files for form processing
+include 'connect.php';
+include 'includes/flash.php';
+
+// Handle form submissions BEFORE any HTML output to avoid header issues
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $action = $_POST['action'] ?? null;
+    // Add Building
+    if ($action === 'add_building') {
+        $building_name = trim($conn->real_escape_string($_POST['building_name']));
+        $building_code = trim($conn->real_escape_string($_POST['building_code']));
+        $building_description = trim($conn->real_escape_string($_POST['building_description']));
+        
+        if (empty($building_name) || empty($building_code)) {
+            $_SESSION['error_message'] = "Building name and code are required.";
+        } else {
+            // Check if building name or code already exists
+            $check_sql = "SELECT id FROM buildings WHERE name = ? OR code = ?";
+            $check_stmt = $conn->prepare($check_sql);
+            $check_stmt->bind_param("ss", $building_name, $building_code);
+            $check_stmt->execute();
+            $check_result = $check_stmt->get_result();
+            
+            if ($check_result && $check_result->num_rows > 0) {
+                $_SESSION['error_message'] = "A building with this name or code already exists.";
+                $check_stmt->close();
+            } else {
+                $check_stmt->close();
+                $sql = "INSERT INTO buildings (name, code, description, is_active) VALUES (?, ?, ?, 1)";
+                $stmt = $conn->prepare($sql);
+                $stmt->bind_param("sss", $building_name, $building_code, $building_description);
+                
+                if ($stmt->execute()) {
+                    $stmt->close();
+                    redirect_with_flash('rooms.php', 'success', 'Building added successfully!');
+                } else {
+                    error_log("ERROR: Add Building - Insert failed: " . $stmt->error);
+                    $_SESSION['error_message'] = "Error adding building: " . $stmt->error;
+                }
+                $stmt->close();
+            }
+        }
+        // Redirect to prevent form resubmission
+        header('Location: rooms.php');
+        exit;
+    }
+
+    // Bulk Add Rooms
+    if ($action === 'bulk_add_rooms') {
+        $building_id = (int)$_POST['building_id'];
+        $room_type = trim($conn->real_escape_string($_POST['room_type']));
+        $capacity = (int)$_POST['capacity'];
+        $room_prefix = trim($conn->real_escape_string($_POST['room_prefix']));
+        $room_suffix = trim($conn->real_escape_string($_POST['room_suffix']));
+        $start_number = (int)$_POST['start_number'];
+        $end_number = (int)$_POST['end_number'];
+        
+        if ($building_id <= 0 || empty($room_type) || $capacity <= 0 || empty($room_prefix) || $start_number <= 0 || $end_number <= 0) {
+            $_SESSION['error_message'] = "All required fields must be filled.";
+        } elseif ($start_number > $end_number) {
+            $_SESSION['error_message'] = "Start number must be less than or equal to end number.";
+        } elseif (($end_number - $start_number + 1) > 100) {
+            $_SESSION['error_message'] = "Cannot create more than 100 rooms at once.";
+        } else {
+            // Convert room type to database format
+            $room_type_mappings = [
+                'Classroom' => 'classroom',
+                'Lecture Hall' => 'lecture_hall',
+                'Laboratory' => 'laboratory',
+                'Computer Lab' => 'computer_lab',
+                'Seminar Room' => 'seminar_room',
+                'Auditorium' => 'auditorium'
+            ];
+            $db_room_type = $room_type_mappings[$room_type] ?? 'classroom';
+            
+            $success_count = 0;
+            $error_count = 0;
+            $duplicate_count = 0;
+            
+            // Prepare the insert statement
+            $sql = "INSERT INTO rooms (name, room_type, capacity, building_id, is_active) VALUES (?, ?, ?, ?, 1)";
+            $stmt = $conn->prepare($sql);
+            
+            for ($i = $start_number; $i <= $end_number; $i++) {
+                $room_name = $room_prefix . $i . $room_suffix;
+                
+                // Check if room already exists
+                $check_sql = "SELECT id FROM rooms WHERE name = ? AND building_id = ? AND is_active = 1";
+                $check_stmt = $conn->prepare($check_sql);
+                $check_stmt->bind_param("si", $room_name, $building_id);
+                $check_stmt->execute();
+                $check_result = $check_stmt->get_result();
+                
+                if ($check_result && $check_result->num_rows > 0) {
+                    $duplicate_count++;
+                    $check_stmt->close();
+                    continue;
+                }
+                $check_stmt->close();
+                
+                // Insert the room
+                $stmt->bind_param("ssii", $room_name, $db_room_type, $capacity, $building_id);
+                if ($stmt->execute()) {
+                    $success_count++;
+                } else {
+                    $error_count++;
+                    error_log("ERROR: Bulk Add Rooms - Failed to insert room: $room_name");
+                }
+            }
+            
+            $stmt->close();
+            
+            // Create success message
+            $message_parts = [];
+            if ($success_count > 0) {
+                $message_parts[] = "$success_count rooms created successfully";
+            }
+            if ($duplicate_count > 0) {
+                $message_parts[] = "$duplicate_count rooms skipped (already exist)";
+            }
+            if ($error_count > 0) {
+                $message_parts[] = "$error_count rooms failed to create";
+            }
+            
+            if ($success_count > 0) {
+                redirect_with_flash('rooms.php', 'success', implode(', ', $message_parts) . '.');
+            } else {
+                $_SESSION['error_message'] = implode(', ', $message_parts) . '.';
+            }
+        }
+        // Redirect to prevent form resubmission
+        header('Location: rooms.php');
+        exit;
+    }
+}
 $pageTitle = 'Rooms Management';
 include 'includes/header.php';
 include 'includes/sidebar.php';
@@ -60,8 +208,7 @@ include 'includes/sidebar.php';
  * REMINDER: room_type is stored as VARCHAR in database, validation is enforced at application level
  */
 
-// Database connection
-include 'connect.php';
+// Database connection already included above
 
 // Test room type validation (for debugging)
 if (isset($_GET['test_room_type'])) {
@@ -75,17 +222,18 @@ if (isset($_GET['test_room_type'])) {
 }
 
 // Handle bulk import and form submissions
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    // Normalize action to avoid undefined index notices
+    $action = $_POST['action'] ?? null;
     // Debug: Log all POST data
-    error_log("POST action: " . $_POST['action']);
+    error_log("POST action: " . ($action ?? 'NULL'));
     if (isset($_POST['room_type'])) {
         error_log("Raw room_type from POST: '" . $_POST['room_type'] . "'");
         error_log("Raw room_type length: " . strlen($_POST['room_type']));
         error_log("Raw room_type ASCII: " . implode(',', array_map('ord', str_split($_POST['room_type']))));
     }
-
     // Bulk import
-    if ($_POST['action'] === 'bulk_import' && isset($_POST['import_data'])) {
+    if ($action === 'bulk_import' && isset($_POST['import_data'])) {
         $import_data = json_decode($_POST['import_data'], true);
         if ($import_data) {
             $success_count = 0;
@@ -123,110 +271,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 
                 // Sanitize and trim inputs
                 $name = isset($row['name']) ? trim($conn->real_escape_string($row['name'])) : '';
-                $building = isset($row['building']) ? trim($conn->real_escape_string($row['building'])) : '';
                 $room_type = isset($row['room_type']) ? trim($conn->real_escape_string($row['room_type'])) : 'classroom';
                 $capacity = isset($row['capacity']) ? (int)$row['capacity'] : 30;
+                $building_id = 1; // Default to main building since we only have one
 
-                // Debug: Log the raw CSV data
-                error_log("Bulk Import - Processing row: name='$name', building='$building', room_type='$room_type', capacity=$capacity");
-                error_log("Bulk Import - Raw facilities: '" . (isset($row['facilities']) ? $row['facilities'] : 'NOT_SET') . "'");
-                error_log("Bulk Import - Raw accessibility_features: '" . (isset($row['accessibility_features']) ? $row['accessibility_features'] : 'NOT_SET') . "'");
+                // Debug: Log the processed data
+                error_log("Bulk Import - Processing row: name='$name', room_type='$room_type', capacity=$capacity, building_id=$building_id");
 
-                // Smart parsing for CSV format fields
-                $stream_availability = '["regular"]';
-                if (isset($row['stream_availability']) && !empty($row['stream_availability'])) {
-                    $sa_raw = trim($row['stream_availability']);
-                    if (strpos($sa_raw, ',') !== false) {
-                        $sa_parts = array_map('trim', str_getcsv($sa_raw));
-                        $sa_clean = [];
-                        foreach ($sa_parts as $part) {
-                            $part_lower = strtolower($part);
-                            if (in_array($part_lower, ['regular', 'evening', 'weekend'])) {
-                                $sa_clean[] = $part_lower;
-                            }
-                        }
-                        if (!empty($sa_clean)) {
-                            $stream_availability = json_encode($sa_clean);
-                        }
-                    } else {
-                        $sa_lower = strtolower($sa_raw);
-                        if (in_array($sa_lower, ['regular', 'evening', 'weekend'])) {
-                            $stream_availability = json_encode([$sa_lower]);
-                        }
-                    }
-                }
-
-                $facilities = '[]';
-                if (isset($row['facilities'])) {
-                    $fac_raw = trim($row['facilities']);
-                    error_log("Bulk Import - Trimmed facilities: '$fac_raw'");
-                    if (!empty($fac_raw)) {
-                        if (strpos($fac_raw, ',') !== false) {
-                            $fac_parts = array_map('trim', str_getcsv($fac_raw));
-                            $fac_clean = [];
-                            foreach ($fac_parts as $part) {
-                                $part_lower = strtolower($part);
-                                if (in_array($part_lower, ['projector', 'whiteboard', 'computer', 'audio_system', 'air_conditioning'])) {
-                                    $fac_clean[] = $part_lower;
-                                }
-                            }
-                            if (!empty($fac_clean)) {
-                                $facilities = json_encode($fac_clean);
-                            }
-                        } else {
-                            $fac_lower = strtolower($fac_raw);
-                            if (in_array($fac_lower, ['projector', 'whiteboard', 'computer', 'audio_system', 'air_conditioning'])) {
-                                $facilities = json_encode([$fac_lower]);
-                            }
-                        }
-                    }
-                }
-                error_log("Bulk Import - Final facilities: $facilities");
-
-                $accessibility_features = '[]';
-                if (isset($row['accessibility_features'])) {
-                    $acc_raw = trim($row['accessibility_features']);
-                    error_log("Bulk Import - Trimmed accessibility_features: '$acc_raw'");
-                    if (!empty($acc_raw)) {
-                        if (strtolower($acc_raw) === 'none') {
-                            $accessibility_features = '[]';
-                        } else {
-                            if (strpos($acc_raw, ',') !== false) {
-                                $acc_parts = array_map('trim', str_getcsv($acc_raw));
-                                $acc_clean = [];
-                                foreach ($acc_parts as $part) {
-                                    $part_lower = strtolower($part);
-                                    if (in_array($part_lower, ['wheelchair_access', 'elevator', 'ramp'])) {
-                                        $acc_clean[] = $part_lower;
-                                    }
-                                }
-                                if (!empty($acc_clean)) {
-                                    $accessibility_features = json_encode($acc_clean);
-                                }
-                            } else {
-                                $acc_lower = strtolower($acc_raw);
-                                if (in_array($acc_lower, ['wheelchair_access', 'elevator', 'ramp'])) {
-                                    $accessibility_features = json_encode([$acc_lower]);
-                                }
-                            }
-                        }
-                    }
-                }
-                error_log("Bulk Import - Final accessibility_features: $accessibility_features");
                 $is_active = isset($row['is_active']) ? (int)(strtolower(trim($row['is_active'])) === '1' || strtolower(trim($row['is_active'])) === 'true') : 1;
 
-                if ($name === '' || $building === '') {
-                    error_log("ERROR: Bulk Import - Missing name or building");
+                if ($name === '') {
+                    error_log("ERROR: Bulk Import - Missing name");
                     $error_count++;
                     continue;
-                }
-
-                // Validate JSON fields
-                foreach (['stream_availability', 'facilities', 'accessibility_features'] as $json_field) {
-                    if (empty($$json_field) || !json_decode($$json_field, true)) {
-                        error_log("ERROR: Bulk Import - Invalid JSON in $json_field: " . $$json_field);
-                        $$json_field = ($json_field === 'stream_availability') ? '["regular"]' : '[]';
-                    }
                 }
 
                 // Convert and validate room_type
@@ -283,7 +340,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     continue;
                 }
 
-                $sql = "INSERT INTO rooms (name, building, room_type, capacity, stream_availability, facilities, accessibility_features, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+                $sql = "INSERT INTO rooms (name, room_type, capacity, building_id, is_active) VALUES (?, ?, ?, ?, ?)";
                 $stmt = $conn->prepare($sql);
                 if (!$stmt) {
                     error_log("ERROR: Bulk Import - Prepare failed: " . $conn->error);
@@ -291,14 +348,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     continue;
                 }
 
-                error_log("Bulk Import - Binding: name='$name', building='$building', room_type='$db_room_type', capacity=$capacity, stream_availability='$stream_availability', facilities='$facilities', accessibility_features='$accessibility_features', is_active=$is_active");
+                error_log("Bulk Import - Binding: name='$name', room_type='$db_room_type', capacity=$capacity, building_id=$building_id, is_active=$is_active");
 
-                $stmt->bind_param("ssissssi", $name, $building, $db_room_type, $capacity, $stream_availability, $facilities, $accessibility_features, $is_active);
+                $stmt->bind_param("ssiii", $name, $db_room_type, $capacity, $building_id, $is_active);
                 if ($stmt->execute()) {
                     $success_count++;
                 } else {
                     error_log("ERROR: Bulk Import - Insert failed: " . $stmt->error);
-                    error_log("ERROR: Bulk Import - Failed values: name='$name', building='$building', room_type='$db_room_type', capacity=$capacity, stream_availability='$stream_availability', facilities='$facilities', accessibility_features='$accessibility_features', is_active=$is_active");
+                    error_log("ERROR: Bulk Import - Failed values: name='$name', room_type='$db_room_type', capacity=$capacity, building_id=$building_id, is_active=$is_active");
                     $error_count++;
                 }
                 $stmt->close();
@@ -321,7 +378,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         }
 
     // Single add
-    } elseif ($_POST['action'] === 'add') {
+    } elseif ($action === 'add') {
         // Debug: Log all POST data
         error_log("Single Add - POST data received: " . json_encode($_POST));
         error_log("Single Add - Raw room_type value: '" . $_POST['room_type'] . "'");
@@ -329,7 +386,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         error_log("Single Add - Raw room_type bytes: " . implode(',', array_map('ord', str_split($_POST['room_type']))));
         
         $name = trim($conn->real_escape_string($_POST['name']));
-        $building = trim($conn->real_escape_string($_POST['building']));
+        $building_id = (int)$_POST['building_id'];
         $room_type = trim($conn->real_escape_string($_POST['room_type']));
         $valid_form_room_types = ['Classroom', 'Lecture Hall', 'Laboratory', 'Computer Lab', 'Seminar Room', 'Auditorium'];
 
@@ -343,18 +400,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $error_message = "Invalid room type selected. Please choose a valid room type from the dropdown.";
         } else {
             $capacity = (int)$_POST['capacity'];
-            $stream_availability = isset($_POST['stream_availability']) ? json_encode($_POST['stream_availability']) : '["regular"]';
-            $facilities = isset($_POST['facilities']) ? json_encode($_POST['facilities']) : '[]';
-            $accessibility_features = isset($_POST['accessibility_features']) ? json_encode($_POST['accessibility_features']) : '[]';
             $is_active = isset($_POST['is_active']) ? 1 : 0;
-
-            // Validate JSON fields
-            foreach (['stream_availability', 'facilities', 'accessibility_features'] as $json_field) {
-                if (empty($$json_field) || !json_decode($$json_field, true)) {
-                    error_log("ERROR: Single Add - Invalid JSON in $json_field: " . $$json_field);
-                    $$json_field = ($json_field === 'stream_availability') ? '["regular"]' : '[]';
-                }
-            }
 
                         // Convert room type to database format (hardcoded mapping)
             $room_type_mappings = [
@@ -406,9 +452,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     error_log("  room_type length: " . strlen($db_room_type));
                     error_log("  room_type bytes: " . implode(',', array_map('ord', str_split($db_room_type))));
                     error_log("  capacity: $capacity");
-                    error_log("  stream_availability: '$stream_availability'");
-                    error_log("  facilities: '$facilities'");
-                    error_log("  accessibility_features: '$accessibility_features'");
+
+
                     error_log("  is_active: $is_active");
                     
                     // Final validation - ensure room_type matches database ENUM exactly
@@ -419,18 +464,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     } else {
                         error_log("SUCCESS: Single Add - Final validation passed for room_type: '$db_room_type'");
                         
-                                                $sql = "INSERT INTO rooms (name, building, room_type, capacity, stream_availability, facilities, accessibility_features, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+                                                $sql = "INSERT INTO rooms (name, room_type, capacity, building_id, is_active) VALUES (?, ?, ?, ?, ?)";
                         $stmt = $conn->prepare($sql);
                         if ($stmt) {
-                            $stmt->bind_param("ssissssi", $name, $building, $db_room_type, $capacity, $stream_availability, $facilities, $accessibility_features, $is_active);
-                            error_log("Single Add - Binding: name='$name', building='$building', room_type='$db_room_type', capacity=$capacity, stream_availability='$stream_availability', facilities='$facilities', accessibility_features='$accessibility_features', is_active=$is_active");
+                            $building_id = 1; // Default to main building
+                            $stmt->bind_param("ssiii", $name, $db_room_type, $capacity, $building_id, $is_active);
+                            error_log("Single Add - Binding: name='$name', room_type='$db_room_type', capacity=$capacity, building_id=$building_id, is_active=$is_active");
 
                             if ($stmt->execute()) {
                                 $stmt->close();
                                 redirect_with_flash('rooms.php', 'success', 'Room added successfully!');
                             } else {
                                 error_log("ERROR: Single Add - Insert failed: " . $stmt->error);
-                                error_log("ERROR: Single Add - Failed values: name='$name', building='$building', room_type='$db_room_type', capacity=$capacity, stream_availability='$stream_availability', facilities='$facilities', accessibility_features='$accessibility_features', is_active=$is_active");
+                                error_log("ERROR: Single Add - Failed values: name='$name', room_type='$db_room_type', capacity=$capacity, building_id=$building_id, is_active=$is_active");
                                 $error_message = "Error adding room: " . $stmt->error;
                             }
                             $stmt->close();
@@ -443,10 +489,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         }
 
     // Edit
-    } elseif ($_POST['action'] === 'edit' && isset($_POST['id'])) {
+    } elseif ($action === 'edit' && isset($_POST['id'])) {
         $id = (int)$_POST['id'];
         $name = trim($conn->real_escape_string($_POST['name']));
-        $building = trim($conn->real_escape_string($_POST['building']));
+        $building_id = (int)$_POST['building_id'];
         $room_type = trim($conn->real_escape_string($_POST['room_type']));
         $valid_form_room_types = ['Classroom', 'Lecture Hall', 'Laboratory', 'Computer Lab', 'Seminar Room', 'Auditorium'];
 
@@ -455,18 +501,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $error_message = "Invalid room type selected. Please choose a valid room type from the dropdown.";
         } else {
             $capacity = (int)$_POST['capacity'];
-            $stream_availability = isset($_POST['stream_availability']) ? json_encode($_POST['stream_availability']) : '["regular"]';
-            $facilities = isset($_POST['facilities']) ? json_encode($_POST['facilities']) : '[]';
-            $accessibility_features = isset($_POST['accessibility_features']) ? json_encode($_POST['accessibility_features']) : '[]';
+
             $is_active = isset($_POST['is_active']) ? 1 : 0;
 
-            // Validate JSON fields
-            foreach (['stream_availability', 'facilities', 'accessibility_features'] as $json_field) {
-                if (empty($$json_field) || !json_decode($$json_field, true)) {
-                    error_log("ERROR: Edit - Invalid JSON in $json_field: " . $$json_field);
-                    $$json_field = ($json_field === 'stream_availability') ? '["regular"]' : '[]';
-                }
-            }
+
 
                         // Convert room type to database format (hardcoded mapping)
             $room_type_mappings = [
@@ -500,18 +538,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     $check_stmt->close();
                 } else {
                     $check_stmt->close();
-                    $sql = "UPDATE rooms SET name = ?, building = ?, room_type = ?, capacity = ?, stream_availability = ?, facilities = ?, accessibility_features = ?, is_active = ? WHERE id = ?";
+                    $sql = "UPDATE rooms SET name = ?, room_type = ?, capacity = ?, building_id = ?, is_active = ? WHERE id = ?";
                     $stmt = $conn->prepare($sql);
                     if ($stmt) {
-                        $stmt->bind_param("ssisssii", $name, $building, $db_room_type, $capacity, $stream_availability, $facilities, $accessibility_features, $is_active, $id);
-                        error_log("Edit - Binding: name='$name', building='$building', room_type='$db_room_type', capacity=$capacity, stream_availability='$stream_availability', facilities='$facilities', accessibility_features='$accessibility_features', is_active=$is_active, id=$id");
+                        $building_id = 1; // Default to main building
+                        $stmt->bind_param("ssiiii", $name, $db_room_type, $capacity, $building_id, $is_active, $id);
+                        error_log("Edit - Binding: name='$name', room_type='$db_room_type', capacity=$capacity, building_id=$building_id, is_active=$is_active, id=$id");
 
                         if ($stmt->execute()) {
                             $stmt->close();
                             redirect_with_flash('rooms.php', 'success', 'Room updated successfully!');
                         } else {
                             error_log("ERROR: Edit - Update failed: " . $stmt->error);
-                            error_log("ERROR: Edit - Failed values: name='$name', building='$building', room_type='$db_room_type', capacity=$capacity, stream_availability='$stream_availability', facilities='$facilities', accessibility_features='$accessibility_features', is_active=$is_active, id=$id");
+                            error_log("ERROR: Edit - Failed values: name='$name', room_type='$db_room_type', capacity=$capacity, building_id=$building_id, is_active=$is_active, id=$id");
                             $error_message = "Error updating room: " . $stmt->error;
                         }
                         $stmt->close();
@@ -523,7 +562,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         }
 
     // Bulk Edit
-    } elseif ($_POST['action'] === 'bulk_edit' && isset($_POST['room_ids'])) {
+    } elseif ($action === 'bulk_edit' && isset($_POST['room_ids'])) {
         $room_ids = json_decode($_POST['room_ids'], true);
         if (!$room_ids || !is_array($room_ids)) {
             $error_message = "Invalid room selection.";
@@ -571,29 +610,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     }
                 }
                 
-                // Stream Availability
-                if (isset($_POST['stream_availability']) && is_array($_POST['stream_availability'])) {
-                    $stream_availability = json_encode($_POST['stream_availability']);
-                    $update_fields[] = "stream_availability = ?";
-                    $update_values[] = $stream_availability;
-                    $update_types .= "s";
-                }
-                
-                // Facilities
-                if (isset($_POST['facilities']) && is_array($_POST['facilities'])) {
-                    $facilities = json_encode($_POST['facilities']);
-                    $update_fields[] = "facilities = ?";
-                    $update_values[] = $facilities;
-                    $update_types .= "s";
-                }
-                
-                // Accessibility Features
-                if (isset($_POST['accessibility_features']) && is_array($_POST['accessibility_features'])) {
-                    $accessibility_features = json_encode($_POST['accessibility_features']);
-                    $update_fields[] = "accessibility_features = ?";
-                    $update_values[] = $accessibility_features;
-                    $update_types .= "s";
-                }
+
                 
                 // Status
                 if (isset($_POST['is_active'])) {
@@ -638,7 +655,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         }
     
     // Delete (soft delete: set is_active = 0)
-    } elseif ($_POST['action'] === 'delete' && isset($_POST['id'])) {
+    } elseif ($action === 'delete' && isset($_POST['id'])) {
         $id = (int)$_POST['id'];
         $sql = "UPDATE rooms SET is_active = 0 WHERE id = ?";
         $stmt = $conn->prepare($sql);
@@ -651,12 +668,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $error_message = "Error deleting room: " . $conn->error;
         }
         $stmt->close();
-    }
+    
+
 }
 
-// Fetch rooms with all fields from schema
-$sql = "SELECT id, name, building, room_type, capacity, stream_availability, facilities, accessibility_features, is_active, created_at, updated_at FROM rooms WHERE is_active = 1 ORDER BY building, name";
+// Fetch rooms with all fields from current schema, joining with buildings table
+$sql = "SELECT r.id, r.name, b.name as building_name, r.room_type, r.capacity, r.is_active, r.created_at, r.updated_at, r.building_id 
+        FROM rooms r 
+        LEFT JOIN buildings b ON r.building_id = b.id 
+        WHERE r.is_active = 1 
+        ORDER BY b.name, r.name";
 $result = $conn->query($sql);
+
+// Fetch buildings for dropdown
+$buildings_sql = "SELECT id, name FROM buildings WHERE is_active = 1 ORDER BY name";
+$buildings_result = $conn->query($buildings_sql);
+
+}
 ?>
 
 <div class="main-content" id="mainContent">
@@ -666,6 +694,9 @@ $result = $conn->query($sql);
             <div class="d-flex gap-2">
                 <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#importModal">
                     <i class="fas fa-upload me-2"></i>Import
+                </button>
+                <button class="btn btn-info" data-bs-toggle="modal" data-bs-target="#bulkAddRoomsModal">
+                    <i class="fas fa-layer-group me-2"></i>Bulk Add Rooms
                 </button>
                 <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addRoomModal">
                     <i class="fas fa-plus me-2"></i>Add New Room
@@ -680,9 +711,29 @@ $result = $conn->query($sql);
             </div>
         <?php endif; ?>
         
-        <?php if (isset($error_message)): ?>
+        <?php if (isset($error_message) || isset($_SESSION['error_message']) || (!empty($php_errors))): ?>
             <div class="alert alert-danger alert-dismissible fade show m-3" role="alert">
-                <?php echo htmlspecialchars($error_message); ?>
+                <?php 
+                // Primary error messages
+                if (isset($error_message)) {
+                    echo htmlspecialchars($error_message);
+                } elseif (isset($_SESSION['error_message'])) {
+                    echo htmlspecialchars($_SESSION['error_message']);
+                    unset($_SESSION['error_message']); // Clear after displaying
+                }
+
+                // Append any captured PHP warnings/notices
+                if (!empty($php_errors)) {
+                    echo '<hr style="margin:8px 0;">';
+                    echo '<strong>System notices:</strong><br />';
+                    foreach ($php_errors as $pe) {
+                        $msg = htmlspecialchars($pe['errstr']);
+                        $file = htmlspecialchars($pe['errfile']);
+                        $line = (int)$pe['errline'];
+                        echo "<div style=\"font-family:monospace; font-size:0.95em; margin-top:4px;\">" . $msg . " <small class=\"text-muted\">(" . $file . ":" . $line . ")</small></div>";
+                    }
+                }
+                ?>
                 <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
             </div>
         <?php endif; ?>
@@ -724,9 +775,9 @@ $result = $conn->query($sql);
                                     <span class="badge <?php echo $type_badge; ?>"><?php echo htmlspecialchars($display_type); ?></span>
                                 </td>
                                 <td><span class="badge bg-dark"><?php echo htmlspecialchars($row['capacity']); ?> students</span></td>
-                                <td><?php echo htmlspecialchars($row['building']); ?></td>
+                                <td><?php echo htmlspecialchars($row['building_name']); ?></td>
                                 <td>
-                                    <button class="btn btn-sm btn-outline-primary me-1" onclick="editRoom(<?php echo $row['id']; ?>, <?php echo json_encode($row['name']); ?>, <?php echo json_encode($row['building']); ?>, <?php echo json_encode(ucwords(str_replace('_', ' ', $row['room_type']))); ?>, <?php echo (int)$row['capacity']; ?>, <?php echo json_encode($row['stream_availability']); ?>, <?php echo json_encode($row['facilities']); ?>, <?php echo json_encode($row['accessibility_features']); ?>, <?php echo $row['is_active']; ?>)">
+                                    <button class="btn btn-sm btn-outline-primary me-1" onclick="editRoom(<?php echo $row['id']; ?>, <?php echo json_encode($row['name']); ?>, <?php echo $row['building_id']; ?>, <?php echo json_encode(ucwords(str_replace('_', ' ', $row['room_type']))); ?>, <?php echo (int)$row['capacity']; ?>, <?php echo $row['is_active']; ?>)">
                                         <i class="fas fa-edit"></i>
                                     </button>
                                     <form method="POST" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this room?')">
@@ -774,8 +825,23 @@ $result = $conn->query($sql);
                         </div>
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label for="building" class="form-label">Building *</label>
-                                <input type="text" class="form-control" id="building" name="building" required>
+                                <label for="building_id" class="form-label">Building *</label>
+                                <select class="form-select" id="building_id" name="building_id" required>
+                                    <option value="">Select Building</option>
+                                    <?php 
+                                    if ($buildings_result && $buildings_result->num_rows > 0) {
+                                        mysqli_data_seek($buildings_result, 0); // Reset pointer
+                                        while ($building = $buildings_result->fetch_assoc()) {
+                                            echo '<option value="' . $building['id'] . '">' . htmlspecialchars($building['name']) . '</option>';
+                                        }
+                                    }
+                                    ?>
+                                </select>
+                                <small class="text-muted">
+                                    <a href="#" onclick="showAddBuildingModal()" class="text-decoration-none">
+                                        <i class="fas fa-plus-circle me-1"></i>Add New Building
+                                    </a>
+                                </small>
                             </div>
                         </div>
                     </div>
@@ -806,89 +872,10 @@ $result = $conn->query($sql);
                         </div>
                     </div>
                     
-                    <div class="mb-3">
-                        <label class="form-label">Stream Availability *</label>
-                        <div class="row">
-                            <div class="col-md-4">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" name="stream_availability[]" value="regular" id="sa_regular" checked>
-                                    <label class="form-check-label" for="sa_regular">Regular</label>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" name="stream_availability[]" value="evening" id="sa_evening">
-                                    <label class="form-check-label" for="sa_evening">Evening</label>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" name="stream_availability[]" value="weekend" id="sa_weekend">
-                                    <label class="form-check-label" for="sa_weekend">Weekend</label>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
                     
-                    <div class="mb-3">
-                        <label class="form-label">Facilities</label>
-                        <div class="row">
-                            <div class="col-md-4">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" name="facilities[]" value="projector" id="fac_projector">
-                                    <label class="form-check-label" for="fac_projector">Projector</label>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" name="facilities[]" value="whiteboard" id="fac_whiteboard">
-                                    <label class="form-check-label" for="fac_whiteboard">Whiteboard</label>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" name="facilities[]" value="computer" id="fac_computer">
-                                    <label class="form-check-label" for="fac_computer">Computer</label>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" name="facilities[]" value="audio_system" id="fac_audio">
-                                    <label class="form-check-label" for="fac_audio">Audio System</label>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" name="facilities[]" value="air_conditioning" id="fac_ac">
-                                    <label class="form-check-label" for="fac_ac">Air Conditioning</label>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+
                     
-                    <div class="mb-3">
-                        <label class="form-label">Accessibility Features</label>
-                        <div class="row">
-                            <div class="col-md-4">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" name="accessibility_features[]" value="wheelchair_access" id="acc_wheelchair">
-                                    <label class="form-check-label" for="acc_wheelchair">Wheelchair Access</label>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" name="accessibility_features[]" value="elevator" id="acc_elevator">
-                                    <label class="form-check-label" for="acc_elevator">Elevator</label>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" name="accessibility_features[]" value="ramp" id="acc_ramp">
-                                    <label class="form-check-label" for="acc_ramp">Ramp</label>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+
                     
                     <div class="mb-3">
                         <div class="form-check">
@@ -929,8 +916,23 @@ $result = $conn->query($sql);
                         </div>
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label for="edit_building" class="form-label">Building *</label>
-                                <input type="text" class="form-control" id="edit_building" name="building" required>
+                                <label for="edit_building_id" class="form-label">Building *</label>
+                                <select class="form-select" id="edit_building_id" name="building_id" required>
+                                    <option value="">Select Building</option>
+                                    <?php 
+                                    if ($buildings_result && $buildings_result->num_rows > 0) {
+                                        mysqli_data_seek($buildings_result, 0); // Reset pointer
+                                        while ($building = $buildings_result->fetch_assoc()) {
+                                            echo '<option value="' . $building['id'] . '">' . htmlspecialchars($building['name']) . '</option>';
+                                        }
+                                    }
+                                    ?>
+                                </select>
+                                <small class="text-muted">
+                                    <a href="#" onclick="showAddBuildingModal()" class="text-decoration-none">
+                                        <i class="fas fa-plus-circle me-1"></i>Add New Building
+                                    </a>
+                                </small>
                             </div>
                         </div>
                     </div>
@@ -961,89 +963,9 @@ $result = $conn->query($sql);
                         </div>
                     </div>
                     
-                    <div class="mb-3">
-                        <label class="form-label">Stream Availability *</label>
-                        <div class="row">
-                            <div class="col-md-4">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" name="stream_availability[]" value="regular" id="edit_sa_regular">
-                                    <label class="form-check-label" for="edit_sa_regular">Regular</label>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" name="stream_availability[]" value="evening" id="edit_sa_evening">
-                                    <label class="form-check-label" for="edit_sa_evening">Evening</label>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" name="stream_availability[]" value="weekend" id="edit_sa_weekend">
-                                    <label class="form-check-label" for="edit_sa_weekend">Weekend</label>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+
                     
-                    <div class="mb-3">
-                        <label class="form-label">Facilities</label>
-                        <div class="row">
-                            <div class="col-md-4">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" name="facilities[]" value="projector" id="edit_fac_projector">
-                                    <label class="form-check-label" for="edit_fac_projector">Projector</label>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" name="facilities[]" value="whiteboard" id="edit_fac_whiteboard">
-                                    <label class="form-check-label" for="edit_fac_whiteboard">Whiteboard</label>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" name="facilities[]" value="computer" id="edit_fac_computer">
-                                    <label class="form-check-label" for="edit_fac_computer">Computer</label>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" name="facilities[]" value="audio_system" id="edit_fac_audio">
-                                    <label class="form-check-label" for="edit_fac_audio">Audio System</label>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" name="facilities[]" value="air_conditioning" id="edit_fac_ac">
-                                    <label class="form-check-label" for="edit_fac_ac">Air Conditioning</label>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="mb-3">
-                        <label class="form-label">Accessibility Features</label>
-                        <div class="row">
-                            <div class="col-md-4">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" name="accessibility_features[]" value="wheelchair_access" id="edit_acc_wheelchair">
-                                    <label class="form-check-label" for="edit_acc_wheelchair">Wheelchair Access</label>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" name="accessibility_features[]" value="elevator" id="edit_acc_elevator">
-                                    <label class="form-check-label" for="edit_acc_elevator">Elevator</label>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" name="accessibility_features[]" value="ramp" id="edit_acc_ramp">
-                                    <label class="form-check-label" for="edit_acc_ramp">Ramp</label>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+
                     
                     <div class="mb-3">
                         <div class="form-check">
@@ -1082,11 +1004,9 @@ $result = $conn->query($sql);
                     <div class="upload-area" id="uploadArea" style="border: 2px dashed #ccc; border-radius: 8px; padding: 40px; text-align: center; background: #f8f9fa; cursor: pointer;">
                         <i class="fas fa-cloud-upload-alt fa-2x text-muted mb-3"></i>
                         <p class="mb-2">Drop CSV file here or <strong>click to browse</strong></p>
-                        <small class="text-muted">Supported format: CSV with headers: name,building,room_type,capacity,stream_availability,facilities,accessibility_features,is_active</small>
+                        <small class="text-muted">Supported format: CSV with headers: name,room_type,capacity,is_active</small>
                         <br><small class="text-muted">Room types: classroom, lecture_hall, laboratory, computer_lab, seminar_room, auditorium</small>
-                        <br><small class="text-muted">Stream availability: "regular, evening, weekend" (comma-separated)</small>
-                        <br><small class="text-muted">Facilities: "projector, whiteboard" (comma-separated)</small>
-                        <br><small class="text-muted">Accessibility: "wheelchair_access, elevator, ramp" or "none" (comma-separated)</small>
+                        <br><small class="text-muted">All rooms will be assigned to the main building automatically</small>
                     </div>
                     <input type="file" class="form-control d-none" id="csvFile" accept=".csv">
                 </div>
@@ -1102,9 +1022,8 @@ $result = $conn->query($sql);
                                     <th>Building</th>
                                     <th>Type</th>
                                     <th>Capacity</th>
-                                    <th>Stream Availability</th>
-                                    <th>Facilities</th>
-                                    <th>Accessibility</th>
+
+
                                     <th>Status</th>
                                     <th>Validation</th>
                                 </tr>
@@ -1173,101 +1092,8 @@ $result = $conn->query($sql);
                         </div>
                     </div>
                     
-                    <div class="mb-3">
-                        <label class="form-label">Stream Availability</label>
-                        <div class="form-check">
-                            <input class="form-check-input" type="checkbox" id="bulk_edit_stream_availability_check">
-                            <label class="form-check-label" for="bulk_edit_stream_availability_check">Update stream availability</label>
-                        </div>
-                        <div class="row mt-2">
-                            <div class="col-md-4">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" name="stream_availability[]" value="regular" id="bulk_sa_regular" disabled>
-                                    <label class="form-check-label" for="bulk_sa_regular">Regular</label>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" name="stream_availability[]" value="evening" id="bulk_sa_evening" disabled>
-                                    <label class="form-check-label" for="bulk_sa_evening">Evening</label>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" name="stream_availability[]" value="weekend" id="bulk_sa_weekend" disabled>
-                                    <label class="form-check-label" for="bulk_sa_weekend">Weekend</label>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
                     
-                    <div class="mb-3">
-                        <label class="form-label">Facilities</label>
-                        <div class="form-check">
-                            <input class="form-check-input" type="checkbox" id="bulk_edit_facilities_check">
-                            <label class="form-check-label" for="bulk_edit_facilities_check">Update facilities</label>
-                        </div>
-                        <div class="row mt-2">
-                            <div class="col-md-4">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" name="facilities[]" value="projector" id="bulk_fac_projector" disabled>
-                                    <label class="form-check-label" for="bulk_fac_projector">Projector</label>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" name="facilities[]" value="whiteboard" id="bulk_fac_whiteboard" disabled>
-                                    <label class="form-check-label" for="bulk_fac_whiteboard">Whiteboard</label>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" name="facilities[]" value="computer" id="bulk_fac_computer" disabled>
-                                    <label class="form-check-label" for="bulk_fac_computer">Computer</label>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" name="facilities[]" value="audio_system" id="bulk_fac_audio" disabled>
-                                    <label class="form-check-label" for="bulk_fac_audio">Audio System</label>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" name="facilities[]" value="air_conditioning" id="bulk_fac_ac" disabled>
-                                    <label class="form-check-label" for="bulk_fac_ac">Air Conditioning</label>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="mb-3">
-                        <label class="form-label">Accessibility Features</label>
-                        <div class="form-check">
-                            <input class="form-check-input" type="checkbox" id="bulk_edit_accessibility_check">
-                            <label class="form-check-label" for="bulk_edit_accessibility_check">Update accessibility features</label>
-                        </div>
-                        <div class="row mt-2">
-                            <div class="col-md-4">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" name="accessibility_features[]" value="wheelchair_access" id="bulk_acc_wheelchair" disabled>
-                                    <label class="form-check-label" for="bulk_acc_wheelchair">Wheelchair Access</label>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" name="accessibility_features[]" value="elevator" id="bulk_acc_elevator" disabled>
-                                    <label class="form-check-label" for="bulk_acc_elevator">Elevator</label>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" name="accessibility_features[]" value="ramp" id="bulk_acc_ramp" disabled>
-                                    <label class="form-check-label" for="bulk_acc_ramp">Ramp</label>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+
                     
                     <div class="mb-3">
                         <label class="form-label">Status</label>
@@ -1280,12 +1106,149 @@ $result = $conn->query($sql);
                             <label class="form-check-label" for="bulk_edit_is_active">
                                 Room Available
                             </label>
+                                </div>
+                            </div>
+                                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-warning">Update Selected Rooms</button>
+                            </div>
+            </form>
+                                </div>
+                            </div>
                         </div>
+
+<!-- Add Building Modal -->
+<div class="modal fade" id="addBuildingModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Add New Building</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+            <form method="POST">
+                <div class="modal-body">
+                    <input type="hidden" name="action" value="add_building">
+                    
+                    <div class="mb-3">
+                        <label for="building_name" class="form-label">Building Name *</label>
+                        <input type="text" class="form-control" id="building_name" name="building_name" required>
+                        </div>
+                    
+                    <div class="mb-3">
+                        <label for="building_code" class="form-label">Building Code *</label>
+                        <input type="text" class="form-control" id="building_code" name="building_code" required>
+                        <small class="text-muted">Short code for the building (e.g., "MAIN", "SCI", "ENG")</small>
+                                </div>
+                    
+                    <div class="mb-3">
+                        <label for="building_description" class="form-label">Description</label>
+                        <textarea class="form-control" id="building_description" name="building_description" rows="2"></textarea>
+                            </div>
+                                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Add Building</button>
+                            </div>
+            </form>
+                                </div>
+                            </div>
+                                </div>
+
+<!-- Bulk Add Rooms Modal -->
+<div class="modal fade" id="bulkAddRoomsModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Bulk Add Rooms</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                            </div>
+            <form method="POST">
+                <div class="modal-body">
+                    <input type="hidden" name="action" value="bulk_add_rooms">
+                    
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="bulk_building_id" class="form-label">Building *</label>
+                                <select class="form-select" id="bulk_building_id" name="building_id" required>
+                                    <option value="">Select Building</option>
+                                    <?php
+                                    if ($buildings_result && $buildings_result->num_rows > 0) {
+                                        mysqli_data_seek($buildings_result, 0); // Reset pointer
+                                        while ($building = $buildings_result->fetch_assoc()) {
+                                            echo '<option value="' . $building['id'] . '" data-code="' . htmlspecialchars($building['code']) . '">' . htmlspecialchars($building['name']) . '</option>';
+                                        }
+                                    }
+                                    ?>
+                                </select>
+                                </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="bulk_room_type" class="form-label">Room Type *</label>
+                                <select class="form-select" id="bulk_room_type" name="room_type" required>
+                                    <option value="">Select Type *</option>
+                                    <option value="Classroom">Classroom</option>
+                                    <option value="Lecture Hall">Lecture Hall</option>
+                                    <option value="Laboratory">Laboratory</option>
+                                    <option value="Computer Lab">Computer Lab</option>
+                                    <option value="Seminar Room">Seminar Room</option>
+                                    <option value="Auditorium">Auditorium</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-4">
+                    <div class="mb-3">
+                                <label for="bulk_capacity" class="form-label">Capacity *</label>
+                                <input type="number" class="form-control" id="bulk_capacity" name="capacity" min="1" max="500" required>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                            <div class="mb-3">
+                                <label for="room_prefix" class="form-label">Room Prefix *</label>
+                                <input type="text" class="form-control" id="room_prefix" name="room_prefix" required readonly>
+                                <small class="text-muted">Automatically set to selected building's code</small>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                            <div class="mb-3">
+                                <label for="room_suffix" class="form-label">Room Suffix</label>
+                                <input type="text" class="form-control" id="room_suffix" name="room_suffix" placeholder="e.g., A, B">
+                                <small class="text-muted">Optional text after the number</small>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6">
+                    <div class="mb-3">
+                                <label for="start_number" class="form-label">Start Number *</label>
+                                <input type="number" class="form-control" id="start_number" name="start_number" min="1" required>
+                                <small class="text-muted">Starting room number</small>
+                        </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="end_number" class="form-label">End Number *</label>
+                                <input type="number" class="form-control" id="end_number" name="end_number" min="1" required>
+                                <small class="text-muted">Ending room number</small>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle me-2"></i>
+                        <strong>Room Names Preview:</strong><br>
+                        <span id="bulk_preview">Select a building and enter room range to see preview</span>
                     </div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="submit" class="btn btn-warning">Update Selected Rooms</button>
+                    <button type="submit" class="btn btn-primary">Create Rooms</button>
                 </div>
             </form>
         </div>
@@ -1314,12 +1277,47 @@ include 'includes/footer.php';
 ?>
 
 <script>
-function editRoom(id, name, building, roomType, capacity, sessionAvailability, facilities, accessibilityFeatures, isActive) {
+// Debug: Check if Bootstrap is loading
+console.log('Rooms page loading...');
+console.log('Bootstrap available:', typeof bootstrap !== 'undefined');
+if (typeof bootstrap !== 'undefined') {
+    console.log('Bootstrap Modal available:', typeof bootstrap.Modal !== 'undefined');
+}
+
+// Ensure Bootstrap is available before using modal functions
+function ensureBootstrapLoaded() {
+    if (typeof bootstrap === 'undefined' || !bootstrap.Modal) {
+        console.error('Bootstrap Modal not available');
+        return false;
+    }
+    return true;
+}
+
+// Wait for Bootstrap to be available (with timeout)
+function waitForBootstrap(callback, maxWait = 5000) {
+    const startTime = Date.now();
+
+    function checkBootstrap() {
+        if (ensureBootstrapLoaded()) {
+            callback();
+        } else if (Date.now() - startTime < maxWait) {
+            setTimeout(checkBootstrap, 50);
+        } else {
+            console.error('Bootstrap failed to load within timeout');
+        }
+    }
+
+    checkBootstrap();
+}
+
+function editRoom(id, name, buildingId, roomType, capacity, isActive) {
+    if (!ensureBootstrapLoaded()) return;
+
     document.getElementById('edit_id').value = id;
     document.getElementById('edit_name').value = name;
-    document.getElementById('edit_building').value = building;
+    document.getElementById('edit_building_id').value = buildingId;
     document.getElementById('edit_capacity').value = capacity;
-    
+
     // Set room type (convert database room_type to form value)
     const editRoomType = document.getElementById('edit_room_type');
     const roomTypeMappings = {
@@ -1331,57 +1329,21 @@ function editRoom(id, name, building, roomType, capacity, sessionAvailability, f
         'auditorium': 'Auditorium'
     };
     editRoomType.value = roomTypeMappings[roomType] || 'Classroom';
-    
-    // Set stream availability checkboxes
-    const saCheckboxes = document.querySelectorAll('#editRoomModal input[name="stream_availability[]"]');
-    saCheckboxes.forEach(checkbox => checkbox.checked = false);
-    try {
-        const saData = JSON.parse(sessionAvailability);
-        if (Array.isArray(saData)) {
-            saData.forEach(avail => {
-                const checkbox = document.querySelector(`#editRoomModal input[value="${avail}"]`);
-                if (checkbox) checkbox.checked = true;
-            });
-        }
-    } catch (e) {
-        console.error('Error parsing stream_availability:', e);
-    }
-    
-    // Set facilities checkboxes
-    const facCheckboxes = document.querySelectorAll('#editRoomModal input[name="facilities[]"]');
-    facCheckboxes.forEach(checkbox => checkbox.checked = false);
-    try {
-        const facData = JSON.parse(facilities);
-        if (Array.isArray(facData)) {
-            facData.forEach(facility => {
-                const checkbox = document.querySelector(`#editRoomModal input[value="${facility}"]`);
-                if (checkbox) checkbox.checked = true;
-            });
-        }
-    } catch (e) {
-        console.error('Error parsing facilities:', e);
-    }
-    
-    // Set accessibility features checkboxes
-    const accCheckboxes = document.querySelectorAll('#editRoomModal input[name="accessibility_features[]"]');
-    accCheckboxes.forEach(checkbox => checkbox.checked = false);
-    try {
-        const accData = JSON.parse(accessibilityFeatures);
-        if (Array.isArray(accData)) {
-            accData.forEach(feature => {
-                const checkbox = document.querySelector(`#editRoomModal input[value="${feature}"]`);
-                if (checkbox) checkbox.checked = true;
-            });
-        }
-    } catch (e) {
-        console.error('Error parsing accessibility_features:', e);
-    }
-    
+
+
+
     // Set is_active checkbox
     document.getElementById('edit_is_active').checked = !!isActive;
 
-    var editModal = new bootstrap.Modal(document.getElementById('editRoomModal'));
-    editModal.show();
+    var el = document.getElementById('editRoomModal');
+    if (!el) return console.error('editRoomModal element missing');
+
+    try {
+        var editModal = bootstrap.Modal.getOrCreateInstance(el);
+        editModal.show();
+    } catch (error) {
+        console.error('Error showing edit modal:', error);
+    }
 }
 
 let importDataRooms = [];
@@ -1438,10 +1400,10 @@ function parseCSVRooms(csvText) {
     // Parse headers - handle quoted CSV properly
     const headers = parseCSVLine(lines[0]).map(h => h.trim().toLowerCase().replace(/"/g, ''));
     console.log('Parsed headers:', headers);
-    console.log('Expected headers: name, building, room_type, capacity, stream_availability, facilities, accessibility_features, is_active');
+    console.log('Expected headers: name, room_type, capacity, is_active');
     
     // Check if headers match expected format
-    const expectedHeaders = ['name', 'building', 'room_type', 'capacity', 'stream_availability', 'facilities', 'accessibility_features', 'is_active'];
+    const expectedHeaders = ['name', 'room_type', 'capacity', 'is_active'];
     const missingHeaders = expectedHeaders.filter(h => !headers.includes(h));
     if (missingHeaders.length > 0) {
         console.warn('Missing headers:', missingHeaders);
@@ -1526,12 +1488,8 @@ function validateRoomsData(data) {
         
         const validated = {
             name: row.name || row.Name || '',
-            building: row.building || row.Building || '',
             room_type: row.room_type || row.roomType || row.room_type || 'classroom',
             capacity: row.capacity || row.Capacity || '30',
-            stream_availability: row.stream_availability || row.streamAvailability || 'regular',
-            facilities: row.facilities || row.Facilities || '',
-            accessibility_features: row.accessibility_features || row.accessibilityFeatures || row.accessibility_features || '',
             is_active: (row.is_active || row.isActive || '1') === '1' ? '1' : '0'
         };
         
@@ -1565,32 +1523,7 @@ function validateRoomsData(data) {
         }
         validated.capacity = capacityNum;
 
-        // Validate stream_availability
-        let sa_clean = ['regular'];
-        if (validated.stream_availability) {
-            const sa_parts = validated.stream_availability.split(',').map(p => p.trim().toLowerCase());
-            sa_clean = sa_parts.filter(p => ['regular', 'evening', 'weekend'].includes(p));
-            if (sa_clean.length === 0) {
-                sa_clean = ['regular'];
-            }
-        }
-        validated.stream_availability = JSON.stringify(sa_clean);
 
-        // Validate facilities
-        let fac_clean = [];
-        if (validated.facilities) {
-            const fac_parts = validated.facilities.split(',').map(p => p.trim().toLowerCase());
-            fac_clean = fac_parts.filter(p => ['projector', 'whiteboard', 'computer', 'audio_system', 'air_conditioning'].includes(p));
-        }
-        validated.facilities = JSON.stringify(fac_clean);
-
-        // Validate accessibility_features
-        let acc_clean = [];
-        if (validated.accessibility_features && validated.accessibility_features.toLowerCase() !== 'none') {
-            const acc_parts = validated.accessibility_features.split(',').map(p => p.trim().toLowerCase());
-            acc_clean = acc_parts.filter(p => ['wheelchair_access', 'elevator', 'ramp'].includes(p));
-        }
-        validated.accessibility_features = JSON.stringify(acc_clean);
 
         // Check for duplicate name+building (only if we have existing rooms data)
         if (existingRooms && existingRooms.length > 0) {
@@ -1687,9 +1620,8 @@ function showPreviewRooms() {
             <td>${row.building}</td>
             <td>${row.room_type}</td>
             <td>${row.capacity}</td>
-            <td>${formatArrayField(row.stream_availability)}</td>
-            <td>${formatArrayField(row.facilities)}</td>
-            <td>${formatArrayField(row.accessibility_features)}</td>
+
+
             <td>${row.is_active === '1' ? '<span class="badge bg-success">Active</span>' : '<span class="badge bg-secondary">Inactive</span>'}</td>
             <td>${validationHtml}</td>
         `;
@@ -1775,6 +1707,7 @@ function processRoomsImport() {
 }
 
 // Set up drag/drop and file input
+waitForBootstrap(function() {
 document.addEventListener('DOMContentLoaded', function() {
     // Load existing rooms for duplicate checking
     loadExistingRooms();
@@ -1832,6 +1765,7 @@ document.addEventListener('DOMContentLoaded', function() {
         form.submit();
     });
 });
+});
 
 // Add search functionality
 document.querySelector('.search-input').addEventListener('input', function() {
@@ -1846,6 +1780,7 @@ document.querySelector('.search-input').addEventListener('input', function() {
 });
 
 // Enhanced form validation for room type
+waitForBootstrap(function() {
 document.addEventListener('DOMContentLoaded', function() {
     const addRoomForm = document.querySelector('#addRoomModal form');
     if (addRoomForm) {
@@ -1891,6 +1826,7 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Bulk Edit functionality
     setupBulkEdit();
+});
 });
 
 // Bulk Edit Functions
@@ -1978,9 +1914,8 @@ function setupBulkEditModal() {
     const checkboxes = [
         { id: 'bulk_edit_room_type_check', target: 'bulk_edit_room_type' },
         { id: 'bulk_edit_capacity_check', target: 'bulk_edit_capacity' },
-        { id: 'bulk_edit_stream_availability_check', targets: ['bulk_sa_regular', 'bulk_sa_evening', 'bulk_sa_weekend'] },
-        { id: 'bulk_edit_facilities_check', targets: ['bulk_fac_projector', 'bulk_fac_whiteboard', 'bulk_fac_computer', 'bulk_fac_audio', 'bulk_fac_ac'] },
-        { id: 'bulk_edit_accessibility_check', targets: ['bulk_acc_wheelchair', 'bulk_acc_elevator', 'bulk_acc_ramp'] },
+
+
         { id: 'bulk_edit_status_check', target: 'bulk_edit_is_active' }
     ];
     
@@ -2024,5 +1959,134 @@ function setupBulkEditModal() {
             document.getElementById('bulkEditCount').textContent = selectedCount;
         });
     }
+}
+
+// Add Building Modal Functions
+function showAddBuildingModal() {
+    if (!ensureBootstrapLoaded()) return;
+
+    var el = document.getElementById('addBuildingModal');
+    if (!el) {
+        console.error('showAddBuildingModal: addBuildingModal element not found');
+        return;
+    }
+
+    try {
+        // Use getOrCreateInstance to avoid re-initialization issues
+        var modal = bootstrap.Modal.getOrCreateInstance(el);
+        modal.show();
+    } catch (error) {
+        console.error('Error showing add building modal:', error);
+    }
+}
+
+// Bulk Add Rooms Functions
+waitForBootstrap(function() {
+document.addEventListener('DOMContentLoaded', function() {
+    // Setup bulk add rooms preview
+    const bulkInputs = ['room_prefix', 'room_suffix', 'start_number', 'end_number'];
+    bulkInputs.forEach(id => {
+        const element = document.getElementById(id);
+        if (element) {
+            element.addEventListener('input', updateBulkPreview);
+        }
+    });
+
+    // Setup building selection to auto-populate room prefix
+    const bulkBuildingSelect = document.getElementById('bulk_building_id');
+    if (bulkBuildingSelect) {
+        bulkBuildingSelect.addEventListener('change', function() {
+            const selectedOption = this.options[this.selectedIndex];
+            const buildingCode = selectedOption.getAttribute('data-code');
+
+            if (buildingCode) {
+                const roomPrefixInput = document.getElementById('room_prefix');
+                if (roomPrefixInput) {
+                    roomPrefixInput.value = buildingCode;
+                    // Trigger preview update
+                    updateBulkPreview();
+                }
+            } else {
+                // Clear prefix if no building selected
+                const roomPrefixInput = document.getElementById('room_prefix');
+                if (roomPrefixInput) {
+                    roomPrefixInput.value = '';
+                    updateBulkPreview();
+                }
+            }
+        });
+    }
+
+    // Setup bulk add rooms modal to reset when opened
+    const bulkAddRoomsModal = document.getElementById('bulkAddRoomsModal');
+    if (bulkAddRoomsModal) {
+        bulkAddRoomsModal.addEventListener('show.bs.modal', function() {
+            // Reset form fields
+            document.getElementById('bulk_building_id').value = '';
+            document.getElementById('bulk_room_type').value = '';
+            document.getElementById('bulk_capacity').value = '';
+            document.getElementById('room_prefix').value = '';
+            document.getElementById('room_suffix').value = '';
+            document.getElementById('start_number').value = '';
+            document.getElementById('end_number').value = '';
+            document.getElementById('bulk_preview').textContent = 'Select a building and enter room range to see preview';
+            document.getElementById('bulk_preview').className = '';
+        });
+    }
+});
+});
+
+function updateBulkPreview() {
+    const prefix = document.getElementById('room_prefix')?.value || '';
+    const suffix = document.getElementById('room_suffix')?.value || '';
+    const start = parseInt(document.getElementById('start_number')?.value) || 0;
+    const end = parseInt(document.getElementById('end_number')?.value) || 0;
+    const previewElement = document.getElementById('bulk_preview');
+
+    if (!prefix || start <= 0 || end <= 0) {
+        previewElement.textContent = 'Select a building and enter room range to see preview';
+        return;
+    }
+    
+    if (start > end) {
+        previewElement.textContent = 'Start number must be less than or equal to end number';
+        previewElement.className = 'text-danger';
+        return;
+    }
+    
+    const count = end - start + 1;
+    if (count > 100) {
+        previewElement.textContent = 'Cannot create more than 100 rooms at once';
+        previewElement.className = 'text-danger';
+        return;
+    }
+    
+    // Show preview of first few and last few rooms
+    let preview = '';
+    if (count <= 10) {
+        // Show all rooms
+        const rooms = [];
+        for (let i = start; i <= end; i++) {
+            rooms.push(`${prefix}${i}${suffix}`);
+        }
+        preview = rooms.join(', ');
+    } else {
+        // Show first 3, ..., last 3
+        const firstRooms = [];
+        const lastRooms = [];
+        
+        for (let i = start; i < start + 3; i++) {
+            firstRooms.push(`${prefix}${i}${suffix}`);
+        }
+        
+        for (let i = end - 2; i <= end; i++) {
+            lastRooms.push(`${prefix}${i}${suffix}`);
+        }
+        
+        preview = `${firstRooms.join(', ')}, ..., ${lastRooms.join(', ')} (${count} rooms total)`;
+    }
+    
+    previewElement.textContent = preview;
+    previewElement.className = '';
 }
 </script>

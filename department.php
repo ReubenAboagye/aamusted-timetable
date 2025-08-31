@@ -1,6 +1,7 @@
 <?php
 // Handle bulk import BEFORE any output
 include 'connect.php';
+include 'includes/flash.php';
 
 // Enable error reporting for debugging
 error_reporting(E_ALL);
@@ -38,8 +39,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         die('CSRF token validation failed');
     }
 }
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'bulk_import') {
-    if (isset($_POST['import_data'])) {
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $action = $_POST['action'] ?? null;
+    if ($action === 'bulk_import' && isset($_POST['import_data'])) {
         $import_data = json_decode($_POST['import_data'], true);
         if ($import_data) {
             $success_count = 0;
@@ -459,7 +461,8 @@ $stats = $stats_result ? $stats_result->fetch_assoc() : ['total_departments' => 
                     <div class="upload-area" id="uploadArea" style="border: 2px dashed #ccc; border-radius: 8px; padding: 40px; text-align: center; background: #f8f9fa; cursor: pointer;">
                         <i class="fas fa-cloud-upload-alt fa-2x text-muted mb-3"></i>
                         <p class="mb-2">Drop CSV file here or <strong>click to browse</strong></p>
-                        <small class="text-muted">Supported format: CSV</small>
+                        <small class="text-muted">Supported format: CSV<br>
+                        Headers: name, code, description, is_active</small>
                     </div>
                     <input type="file" class="form-control d-none" id="csvFile" accept=",.csv">
                 </div>
@@ -532,7 +535,10 @@ function editDepartment(id, name, code, description, isActive) {
     document.getElementById('edit_is_active').value = isActive;
     
     // Show the edit modal
-    var editModal = new bootstrap.Modal(document.getElementById('editDepartmentModal'));
+    var el = document.getElementById('editDepartmentModal');
+    if (!el) return console.error('editDepartmentModal element missing');
+    if (typeof bootstrap === 'undefined' || !bootstrap.Modal) return console.error('Bootstrap Modal not available');
+    var editModal = bootstrap.Modal.getOrCreateInstance(el);
     editModal.show();
 }
 
@@ -556,13 +562,11 @@ function processFile() {
     reader.onload = function(e) {
         try {
             const data = parseCSV(e.target.result);
-            
+
             if (data.length > 0) {
                 importData = validateData(data);
                 showPreview();
-                // Show confirmation modal directly
-                var confirmModal = new bootstrap.Modal(document.getElementById('confirmImportModal'));
-                confirmModal.show();
+                // Do NOT show confirmation modal here; user must click "Process File" to confirm import
             } else {
                 alert('No data found in the file.');
             }
@@ -666,8 +670,10 @@ function confirmImport() {
     }
     
     document.getElementById('importCount').textContent = validCount;
-    var confirmModal = new bootstrap.Modal(document.getElementById('confirmImportModal'));
-    confirmModal.show();
+    var el = document.getElementById('confirmImportModal');
+    if (!el) return console.error('confirmImportModal element missing');
+    if (typeof bootstrap === 'undefined' || !bootstrap.Modal) return console.error('Bootstrap Modal not available');
+    bootstrap.Modal.getOrCreateInstance(el).show();
 }
 
 function executeImport() {
@@ -767,17 +773,60 @@ document.addEventListener('DOMContentLoaded', function() {
         const files = e.dataTransfer.files;
         if (files.length > 0) {
             fileInput.files = files;
-            // Auto-process the file
-            processFile();
+            // Auto-parse and show preview only; user must click Process File to confirm import
+            const reader = new FileReader();
+            reader.onload = function(ev) {
+                try {
+                    const data = parseCSV(ev.target.result);
+                    if (data.length > 0) {
+                        importData = validateData(data);
+                        showPreview();
+                    } else {
+                        alert('No data found in the file.');
+                    }
+                } catch (error) {
+                    alert('Error processing file: ' + error.message);
+                }
+            };
+            reader.readAsText(files[0]);
         }
     });
     
     // File input change event
     fileInput.addEventListener('change', function() {
         if (this.files.length > 0) {
-            // Auto-process the file
-            processFile();
+            // Auto-parse and show preview only; user must click Process File to confirm import
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const data = parseCSV(e.target.result);
+                    if (data.length > 0) {
+                        importData = validateData(data);
+                        showPreview();
+                    } else {
+                        alert('No data found in the file.');
+                    }
+                } catch (error) {
+                    alert('Error processing file: ' + error.message);
+                }
+            };
+            reader.readAsText(this.files[0]);
         }
+    });
+
+    // Process button should open the confirmation modal only when clicked
+    const processBtn = document.getElementById('processBtn');
+    processBtn.addEventListener('click', function() {
+        const validCount = importData.filter(row => row.valid).length;
+        if (validCount === 0) {
+            alert('No valid data to import. Please fix the errors first.');
+            return;
+        }
+        document.getElementById('importCount').textContent = validCount;
+        var el = document.getElementById('confirmImportModal');
+        if (!el) return console.error('confirmImportModal element missing');
+        if (typeof bootstrap === 'undefined' || !bootstrap.Modal) return console.error('Bootstrap Modal not available');
+        bootstrap.Modal.getOrCreateInstance(el).show();
     });
     
     // Search functionality

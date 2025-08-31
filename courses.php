@@ -1,13 +1,36 @@
 <?php
+// Database connection and flash functionality
+include 'connect.php';
+include 'includes/flash.php';
+
+// Enable error reporting for debugging
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
+
+// Start session for better security
+if (session_status() == PHP_SESSION_NONE) {
+    session_start();
+}
+
+// Generate CSRF token if not exists
+if (!isset($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
+
+// Verify CSRF token for POST requests
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== $_SESSION['csrf_token']) {
+        die('CSRF token validation failed');
+    }
+}
+
 $pageTitle = 'Courses Management';
 include 'includes/header.php';
 include 'includes/sidebar.php';
 
-// Database connection
-include 'connect.php';
-
 // Handle form submission for adding new course
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $action = $_POST['action'] ?? null;
     if ($_POST['action'] === 'add') {
         $course_name = $conn->real_escape_string($_POST['course_name']);
         $course_code = $conn->real_escape_string($_POST['course_code']);
@@ -113,15 +136,28 @@ include_once 'includes/stream_manager.php';
 $streamManager = getStreamManager();
 
 // Fetch courses with department names
-$sql = "SELECT c.* 
+$sql = "SELECT c.*, d.name as department_name, d.code as department_code
         FROM courses c 
+        LEFT JOIN departments d ON c.department_id = d.id
         WHERE c.is_active = 1
-        ORDER BY c.name";
+        ORDER BY c.department_id IS NULL DESC, d.name, c.name";
 $result = $conn->query($sql);
 
-// Fetch departments for dropdown (filtered by stream)
+// Fetch departments for dropdown
 $dept_sql = "SELECT id, name FROM departments WHERE is_active = 1 ORDER BY name";
 $dept_result = $conn->query($dept_sql);
+
+// Get course statistics
+$stats_sql = "
+    SELECT 
+        COUNT(*) as total_courses,
+        COUNT(department_id) as assigned_courses,
+        COUNT(*) - COUNT(department_id) as unassigned_courses
+    FROM courses 
+    WHERE is_active = 1
+";
+$stats_result = $conn->query($stats_sql);
+$stats = $stats_result ? $stats_result->fetch_assoc() : ['total_courses' => 0, 'assigned_courses' => 0, 'unassigned_courses' => 0];
 ?>
 
 <div class="main-content" id="mainContent">
@@ -129,6 +165,9 @@ $dept_result = $conn->query($dept_sql);
         <div class="table-header d-flex justify-content-between align-items-center">
             <h4><i class="fas fa-book me-2"></i>Courses Management</h4>
             <div class="d-flex gap-2">
+                <a href="assign_course_departments.php" class="btn btn-warning">
+                    <i class="fas fa-link me-2"></i>Assign Departments
+                </a>
                 <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#importModal">
                     <i class="fas fa-upload me-2"></i>Import
                 </button>
@@ -152,6 +191,55 @@ $dept_result = $conn->query($dept_sql);
             </div>
         <?php endif; ?>
 
+        <!-- Statistics Cards -->
+        <div class="row g-3 mb-3 m-3">
+            <div class="col-md-4">
+                <div class="card theme-card bg-theme-primary text-white">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <h4 class="card-title"><?php echo $stats['total_courses']; ?></h4>
+                                <p class="card-text">Total Courses</p>
+                            </div>
+                            <div class="align-self-center">
+                                <i class="fas fa-book fa-2x"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card theme-card bg-success text-white">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <h4 class="card-title"><?php echo $stats['assigned_courses']; ?></h4>
+                                <p class="card-text">Assigned to Departments</p>
+                            </div>
+                            <div class="align-self-center">
+                                <i class="fas fa-check-circle fa-2x"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card theme-card bg-warning text-dark">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <h4 class="card-title"><?php echo $stats['unassigned_courses']; ?></h4>
+                                <p class="card-text">Unassigned Courses</p>
+                            </div>
+                            <div class="align-self-center">
+                                <i class="fas fa-exclamation-triangle fa-2x"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <div class="search-container m-3">
             <input type="text" class="search-input" placeholder="Search courses...">
         </div>
@@ -162,6 +250,7 @@ $dept_result = $conn->query($dept_sql);
                     <tr>
                         <th>Course Name</th>
                         <th>Code</th>
+                        <th>Department</th>
                         <th>Hours/Week</th>
                         <th>Actions</th>
                     </tr>
@@ -169,16 +258,26 @@ $dept_result = $conn->query($dept_sql);
                 <tbody>
                     <?php if ($result && $result->num_rows > 0): ?>
                         <?php while ($row = $result->fetch_assoc()): ?>
-                            <tr>
+                            <tr class="<?php echo $row['department_id'] ? '' : 'table-warning'; ?>">
                                 <td><strong><?php echo htmlspecialchars($row['name']); ?></strong></td>
                                 <td><span class="badge bg-primary"><?php echo htmlspecialchars($row['code']); ?></span></td>
-                                <td><span class="badge bg-warning"><?php echo htmlspecialchars($row['hours_per_week'] ?? 'N/A'); ?> hrs/week</span></td>
+                                <td>
+                                    <?php if ($row['department_id']): ?>
+                                        <span class="badge bg-success">
+                                            <?php echo htmlspecialchars($row['department_code'] . ' - ' . $row['department_name']); ?>
+                                        </span>
+                                    <?php else: ?>
+                                        <span class="badge bg-warning text-dark">Unassigned</span>
+                                    <?php endif; ?>
+                                </td>
+                                <td><span class="badge bg-info"><?php echo htmlspecialchars($row['hours_per_week'] ?? 'N/A'); ?> hrs/week</span></td>
                                 <td>
                                     <button class="btn btn-sm btn-outline-primary me-1" onclick="editCourse(<?php echo $row['id']; ?>)">
                                         <i class="fas fa-edit"></i>
                                     </button>
                                     <form method="POST" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this course?')">
                                         <input type="hidden" name="action" value="delete">
+                                        <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                                         <input type="hidden" name="id" value="<?php echo $row['id']; ?>">
                                         <button type="submit" class="btn btn-sm btn-outline-danger">
                                             <i class="fas fa-trash"></i>
@@ -189,7 +288,7 @@ $dept_result = $conn->query($dept_sql);
                         <?php endwhile; ?>
                     <?php else: ?>
                         <tr>
-                            <td colspan="4" class="empty-state">
+                            <td colspan="5" class="empty-state">
                                 <i class="fas fa-book"></i>
                                 <p>No courses found. Add your first course to get started!</p>
                             </td>
@@ -212,6 +311,7 @@ $dept_result = $conn->query($dept_sql);
             <form method="POST">
                 <div class="modal-body">
                     <input type="hidden" name="action" value="add">
+                    <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                     
                     <div class="row">
                         <div class="col-md-6">

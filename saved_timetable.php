@@ -78,17 +78,19 @@ $timetables_result = $stmt->get_result();
 $stmt->close();
 
 // Handle delete action
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'delete') {
-    $session_id = isset($_POST['session_id']) ? intval($_POST['session_id']) : 0;
-    
-    if ($session_id > 0) {
-        // Delete timetable entries for the session
-        $delete_stmt = $conn->prepare("DELETE FROM timetable WHERE session_id = ?");
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $action = $_POST['action'] ?? null;
+    if ($action === 'delete') {
+        $session_id = isset($_POST['session_id']) ? intval($_POST['session_id']) : 0;
+
+        if ($session_id > 0) {
+            // Delete timetable entries for the session
+            $delete_stmt = $conn->prepare("DELETE FROM timetable WHERE session_id = ?");
         $delete_stmt->bind_param('i', $session_id);
         
-        if ($delete_stmt->execute()) {
-            $delete_stmt->close();
-            $location = 'saved_timetable.php';
+            if ($delete_stmt->execute()) {
+                $delete_stmt->close();
+                $location = 'saved_timetable.php';
             $params = [];
             if ($selected_stream) $params['stream_id'] = $selected_stream;
             if ($selected_department) $params['department_id'] = $selected_department;
@@ -97,20 +99,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         } else {
             $error_message = "Error deleting timetable: " . $conn->error;
         }
-        $delete_stmt->close();
+            $delete_stmt->close();
+        }
     }
 }
 
 // Handle edit/update session action
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'update_session') {
-    $session_id = isset($_POST['session_id']) ? intval($_POST['session_id']) : 0;
-    $semester_name = isset($_POST['semester_name']) ? $conn->real_escape_string($_POST['semester_name']) : '';
-    $academic_year = isset($_POST['academic_year']) ? $conn->real_escape_string($_POST['academic_year']) : '';
-    $semester_number = isset($_POST['semester_number']) ? intval($_POST['semester_number']) : 0;
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $action = $_POST['action'] ?? null;
+    if ($action === 'update_session') {
+        $session_id = isset($_POST['session_id']) ? intval($_POST['session_id']) : 0;
+        $semester_name = isset($_POST['semester_name']) ? $conn->real_escape_string($_POST['semester_name']) : '';
+        $academic_year = isset($_POST['academic_year']) ? $conn->real_escape_string($_POST['academic_year']) : '';
+        $semester_number = isset($_POST['semester_number']) ? intval($_POST['semester_number']) : 0;
 
-    if ($session_id > 0 && $semester_name !== '' && $academic_year !== '' && $semester_number > 0) {
-        $update_stmt = $conn->prepare("UPDATE sessions SET semester_name = ?, academic_year = ?, semester_number = ? WHERE id = ?");
-        if ($update_stmt) {
+        if ($session_id > 0 && $semester_name !== '' && $academic_year !== '' && $semester_number > 0) {
+            $update_stmt = $conn->prepare("UPDATE sessions SET semester_name = ?, academic_year = ?, semester_number = ? WHERE id = ?");
+            if ($update_stmt) {
             $update_stmt->bind_param('ssii', $semester_name, $academic_year, $semester_number, $session_id);
             if ($update_stmt->execute()) {
                 $success_message = 'Session updated successfully.';
@@ -128,6 +133,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     // Refresh timetables result after update
     header('Location: saved_timetable.php');
     exit();
+    }
 }
 
 // Get success/error messages from session or URL
@@ -381,7 +387,10 @@ $error_message = $_GET['error'] ?? '';
 function confirmDelete(sessionId, sessionName) {
     document.getElementById('deleteSessionId').value = sessionId;
     document.getElementById('sessionName').textContent = sessionName;
-    new bootstrap.Modal(document.getElementById('deleteModal')).show();
+    var el = document.getElementById('deleteModal');
+    if (!el) return console.error('deleteModal element missing');
+    if (typeof bootstrap === 'undefined' || !bootstrap.Modal) return console.error('Bootstrap Modal not available');
+    bootstrap.Modal.getOrCreateInstance(el).show();
 }
 
 // Auto-submit form when filters change
@@ -403,8 +412,10 @@ function openEditSessionModal(id, semesterName, academicYear, semesterNumber) {
     document.getElementById('semester_name').value = semesterName;
     document.getElementById('academic_year').value = academicYear;
     document.getElementById('semester_number').value = semesterNumber;
-    var modal = new bootstrap.Modal(document.getElementById('editSessionModal'));
-    modal.show();
+    var el = document.getElementById('editSessionModal');
+    if (!el) return console.error('editSessionModal element missing');
+    if (typeof bootstrap === 'undefined' || !bootstrap.Modal) return console.error('Bootstrap Modal not available');
+    bootstrap.Modal.getOrCreateInstance(el).show();
 }
 </script>
 

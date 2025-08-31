@@ -1,11 +1,16 @@
 <?php
 include 'connect.php';
 
+// Page title and layout includes
+$pageTitle = 'Assign Courses to Class';
+include 'includes/header.php';
+
 $success_message = '';
 $error_message = '';
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
-    if ($_POST['action'] === 'assign_courses') {
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $action = $_POST['action'] ?? null;
+    if ($action === 'assign_courses') {
         $class_id = (int)($_POST['class_id'] ?? 0);
         $course_ids = $_POST['course_ids'] ?? [];
         
@@ -50,14 +55,8 @@ if ($selected_class_id > 0) {
 }
 ?>
 
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Assign Courses to Class</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+<!-- Bootstrap CSS and JS are included globally in includes/header.php -->
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         .card {
             box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
@@ -193,7 +192,6 @@ if ($selected_class_id > 0) {
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         let selectedCourses = new Set();
         

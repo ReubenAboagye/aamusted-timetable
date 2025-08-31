@@ -1,6 +1,10 @@
 <?php
 include 'connect.php';
 
+// Page title and layout includes
+$pageTitle = 'Course Room Type Management';
+include 'includes/header.php';
+
 $success_message = '';
 $error_message = '';
 
@@ -19,101 +23,102 @@ function resolveRoomTypeId($conn, $roomType) {
     return null;
 }
 
-// Handle single course availability
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'add_single') {
-    $course_id = (int)($_POST['course_id'] ?? 0);
-    $room_type = $_POST['room_type'] ?? '';
-    $room_type_id = resolveRoomTypeId($conn, $room_type);
+// Handle POST actions (single bulk delete edit)
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $action = $_POST['action'] ?? null;
 
-    if ($course_id <= 0 || !$room_type_id) {
-        $error_message = 'Please select a valid course and room type.';
-    } else {
-        // Check if course is already available
-        $check_sql = "SELECT COUNT(*) as count FROM course_room_types WHERE course_id = ?";
-        $check_stmt = $conn->prepare($check_sql);
-        $check_stmt->bind_param("i", $course_id);
-        $check_stmt->execute();
-        $check_result = $check_stmt->get_result();
-        $check_row = $check_result->fetch_assoc();
+    if ($action === 'add_single') {
+        $course_id = (int)($_POST['course_id'] ?? 0);
+        $room_type = $_POST['room_type'] ?? '';
+        $room_type_id = resolveRoomTypeId($conn, $room_type);
 
-        if ($check_row['count'] > 0) {
-            $error_message = "This course already has room type preferences set.";
+        if ($course_id <= 0 || !$room_type_id) {
+            $error_message = 'Please select a valid course and room type.';
         } else {
-            $sql = "INSERT INTO course_room_types (course_id, room_type_id) VALUES (?, ?)";
-            $stmt = $conn->prepare($sql);
-            $stmt->bind_param("ii", $course_id, $room_type_id);
+            // Check if course is already available
+            $check_sql = "SELECT COUNT(*) as count FROM course_room_types WHERE course_id = ?";
+            $check_stmt = $conn->prepare($check_sql);
+            $check_stmt->bind_param("i", $course_id);
+            $check_stmt->execute();
+            $check_result = $check_stmt->get_result();
+            $check_row = $check_result->fetch_assoc();
 
-            if ($stmt->execute()) {
-                $stmt->close();
-                redirect_with_flash('course_roomtype.php', 'success', 'Course room type preference added successfully!');
+            if ($check_row['count'] > 0) {
+                $error_message = "This course already has room type preferences set.";
             } else {
-                $error_message = "Error adding course room type preference.";
+                $sql = "INSERT INTO course_room_types (course_id, room_type_id) VALUES (?, ?)";
+                $stmt = $conn->prepare($sql);
+                $stmt->bind_param("ii", $course_id, $room_type_id);
+
+                if ($stmt->execute()) {
+                    $stmt->close();
+                    redirect_with_flash('course_roomtype.php', 'success', 'Course room type preference added successfully!');
+                } else {
+                    $error_message = "Error adding course room type preference.";
+                }
+                $stmt->close();
+            }
+            $check_stmt->close();
+        }
+
+    } elseif ($action === 'add_bulk') {
+        $course_ids = $_POST['course_ids'] ?? [];
+        $room_type = $_POST['room_type'] ?? '';
+        $room_type_id = resolveRoomTypeId($conn, $room_type);
+
+        if (empty($course_ids) || !$room_type_id) {
+            $error_message = "Please select courses and specify a valid room type.";
+        } else {
+            $stmt = $conn->prepare("INSERT IGNORE INTO course_room_types (course_id, room_type_id) VALUES (?, ?)");
+
+            foreach ($course_ids as $course_id) {
+                $cid = (int)$course_id;
+                $stmt->bind_param("ii", $cid, $room_type_id);
+                $stmt->execute();
             }
             $stmt->close();
+            redirect_with_flash('course_roomtype.php', 'success', 'All selected courses have been assigned room type preferences!');
         }
-        $check_stmt->close();
-    }
-}
 
-// Handle bulk course availability
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'add_bulk') {
-    $course_ids = $_POST['course_ids'] ?? [];
-    $room_type = $_POST['room_type'] ?? '';
-    $room_type_id = resolveRoomTypeId($conn, $room_type);
-
-    if (empty($course_ids) || !$room_type_id) {
-        $error_message = "Please select courses and specify a valid room type.";
-    } else {
-        $stmt = $conn->prepare("INSERT IGNORE INTO course_room_types (course_id, room_type_id) VALUES (?, ?)");
-
-        foreach ($course_ids as $course_id) {
-            $cid = (int)$course_id;
-            $stmt->bind_param("ii", $cid, $room_type_id);
-            $stmt->execute();
-        }
-        $stmt->close();
-        redirect_with_flash('course_roomtype.php', 'success', 'All selected courses have been assigned room type preferences!');
-    }
-}
-
-// Handle deletion
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'delete' && isset($_POST['course_id'])) {
-    $course_id = (int)$_POST['course_id'];
-    $sql = "DELETE FROM course_room_types WHERE course_id = ?";
-    $stmt = $conn->prepare($sql);
-    $stmt->bind_param("i", $course_id);
-
-    if ($stmt->execute()) {
-        $stmt->close();
-        redirect_with_flash('course_roomtype.php', 'success', 'Course room type preference deleted successfully!');
-    } else {
-        $error_message = "Error deleting course room type preference.";
-    }
-    $stmt->close();
-}
-
-// Handle editing room type
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'edit_room_type' && isset($_POST['edit_course_id']) && isset($_POST['room_type'])) {
-    $course_id = (int)$_POST['edit_course_id'];
-    $room_type = $_POST['room_type'] ?? '';
-    $room_type_id = resolveRoomTypeId($conn, $room_type);
-
-    if ($course_id <= 0 || !$room_type_id) {
-        $error_message = 'Invalid input for update.';
-    } else {
-        $sql = "UPDATE course_room_types SET room_type_id = ? WHERE course_id = ?";
+    } elseif ($action === 'delete' && isset($_POST['course_id'])) {
+        $course_id = (int)$_POST['course_id'];
+        $sql = "DELETE FROM course_room_types WHERE course_id = ?";
         $stmt = $conn->prepare($sql);
-        $stmt->bind_param("ii", $room_type_id, $course_id);
+        $stmt->bind_param("i", $course_id);
 
         if ($stmt->execute()) {
             $stmt->close();
-            redirect_with_flash('course_roomtype.php', 'success', 'Course room type preference updated successfully!');
+            redirect_with_flash('course_roomtype.php', 'success', 'Course room type preference deleted successfully!');
         } else {
-            $error_message = "Error updating course room type preference.";
+            $error_message = "Error deleting course room type preference.";
         }
         $stmt->close();
+
+    } elseif ($action === 'edit_room_type' && isset($_POST['edit_course_id']) && isset($_POST['room_type'])) {
+        $course_id = (int)$_POST['edit_course_id'];
+        $room_type = $_POST['room_type'] ?? '';
+        $room_type_id = resolveRoomTypeId($conn, $room_type);
+
+        if ($course_id <= 0 || !$room_type_id) {
+            $error_message = 'Invalid input for update.';
+        } else {
+            $sql = "UPDATE course_room_types SET room_type_id = ? WHERE course_id = ?";
+            $stmt = $conn->prepare($sql);
+            $stmt->bind_param("ii", $room_type_id, $course_id);
+
+            if ($stmt->execute()) {
+                $stmt->close();
+                redirect_with_flash('course_roomtype.php', 'success', 'Course room type preference updated successfully!');
+            } else {
+                $error_message = "Error updating course room type preference.";
+            }
+            $stmt->close();
+        }
     }
 }
+
+// Close edit POST handling
+
 
 // Get existing course room type preferences
 $sql = "SELECT crt.course_id, rt.id AS room_type_id, rt.name AS preferred_room_type,
@@ -141,15 +146,9 @@ if ($rt_res) {
 }
 ?>
 
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Course Room Type Management</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet">
+<!-- Bootstrap CSS and JS are included globally in includes/header.php -->
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet">
     <style>
         :root {
             --brand-maroon: #7a0b1c;
@@ -428,7 +427,6 @@ if ($rt_res) {
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
     <script>
@@ -456,7 +454,10 @@ if ($rt_res) {
             document.getElementById('edit_course_display').value = courseCode;
             document.getElementById('edit_room_type').value = roomType;
             
-            new bootstrap.Modal(document.getElementById('editModal')).show();
+            var el = document.getElementById('editModal');
+            if (!el) return console.error('editModal element missing');
+            if (typeof bootstrap === 'undefined' || !bootstrap.Modal) return console.error('Bootstrap Modal not available');
+            bootstrap.Modal.getOrCreateInstance(el).show();
         }
     </script>
 </body>

@@ -7,8 +7,9 @@ include 'connect.php';
 $success_message = '';
 $error_message = '';
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
-    if ($_POST['action'] === 'add') {
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $action = $_POST['action'] ?? null;
+    if ($action === 'add') {
         $lecturer_id = (int)($_POST['lecturer_id'] ?? 0);
         $course_id = (int)($_POST['course_id'] ?? 0);
         if ($lecturer_id > 0 && $course_id > 0) {
@@ -19,7 +20,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $stmt->close();
             } else { $error_message = 'Prepare failed: ' . $conn->error; }
         }
-    } elseif ($_POST['action'] === 'bulk_add') {
+    } elseif ($action === 'bulk_add') {
         $lecturer_id = (int)($_POST['lecturer_id'] ?? 0);
         $course_ids = isset($_POST['course_ids']) && is_array($_POST['course_ids']) ? array_map('intval', $_POST['course_ids']) : [];
         if ($lecturer_id > 0 && !empty($course_ids)) {
@@ -192,8 +193,10 @@ function editMapping(lecturerId) {
     populateCourseLists();
     
     // Use Bootstrap 5 modal methods instead of jQuery
-    const modal = new bootstrap.Modal(document.getElementById('editModal'));
-    modal.show();
+    const el = document.getElementById('editModal');
+    if (!el) return console.error('editModal element missing');
+    if (typeof bootstrap === 'undefined' || !bootstrap.Modal) return console.error('Bootstrap Modal not available');
+    bootstrap.Modal.getOrCreateInstance(el).show();
 }
 
 function populateCourseLists() {

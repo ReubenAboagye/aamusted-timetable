@@ -7,9 +7,10 @@ include 'includes/sidebar.php';
 include 'connect.php';
 
 // Handle bulk import and form submissions
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $action = $_POST['action'] ?? null;
     // Bulk import
-    if ($_POST['action'] === 'bulk_import' && isset($_POST['import_data'])) {
+    if ($action === 'bulk_import' && isset($_POST['import_data'])) {
         $import_data = json_decode($_POST['import_data'], true);
         if ($import_data) {
             $success_count = 0;
@@ -116,7 +117,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         }
 
     // Single add
-    } elseif ($_POST['action'] === 'add') {
+    } elseif ($action === 'add') {
         $name = $conn->real_escape_string($_POST['name']);
         $department_id = (int)$_POST['department_id'];
         $code = $conn->real_escape_string($_POST['code'] ?? '');
@@ -152,7 +153,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         }
 
     // Edit
-    } elseif ($_POST['action'] === 'edit' && isset($_POST['id'])) {
+    } elseif ($action === 'edit' && isset($_POST['id'])) {
         $id = (int)$_POST['id'];
         $name = $conn->real_escape_string($_POST['name']);
         $department_id = (int)$_POST['department_id'];
@@ -189,7 +190,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         }
 
     // Delete (soft delete: set is_active = 0)
-    } elseif ($_POST['action'] === 'delete' && isset($_POST['id'])) {
+    } elseif ($action === 'delete' && isset($_POST['id'])) {
         $id = (int)$_POST['id'];
         $sql = "UPDATE programs SET is_active = 0 WHERE id = ?";
         $stmt = $conn->prepare($sql);
@@ -495,8 +496,10 @@ function editProgram(id, name, departmentId, isActive, code, duration) {
     var checkbox = document.querySelector('#editProgramModal input[name="is_active"]');
     if (checkbox) checkbox.checked = !!isActive;
 
-    var editModal = new bootstrap.Modal(document.getElementById('editProgramModal'));
-    editModal.show();
+    var el = document.getElementById('editProgramModal');
+    if (!el) return console.error('editProgramModal element missing');
+    if (typeof bootstrap === 'undefined' || !bootstrap.Modal) return console.error('Bootstrap Modal not available');
+    bootstrap.Modal.getOrCreateInstance(el).show();
 }
 </script>
 

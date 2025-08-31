@@ -1,8 +1,14 @@
 <?php
 include 'connect.php';
 
+// Page title and layout includes
+$pageTitle = 'Class Course Management';
+include 'includes/header.php';
+
 // Handle single assignment
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'assign_single') {
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $action = $_POST['action'] ?? null;
+    if ($action === 'assign_single') {
     $class_id = (int)($_POST['class_id'] ?? 0);
     $course_id = (int)($_POST['course_id'] ?? 0);
     
@@ -20,10 +26,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     } else {
         $error_message = "Please select both class and course.";
     }
-}
+    }
 
-// Handle bulk assignment
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'assign_bulk') {
+    // Handle bulk assignment
+    if ($action === 'assign_bulk') {
     $class_ids = $_POST['class_ids'] ?? [];
     $course_ids = $_POST['course_ids'] ?? [];
     
@@ -41,10 +47,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     } else {
         $error_message = "Please select both classes and courses.";
     }
-}
+    }
 
-// Handle deletion
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'delete' && isset($_POST['class_course_id'])) {
+    // Handle deletion
+    if ($action === 'delete' && isset($_POST['class_course_id'])) {
     $class_course_id = (int)$_POST['class_course_id'];
     $stmt = $conn->prepare("DELETE FROM class_courses WHERE id = ?");
     $stmt->bind_param('i', $class_course_id);
@@ -56,6 +62,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $error_message = "Error deleting assignment.";
     }
     $stmt->close();
+}
+
+// Close POST request handling
 }
 
 // Get all classes (include human-readable level name)
@@ -90,15 +99,9 @@ if ($existing_assignments_result) {
 }
 ?>
 
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Class Course Management</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet">
+<!-- Bootstrap CSS and JS are included globally in includes/header.php -->
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet">
     <style>
         :root {
             --brand-maroon: #7a0b1c;
@@ -360,7 +363,6 @@ if ($existing_assignments_result) {
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
     <script>
