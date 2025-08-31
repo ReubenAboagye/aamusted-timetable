@@ -18,7 +18,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $period_end = $conn->real_escape_string($_POST['period_end']);
         $break_start = $conn->real_escape_string($_POST['break_start']);
         $break_end = $conn->real_escape_string($_POST['break_end']);
-        $active_days = isset($_POST['active_days']) ? implode(',', $_POST['active_days']) : '';
+        // Store active days as JSON to match DB JSON column
+        $active_days = isset($_POST['active_days']) ? json_encode(array_values($_POST['active_days'])) : json_encode([]);
         $is_active = isset($_POST['is_active']) ? 1 : 0;
 
         $sql = "INSERT INTO streams 
@@ -46,7 +47,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $period_end = $conn->real_escape_string($_POST['period_end']);
         $break_start = $conn->real_escape_string($_POST['break_start']);
         $break_end = $conn->real_escape_string($_POST['break_end']);
-        $active_days = isset($_POST['active_days']) ? implode(',', $_POST['active_days']) : '';
+        // Store active days as JSON to match DB JSON column
+        $active_days = isset($_POST['active_days']) ? json_encode(array_values($_POST['active_days'])) : json_encode([]);
         $is_active = isset($_POST['is_active']) ? 1 : 0;
 
         $sql = "UPDATE streams 
@@ -172,7 +174,20 @@ $result = $conn->query("SELECT * FROM streams ORDER BY created_at DESC");
                 <td><?= htmlspecialchars($row['description']); ?></td>
                 <td><?= $row['period_start'] . " - " . $row['period_end']; ?></td>
                 <td><?= $row['break_start'] . " - " . $row['break_end']; ?></td>
-                <td><?= $row['active_days']; ?></td>
+                <td><?php
+                    $days = $row['active_days'];
+                    $decoded = [];
+                    if ($days !== null && $days !== '') {
+                        $tmp = json_decode($days, true);
+                        if (json_last_error() === JSON_ERROR_NONE && is_array($tmp)) {
+                            $decoded = $tmp;
+                        } else {
+                            // Fallback for legacy comma-separated values
+                            $decoded = array_filter(array_map('trim', explode(',', $days)));
+                        }
+                    }
+                    echo htmlspecialchars(implode(', ', $decoded));
+                ?></td>
                 <td><?= $row['is_active'] ? '✅ Active' : '❌ Inactive'; ?></td>
                 <td><?= $row['created_at']; ?></td>
                 <td>
