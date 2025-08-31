@@ -1,6 +1,7 @@
 <?php
+$pageTitle = 'Manage Streams';
 include 'includes/header.php';
-include 'includes/db.php';
+include 'includes/sidebar.php';
 
 $success_message = "";
 $error_message = "";
@@ -83,6 +84,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 // -------------------- FETCH ALL STREAMS --------------------
 $result = $conn->query("SELECT * FROM streams ORDER BY created_at DESC");
 ?>
+
+<div class="main-content" id="mainContent">
 
 <div class="container mt-4">
     <h2 class="mb-3">Manage Streams</h2>
@@ -184,6 +187,8 @@ $result = $conn->query("SELECT * FROM streams ORDER BY created_at DESC");
         <?php endwhile; ?>
         </tbody>
     </table>
+    </div>
+
 </div>
 
 <?php include 'includes/footer.php'; ?>
