@@ -1,459 +1,630 @@
 <?php
-// Connect to the database and fetch course data
+// Database connection and flash functionality
 include 'connect.php';
+include 'includes/flash.php';
 
-$sql = "SELECT * FROM course";
-$result = $conn->query($sql);
-?>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Courses Management - TimeTable Generator</title>
-  <!-- Bootstrap CSS -->
-  <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.2/css/bootstrap.min.css" rel="stylesheet" />
-  <!-- Font Awesome -->
-  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet" />
-  <!-- Google Font: Open Sans -->
-  <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600&display=swap" rel="stylesheet" />
-  <style>
-    :root {
-      --primary-color: #800020;   /* AAMUSTED maroon */
-      --hover-color: #600010;       /* Darker maroon */
-      --accent-color: #FFD700;      /* Accent goldenrod */
-      --bg-color: #ffffff;          /* White background */
-      --sidebar-bg: #f8f8f8;         /* Light gray sidebar */
-      --footer-bg: #800020;         /* Footer same as primary */
+// Enable error reporting for debugging
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
+
+// Start session for better security
+if (session_status() == PHP_SESSION_NONE) {
+    session_start();
+}
+
+// Generate CSRF token if not exists
+if (!isset($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
+
+// Verify CSRF token for POST requests
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== $_SESSION['csrf_token']) {
+        die('CSRF token validation failed');
     }
-    /* Global Styles */
-    body {
-      font-family: 'Open Sans', sans-serif;
-      background-color: var(--bg-color);
-      margin: 0;
-      padding-top: 70px; /* For fixed header */
-      overflow: hidden;
-      font-size: 14px;
-    }
-    /* Header */
-    .navbar {
-      background-color: var(--primary-color);
-      position: fixed;
-      top: 0;
-      width: 100%;
-      z-index: 1050;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
-    .navbar-brand {
-      font-weight: 600;
-      font-size: 1.75rem;
-      display: flex;
-      align-items: center;
-    }
-    .navbar-brand img {
-      height: 40px;
-      margin-right: 10px;
-    }
-    #sidebarToggle {
-      border: none;
-      background: transparent;
-      color: #fff;
-      font-size: 1.5rem;
-      margin-right: 10px;
-    }
-    /* Sidebar */
-    .sidebar {
-      background-color: var(--sidebar-bg);
-      position: fixed;
-      top: 70px;
-      left: 0;
-      width: 250px;
-      padding: 20px;
-      box-shadow: 2px 0 5px rgba(0,0,0,0.1);
-      transition: transform 0.3s ease;
-      transform: translateX(-100%);
-    }
-    .sidebar.show {
-      transform: translateX(0);
-    }
-    .nav-links {
-      display: flex;
-      flex-direction: column;
-      gap: 5px;
-    }
-    .nav-links a {
-      display: block;
-      width: 100%;
-      padding: 5px 10px;
-      color: var(--primary-color);
-      text-decoration: none;
-      font-weight: 600;
-      font-size: 1rem;
-      transition: background-color 0.3s, color 0.3s;
-    }
-    .nav-links a:not(:last-child) {
-      border-bottom: 1px solid #ccc;
-      margin-bottom: 5px;
-      padding-bottom: 5px;
-    }
-    .nav-links a:hover,
-    .nav-links a.active {
-      background-color: var(--primary-color);
-      color: #fff;
-      border-radius: 4px;
-    }
-    /* Main Content */
-    .main-content {
-      transition: margin-left 0.3s ease;
-      margin-left: 0;
-      padding: 20px;
-      height: calc(100vh - 70px);
-      overflow: auto;
-    }
-    .main-content.shift {
-      margin-left: 250px;
-    }
-    /* Table Styles */
-    .table-custom {
-      background-color: var(--bg-color);
-      border-radius: 8px;
-      overflow: hidden;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-    }
-    .table-custom th {
-      background-color: var(--primary-color);
-      color: var(--accent-color);
-    }
-    /* Footer */
-    .footer {
-      background-color: var(--footer-bg);
-      color: #fff;
-      padding: 10px;
-      text-align: center;
-      position: fixed;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      transition: left 0.3s ease;
-    }
-    .footer.shift {
-      left: 250px;
-    }
-    /* Responsive Adjustments */
-    @media (max-width: 768px) {
-      .sidebar { width: 200px; }
-      .main-content.shift { margin-left: 200px; }
-      .footer.shift { left: 200px; }
-    }
-    @media (max-width: 576px) {
-      .sidebar { width: 250px; }
-      .main-content.shift { margin-left: 0; }
-      .footer.shift { left: 0; }
-    }
-    
-    /* Back to Top Button with Progress Indicator */
-    #backToTop {
-      position: fixed;
-      bottom: 30px;
-      right: 30px;
-      z-index: 9999;
-      display: none; /* Hidden by default */
-      background: rgba(128, 0, 32, 0.7); /* AAMUSTED maroon with transparency */
-      border: none;
-      outline: none;
-      width: 50px;
-      height: 50px;
-      border-radius: 50%;
-      cursor: pointer;
-      transition: background 0.3s ease, transform 0.3s ease;
-      padding: 0;
-      overflow: hidden;
-    }
-    #backToTop svg {
-      display: block;
-      width: 100%;
-      height: 100%;
-    }
-    #backToTop .arrow-icon {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      color: #FFD700;
-      font-size: 1.5rem;
-      pointer-events: none;
-    }
-    #backToTop:hover {
-      background: rgba(96, 0, 16, 0.9);
-      transform: scale(1.1);
-    }
-  </style>
-</head>
-<body>
-  <!-- Header -->
-  <nav class="navbar navbar-dark">
-    <div class="container-fluid">
-      <button id="sidebarToggle"><i class="fas fa-bars"></i></button>
-      <a class="navbar-brand text-white" href="#">
-        <img src="images/aamustedLog.png" alt="AAMUSTED Logo">TimeTable Generator
-      </a>
-      <div class="ms-auto text-white" id="currentTime">12:00:00 PM</div>
-    </div>
-  </nav>
-  
-  <!-- Sidebar -->
-  <?php $currentPage = basename($_SERVER['PHP_SELF']); ?>
-  <div class="sidebar" id="sidebar">
-    <div class="nav-links">
-      <a href="index.php" class="<?= ($currentPage == 'index.php') ? 'active' : '' ?>"><i class="fas fa-home me-2"></i>Dashboard</a>
-      <a href="timetable.php" class="<?= ($currentPage == 'timetable.php') ? 'active' : '' ?>"><i class="fas fa-calendar-alt me-2"></i>Generate Timetable</a>
-      <a href="view_timetable.php" class="<?= ($currentPage == 'view_timetable.php') ? 'active' : '' ?>"><i class="fas fa-table me-2"></i>View Timetable</a>
-      <a href="department.php" class="<?= ($currentPage == 'department.php') ? 'active' : '' ?>"><i class="fas fa-building me-2"></i>Department</a>
-      <a href="lecturer.php" class="<?= ($currentPage == 'lecturer.php') ? 'active' : '' ?>"><i class="fas fa-chalkboard-teacher me-2"></i>Lecturers</a>
-      <a href="rooms.php" class="<?= ($currentPage == 'rooms.php') ? 'active' : '' ?>"><i class="fas fa-door-open me-2"></i>Rooms</a>
-      <a href="courses.php" class="<?= ($currentPage == 'courses.php') ? 'active' : '' ?>"><i class="fas fa-book me-2"></i>Course</a>
-      <a href="classes.php" class="<?= ($currentPage == 'classes.php') ? 'active' : '' ?>"><i class="fas fa-users me-2"></i>Classes</a>
-      <a href="buildings.php" class="<?= ($currentPage == 'buildings.php') ? 'active' : '' ?>"><i class="fas fa-city me-2"></i>Buildings</a>
-    </div>
-  </div>
-  
-  <!-- Main Content -->
-  <div class="main-content" id="mainContent">
-    <h2>Courses Management</h2>
-    <!-- Search & Action Buttons -->
-    <div class="d-flex justify-content-between align-items-center mb-4">
-      <div class="input-group" style="width: 300px;">
-        <span class="input-group-text"><i class="fas fa-search"></i></span>
-        <input type="text" id="searchCourseInput" class="form-control" placeholder="Search for courses...">
-      </div>
-      <div>
-        <button class="btn btn-primary me-2" data-bs-toggle="modal" data-bs-target="#importModal">Import</button>
-        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#dataEntryModal" onclick="setModalAction('add')">Add Course</button>
-      </div>
-    </div>
-    
-    <!-- Courses Table -->
-    <div class="table-responsive">
-      <table class="table table-striped table-custom" id="courseTable">
-        <thead>
-          <tr>
-            <th>Course Code</th>
-            <th>Department</th>
-            <th>Course Name</th>
-            <th>Credit Hours</th>
-            <th>Level</th>
-            <th>Semester</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          <?php
-            include 'connect.php';
-            if ($conn->connect_error) {
-              die("Connection failed: " . $conn->connect_error);
-            }
-            $sql = "SELECT * FROM course";
-            $result = $conn->query($sql);
-            if ($result->num_rows > 0) {
-              while ($row = $result->fetch_assoc()) {
-                echo "<tr>
-                        <td>{$row['course_code']}</td>
-                        <td>{$row['department_name']}</td>
-                        <td>{$row['course_name']}</td>
-                        <td>{$row['course_hours']}</td>
-                        <td>{$row['level']}</td>
-                        <td>{$row['semester']}</td>
-                        <td>
-                          <a href='delete_course.php?course_code={$row['course_code']}' class='btn btn-danger btn-sm' onclick='return confirm(\"Are you sure you want to delete this course?\")'>Delete</a>
-                        </td>
-                      </tr>";
-              }
-            } else {
-              echo "<tr><td colspan='7' class='text-center'>No course found</td></tr>";
-            }
-            $conn->close();
-          ?>
-        </tbody>
-      </table>
-    </div>
-  </div>
-  
-  <!-- Footer -->
-  <div class="footer" id="footer">
-    &copy; 2025 TimeTable Generator
-  </div>
-  
-  <!-- Back to Top Button with Progress Indicator -->
-  <button id="backToTop">
-    <svg width="50" height="50" viewBox="0 0 50 50">
-      <circle id="progressCircle" cx="25" cy="25" r="20" fill="none" stroke="#FFD700" stroke-width="4" stroke-dasharray="126" stroke-dashoffset="126"/>
-    </svg>
-    <i class="fas fa-arrow-up arrow-icon"></i>
-  </button>
-  
-  <!-- Import Modal -->
-  <div class="modal fade" id="importModal" tabindex="-1" aria-labelledby="importModalLabel" aria-hidden="true">
-    <div class="modal-dialog">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h5 class="modal-title" id="importModalLabel">Import Courses</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-        </div>
-        <div class="modal-body">
-          <form action="import_courses.php" method="POST" enctype="multipart/form-data">
-            <div class="mb-3">
-              <label for="file" class="form-label">Choose Excel File</label>
-              <input type="file" class="form-control" id="file" name="file" required accept=".xls, .xlsx">
-            </div>
-            <button type="submit" class="btn btn-primary">Upload</button>
-          </form>
-        </div>
-      </div>
-    </div>
-  </div>
-  
-  <!-- Data Entry Modal -->
-  <div class="modal fade" id="dataEntryModal" tabindex="-1" aria-labelledby="dataEntryModalLabel" aria-hidden="true">
-    <div class="modal-dialog">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h5 class="modal-title" id="dataEntryModalLabel">Enter Course Details</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-        </div>
-        <div class="modal-body">
-          <form action="addcourseform.php" method="POST">
-            <div class="mb-3">
-              <label for="course_code" class="form-label">Course Code</label>
-              <input type="text" class="form-control" id="course_code" name="course_code" placeholder="Enter course code" required>
-            </div>
-            <label for="department" class="form-label">Department</label>
-            <select class="form-select" id="department" name="department_name" required>
-              <option selected disabled>Select Department</option>
-              <?php
-                include 'connect.php';
-                $dept_query = "SELECT department_name FROM department";
-                $dept_result = $conn->query($dept_query);
-                if ($dept_result->num_rows > 0) {
-                  while ($dept_row = $dept_result->fetch_assoc()) {
-                    echo "<option value='{$dept_row['department_name']}'>{$dept_row['department_name']}</option>";
-                  }
-                } else {
-                  echo "<option disabled>No departments available</option>";
-                }
-              ?>
-            </select>
-            <div class="mb-3">
-              <label for="course_name" class="form-label">Course Name</label>
-              <input type="text" class="form-control" id="course_name" name="course_name" placeholder="Enter course name" required>
-            </div>
-            <div class="mb-3">
-              <label for="course_hours" class="form-label">Credit Hours</label>
-              <input type="number" class="form-control" id="course_hours" name="course_hours" placeholder="Enter credit hours" required>
-            </div>
-            <div class="mb-3">
-              <label for="level" class="form-label">Level</label>
-              <select class="form-select" id="level" name="level" required>
-                <option selected disabled>Select Level</option>
-                <option value="100">100</option>
-                <option value="200">200</option>
-                <option value="300">300</option>
-                <option value="400">400</option>
-              </select>
-            </div>
-            <div class="mb-3">
-              <label for="semester" class="form-label">Semester</label>
-              <select class="form-select" id="semester" name="semester" required>
-                <option selected disabled>Select Semester</option>
-                <option value="1">1</option>
-                <option value="2">2</option>
-              </select>
-            </div>
-            <div class="modal-footer">
-              <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-              <button type="submit" class="btn btn-primary">Save changes</button>
-            </div>
-          </form>
-        </div>
-      </div>
-    </div>
-  </div>
-  
-  <!-- Bootstrap Bundle with Popper JS -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.2/js/bootstrap.bundle.min.js"></script>
-  <script>
-    document.addEventListener("DOMContentLoaded", function() {
-      // Update current time in header
-      function updateTime() {
-        const now = new Date();
-        const timeString = now.toLocaleTimeString('en-US', {
-          hour12: true,
-          hour: '2-digit',
-          minute: '2-digit',
-          second: '2-digit'
-        });
-        document.getElementById('currentTime').textContent = timeString;
-      }
-      setInterval(updateTime, 1000);
-      updateTime();
-    
-      // Toggle sidebar visibility
-      document.getElementById('sidebarToggle').addEventListener('click', function() {
-        const sidebar = document.getElementById('sidebar');
-        const mainContent = document.getElementById('mainContent');
-        const footer = document.getElementById('footer');
-        sidebar.classList.toggle('show');
-        if (sidebar.classList.contains('show')) {
-          mainContent.classList.add('shift');
-          footer.classList.add('shift');
-        } else {
-          mainContent.classList.remove('shift');
-          footer.classList.remove('shift');
-        }
-      });
-    
-      // Search functionality for courses table
-      document.getElementById('searchCourseInput').addEventListener('keyup', function() {
-        const searchValue = this.value.toLowerCase();
-        const rows = document.querySelectorAll('#courseTable tbody tr');
-        rows.forEach(row => {
-          const cells = row.querySelectorAll('td');
-          let matchFound = false;
-          for (let i = 0; i < cells.length - 1; i++) {
-            if (cells[i].textContent.toLowerCase().includes(searchValue)) {
-              matchFound = true;
-              break;
-            }
-          }
-          row.style.display = matchFound ? '' : 'none';
-        });
-      });
-      
-      // Back to Top Button with Progress Indicator
-      const backToTopButton = document.getElementById("backToTop");
-      const progressCircle = document.getElementById("progressCircle");
-      const circumference = 2 * Math.PI * 20;
-      progressCircle.style.strokeDasharray = circumference;
-      progressCircle.style.strokeDashoffset = circumference;
-      
-      const mainContent = document.getElementById("mainContent");
-      mainContent.addEventListener("scroll", function() {
-        const scrollTop = mainContent.scrollTop;
-        if (scrollTop > 100) {
-          backToTopButton.style.display = "block";
-        } else {
-          backToTopButton.style.display = "none";
-        }
+}
+
+$pageTitle = 'Courses Management';
+include 'includes/header.php';
+include 'includes/sidebar.php';
+
+// Handle form submission for adding new course
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $action = $_POST['action'] ?? null;
+    if ($_POST['action'] === 'add') {
+        $course_name = $conn->real_escape_string($_POST['course_name']);
+        $course_code = $conn->real_escape_string($_POST['course_code']);
+        $credits = $conn->real_escape_string($_POST['credits']);
+        $hours_per_week = $conn->real_escape_string($_POST['hours_per_week']);
+        $level = $conn->real_escape_string($_POST['level']);
+        $preferred_room_type = $conn->real_escape_string($_POST['preferred_room_type']);
+        $is_active = isset($_POST['is_active']) ? 1 : 0;
         
-        const scrollHeight = mainContent.scrollHeight - mainContent.clientHeight;
-        const scrollPercentage = scrollTop / scrollHeight;
-        const offset = circumference - (scrollPercentage * circumference);
-        progressCircle.style.strokeDashoffset = offset;
-      });
-      
-      backToTopButton.addEventListener("click", function() {
-        mainContent.scrollTo({ top: 0, behavior: "smooth" });
-      });
+        // Global courses: no stream_id required
+        $sql = "INSERT INTO courses (name, code, credits, hours_per_week, level, preferred_room_type, is_active) VALUES (?, ?, ?, ?, ?, ?, ?)";
+        $stmt = $conn->prepare($sql);
+        $stmt->bind_param("ssiiisi", $course_name, $course_code, $credits, $hours_per_week, $level, $preferred_room_type, $is_active);
+        
+        if ($stmt->execute()) {
+            $stmt->close();
+            redirect_with_flash('courses.php', 'success', 'Course added successfully!');
+        } else {
+            $error_message = "Error adding course: " . $conn->error;
+        }
+        $stmt->close();
+    } elseif ($_POST['action'] === 'bulk_import' && isset($_POST['import_data'])) {
+        $import_data = json_decode($_POST['import_data'], true);
+        if ($import_data) {
+            $success_count = 0;
+            $ignored_count = 0;
+            $error_count = 0;
+
+            // Prepare a check statement to detect existing (code)
+            $check_sql = "SELECT id FROM courses WHERE code = ?";
+            $check_stmt = $conn->prepare($check_sql);
+
+            foreach ($import_data as $row) {
+                $course_name = isset($row['course_name']) ? $conn->real_escape_string($row['course_name']) : '';
+                $course_code = isset($row['course_code']) ? $conn->real_escape_string($row['course_code']) : '';
+                $credits = isset($row['credits']) ? (int)$row['credits'] : 3;
+                $hours_per_week = isset($row['hours_per_week']) ? (int)$row['hours_per_week'] : 3;
+                $level = isset($row['level']) ? (int)$row['level'] : 100;
+                $preferred_room_type = isset($row['preferred_room_type']) ? $conn->real_escape_string($row['preferred_room_type']) : 'classroom';
+                $is_active = isset($row['is_active']) ? (int)$row['is_active'] : 1;
+
+                if ($course_name === '' || $course_code === '') {
+                    $error_count++;
+                    continue;
+                }
+
+                // Skip if course with same code exists
+                if ($check_stmt) {
+                    $check_stmt->bind_param("s", $course_code);
+                    $check_stmt->execute();
+                    $existing = $check_stmt->get_result();
+                    if ($existing && $existing->num_rows > 0) {
+                        $ignored_count++;
+                        continue;
+                    }
+                }
+
+                $sql = "INSERT INTO courses (name, code, credits, hours_per_week, level, preferred_room_type, is_active) VALUES (?, ?, ?, ?, ?, ?, ?)";
+                $stmt = $conn->prepare($sql);
+                if (!$stmt) { $error_count++; continue; }
+                $stmt->bind_param("ssiiisi", $course_name, $course_code, $credits, $hours_per_week, $level, $preferred_room_type, $is_active);
+                if ($stmt->execute()) {
+                    $success_count++;
+                } else {
+                    $error_count++;
+                }
+                $stmt->close();
+            }
+
+            if ($check_stmt) $check_stmt->close();
+
+            if ($success_count > 0) {
+                $msg = "Successfully imported $success_count courses!";
+                if ($ignored_count > 0) $msg .= " $ignored_count duplicates ignored.";
+                if ($error_count > 0) $msg .= " $error_count records failed to import.";
+                redirect_with_flash('courses.php', 'success', $msg);
+            } else {
+                if ($ignored_count > 0 && $error_count === 0) {
+                    $success_message = "No new courses imported. $ignored_count duplicates ignored.";
+                } else {
+                    $error_message = "No courses were imported. Please check your data.";
+                }
+            }
+        }
+    } elseif ($_POST['action'] === 'delete' && isset($_POST['id'])) {
+        $id = $conn->real_escape_string($_POST['id']);
+        $sql = "UPDATE courses SET is_active = 0 WHERE id = ?";
+        $stmt = $conn->prepare($sql);
+        $stmt->bind_param("i", $id);
+        
+        if ($stmt->execute()) {
+            $stmt->close();
+            redirect_with_flash('courses.php', 'success', 'Course deleted successfully!');
+        } else {
+            $error_message = "Error deleting course: " . $conn->error;
+        }
+        $stmt->close();
+    }
+}
+
+// Include stream manager (use include_once to avoid redeclaration)
+include_once 'includes/stream_manager.php';
+$streamManager = getStreamManager();
+
+// Fetch courses with department names
+$sql = "SELECT c.*, d.name as department_name, d.code as department_code
+        FROM courses c 
+        LEFT JOIN departments d ON c.department_id = d.id
+        WHERE c.is_active = 1
+        ORDER BY c.department_id IS NULL DESC, d.name, c.name";
+$result = $conn->query($sql);
+
+// Fetch departments for dropdown
+$dept_sql = "SELECT id, name FROM departments WHERE is_active = 1 ORDER BY name";
+$dept_result = $conn->query($dept_sql);
+
+// Get course statistics
+$stats_sql = "
+    SELECT 
+        COUNT(*) as total_courses,
+        COUNT(department_id) as assigned_courses,
+        COUNT(*) - COUNT(department_id) as unassigned_courses
+    FROM courses 
+    WHERE is_active = 1
+";
+$stats_result = $conn->query($stats_sql);
+$stats = $stats_result ? $stats_result->fetch_assoc() : ['total_courses' => 0, 'assigned_courses' => 0, 'unassigned_courses' => 0];
+?>
+
+<div class="main-content" id="mainContent">
+    <div class="table-container">
+        <div class="table-header d-flex justify-content-between align-items-center">
+            <h4><i class="fas fa-book me-2"></i>Courses Management</h4>
+            <div class="d-flex gap-2">
+                <a href="assign_course_departments.php" class="btn btn-warning">
+                    <i class="fas fa-link me-2"></i>Assign Departments
+                </a>
+                <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#importModal">
+                    <i class="fas fa-upload me-2"></i>Import
+                </button>
+                <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addCourseModal">
+                    <i class="fas fa-plus me-2"></i>Add New Course
+                </button>
+            </div>
+        </div>
+        
+        <?php if (isset($success_message)): ?>
+            <div class="alert alert-success alert-dismissible fade show m-3" role="alert">
+                <?php echo $success_message; ?>
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        <?php endif; ?>
+        
+        <?php if (isset($error_message)): ?>
+            <div class="alert alert-danger alert-dismissible fade show m-3" role="alert">
+                <?php echo $error_message; ?>
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        <?php endif; ?>
+
+        <!-- Statistics Cards -->
+        <div class="row g-3 mb-3 m-3">
+            <div class="col-md-4">
+                <div class="card theme-card bg-theme-primary text-white">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <h4 class="card-title"><?php echo $stats['total_courses']; ?></h4>
+                                <p class="card-text">Total Courses</p>
+                            </div>
+                            <div class="align-self-center">
+                                <i class="fas fa-book fa-2x"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card theme-card bg-success text-white">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <h4 class="card-title"><?php echo $stats['assigned_courses']; ?></h4>
+                                <p class="card-text">Assigned to Departments</p>
+                            </div>
+                            <div class="align-self-center">
+                                <i class="fas fa-check-circle fa-2x"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card theme-card bg-warning text-dark">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <h4 class="card-title"><?php echo $stats['unassigned_courses']; ?></h4>
+                                <p class="card-text">Unassigned Courses</p>
+                            </div>
+                            <div class="align-self-center">
+                                <i class="fas fa-exclamation-triangle fa-2x"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="search-container m-3">
+            <input type="text" class="search-input" placeholder="Search courses...">
+        </div>
+
+        <div class="table-responsive">
+            <table class="table" id="coursesTable">
+                <thead>
+                    <tr>
+                        <th>Course Name</th>
+                        <th>Code</th>
+                        <th>Department</th>
+                        <th>Hours/Week</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php if ($result && $result->num_rows > 0): ?>
+                        <?php while ($row = $result->fetch_assoc()): ?>
+                            <tr class="<?php echo $row['department_id'] ? '' : 'table-warning'; ?>">
+                                <td><strong><?php echo htmlspecialchars($row['name']); ?></strong></td>
+                                <td><span class="badge bg-primary"><?php echo htmlspecialchars($row['code']); ?></span></td>
+                                <td>
+                                    <?php if ($row['department_id']): ?>
+                                        <span class="badge bg-success">
+                                            <?php echo htmlspecialchars($row['department_code'] . ' - ' . $row['department_name']); ?>
+                                        </span>
+                                    <?php else: ?>
+                                        <span class="badge bg-warning text-dark">Unassigned</span>
+                                    <?php endif; ?>
+                                </td>
+                                <td><span class="badge bg-info"><?php echo htmlspecialchars($row['hours_per_week'] ?? 'N/A'); ?> hrs/week</span></td>
+                                <td>
+                                    <button class="btn btn-sm btn-outline-primary me-1" onclick="editCourse(<?php echo $row['id']; ?>)">
+                                        <i class="fas fa-edit"></i>
+                                    </button>
+                                    <form method="POST" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this course?')">
+                                        <input type="hidden" name="action" value="delete">
+                                        <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
+                                        <input type="hidden" name="id" value="<?php echo $row['id']; ?>">
+                                        <button type="submit" class="btn btn-sm btn-outline-danger">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </form>
+                                </td>
+                            </tr>
+                        <?php endwhile; ?>
+                    <?php else: ?>
+                        <tr>
+                            <td colspan="5" class="empty-state">
+                                <i class="fas fa-book"></i>
+                                <p>No courses found. Add your first course to get started!</p>
+                            </td>
+                        </tr>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Add Course Modal -->
+<div class="modal fade" id="addCourseModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Add New Course</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST">
+                <div class="modal-body">
+                    <input type="hidden" name="action" value="add">
+                    <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
+                    
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="course_name" class="form-label">Course Name *</label>
+                                <input type="text" class="form-control" id="course_name" name="course_name" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="course_code" class="form-label">Course Code *</label>
+                                <input type="text" class="form-control" id="course_code" name="course_code" required>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <!-- Department field removed: courses are not department-scoped -->
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="level" class="form-label">Level *</label>
+                                <select class="form-select" id="level" name="level" required>
+                                    <option value="">Select Level</option>
+                                    <option value="100">100 Level</option>
+                                    <option value="200">200 Level</option>
+                                    <option value="300">300 Level</option>
+                                    <option value="400">400 Level</option>
+                                    <option value="500">500 Level</option>
+                                    <option value="600">600 Level</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="credits" class="form-label">Credits *</label>
+                                <select class="form-select" id="credits" name="credits" required>
+                                    <option value="">Select Credits</option>
+                                    <option value="1">1 Credit</option>
+                                    <option value="2">2 Credits</option>
+                                    <option value="3">3 Credits</option>
+                                    <option value="4">4 Credits</option>
+                                    <option value="6">6 Credits</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="hours_per_week" class="form-label">Hours Per Week *</label>
+                                <select class="form-select" id="hours_per_week" name="hours_per_week" required>
+                                    <option value="">Select Hours</option>
+                                    <option value="1">1 Hour</option>
+                                    <option value="2">2 Hours</option>
+                                    <option value="3">3 Hours</option>
+                                    <option value="4">4 Hours</option>
+                                    <option value="5">5 Hours</option>
+                                    <option value="6">6 Hours</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="preferred_room_type" class="form-label">Preferred Room Type *</label>
+                        <select class="form-select" id="preferred_room_type" name="preferred_room_type" required>
+                            <option value="">Select Room Type</option>
+                            <option value="classroom">Classroom</option>
+                            <option value="lecture_hall">Lecture Hall</option>
+                            <option value="laboratory">Laboratory</option>
+                            <option value="computer_lab">Computer Lab</option>
+                            <option value="seminar_room">Seminar Room</option>
+                            <option value="auditorium">Auditorium</option>
+                        </select>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="is_active" name="is_active" checked>
+                            <label class="form-check-label" for="is_active">
+                                Active Course
+                            </label>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Add Course</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Import Modal -->
+<div class="modal fade" id="importModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Import Courses</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="text-center mb-4">
+                    <i class="fas fa-upload fa-3x text-primary mb-3"></i>
+                    <h6>Upload CSV File</h6>
+                    <p class="text-muted">Drop your CSV file here or click to browse</p>
+                </div>
+
+                <div class="mb-3">
+                    <div class="upload-area" id="uploadArea" style="border: 2px dashed #ccc; border-radius: 8px; padding: 40px; text-align: center; background: #f8f9fa; cursor: pointer;">
+                        <i class="fas fa-cloud-upload-alt fa-2x text-muted mb-3"></i>
+                        <p class="mb-2">Drop CSV file here or <strong>click to browse</strong></p>
+                        <small class="text-muted">Supported format: CSV (headers: name,code,credits,hours_per_week,level,preferred_room_type,is_active)</small>
+                    </div>
+                    <input type="file" class="form-control d-none" id="csvFile" accept=",.csv">
+                </div>
+
+                <div class="mb-3">
+                    <h6>Preview (first 10 rows)</h6>
+                    <div class="table-responsive">
+                        <table class="table table-sm" id="previewTable">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Name</th>
+                                    <th>Code</th>
+                                    <th>Department ID</th>
+                                    <th>Credits</th>
+                                    <th>Hours/Week</th>
+                                    <th>Level</th>
+                                    <th>Room Type</th>
+                                    <th>Status</th>
+                                    <th>Validation</th>
+                                </tr>
+                            </thead>
+                            <tbody id="previewBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="d-flex justify-content-between">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="processBtn" disabled>Process File</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<?php 
+// Embed existing course codes for client-side duplicate checks
+// Courses are global; do not filter by stream
+$existing_codes = [];
+$codes_res = $conn->query("SELECT code FROM courses WHERE is_active = 1");
+if ($codes_res) {
+    while ($r = $codes_res->fetch_assoc()) {
+        $existing_codes[] = $r['code'];
+    }
+}
+?>
+<script>
+var existingCourseCodes = <?php echo json_encode($existing_codes); ?> || [];
+var existingCourseCodesSet = {};
+existingCourseCodes.forEach(function(code){ if (code) existingCourseCodesSet[code.trim().toUpperCase()] = true; });
+</script>
+
+<?php 
+$conn->close();
+include 'includes/footer.php'; 
+?>
+
+<script>
+function editCourse(id) {
+    // TODO: Implement edit functionality
+    alert('Edit functionality will be implemented here for course ID: ' + id);
+}
+</script>
+
+<script>
+let importDataCourses = [];
+
+function parseCSVCourses(csvText) {
+    const lines = csvText.split('\n').filter(l => l.trim());
+    const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+    const data = [];
+
+    for (let i = 1; i < lines.length; i++) {
+        const values = lines[i].split(',').map(v => v.trim().replace(/"/g, ''));
+        const row = {};
+        headers.forEach((header, index) => {
+            row[header] = values[index] || '';
+        });
+        data.push(row);
+    }
+    return data;
+}
+
+function validateCoursesData(data) {
+    return data.map(row => {
+        const validated = {
+            course_name: row.course_name || row.courseName || row.name || row.Name || '',
+            course_code: row.course_code || row.courseCode || row.code || row.Code || '',
+            // department_id removed: courses are not department-scoped
+            department_id: '',
+            credits: row.credits || row.Credits || '3',
+            hours_per_week: row.hours_per_week || row.hoursPerWeek || row.hours_per_week || '3',
+            level: row.level || row.Level || '100',
+            preferred_room_type: row.preferred_room_type || row.preferredRoomType || row.preferred_room_type || 'classroom',
+            is_active: (row.is_active || row.isActive || '1') === '1' ? '1' : '0'
+        };
+        validated.valid = true;
+        validated.errors = [];
+        if (!validated.course_name.trim()) { validated.valid = false; validated.errors.push('Course name required'); }
+        if (!validated.course_code.trim()) { validated.valid = false; validated.errors.push('Course code required'); }
+        // department_id validation removed
+
+        // Check for duplicate code
+        if (existingCourseCodesSet[validated.code.trim().toUpperCase()]) {
+            validated.valid = false;
+            validated.errors.push('Course code already exists.');
+        }
+        return validated;
     });
-  </script>
-</body>
-</html>
+}
+
+function showPreviewCourses() {
+    const tbody = document.getElementById('previewBody');
+    tbody.innerHTML = '';
+    const previewRows = importDataCourses.slice(0, 10);
+    let validCount = 0;
+
+    previewRows.forEach((row, idx) => {
+        const tr = document.createElement('tr');
+        tr.className = row.valid ? '' : 'table-danger';
+
+        // Determine status badge/text
+        let validationHtml = '';
+        if (row.valid) {
+            validationHtml = '<span class="text-success">✓ Valid</span>';
+            validCount++;
+        } else {
+            const isExisting = row.errors && row.errors.some(e => e.toLowerCase().includes('already exists'));
+            if (isExisting) {
+                validationHtml = '<span class="badge bg-secondary">Skipped (exists)</span>';
+            } else {
+                validationHtml = '<span class="text-danger">✗ ' + (row.errors ? row.errors.join(', ') : 'Invalid') + '</span>';
+            }
+        }
+
+        tr.innerHTML = `
+            <td>${idx+1}</td>
+            <td>${row.course_name}</td>
+            <td>${row.course_code}</td>
+            <!-- department_id removed -->
+            <td>${row.credits}</td>
+            <td>${row.hours_per_week}</td>
+            <td>${row.level}</td>
+            <td>${row.preferred_room_type}</td>
+            <td><span class="badge ${row.is_active === '1' ? 'bg-success' : 'bg-secondary'}">${row.is_active === '1' ? 'Active' : 'Inactive'}</span></td>
+            <td>${validationHtml}</td>
+        `;
+        tbody.appendChild(tr);
+    });
+
+    // Update process button to show how many valid rows will be imported
+    const processBtn = document.getElementById('processBtn');
+    if (processBtn) {
+        if (validCount > 0) {
+            processBtn.disabled = false;
+            processBtn.textContent = `Process (${validCount})`;
+        } else {
+            processBtn.disabled = true;
+            processBtn.textContent = 'Process File';
+        }
+    }
+}
+
+function processCoursesFile(file) {
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const data = parseCSVCourses(e.target.result);
+        importDataCourses = validateCoursesData(data);
+        showPreviewCourses();
+        // process button state is updated inside showPreviewCourses
+    };
+    reader.readAsText(file);
+}
+
+// Set up drag/drop and file input
+document.addEventListener('DOMContentLoaded', function() {
+    const uploadArea = document.getElementById('uploadArea');
+    const fileInput = document.getElementById('csvFile');
+    const processBtn = document.getElementById('processBtn');
+
+    uploadArea.addEventListener('click', () => fileInput.click());
+    uploadArea.addEventListener('dragover', function(e){ e.preventDefault(); this.style.borderColor='#007bff'; this.style.background='#e3f2fd'; });
+    uploadArea.addEventListener('dragleave', function(e){ e.preventDefault(); this.style.borderColor='#ccc'; this.style.background='#f8f9fa'; });
+    uploadArea.addEventListener('drop', function(e){ e.preventDefault(); this.style.borderColor='#ccc'; this.style.background='#f8f9fa'; const files = e.dataTransfer.files; if (files.length) { fileInput.files = files; processCoursesFile(files[0]); } });
+    fileInput.addEventListener('change', function(){ if (this.files.length) processCoursesFile(this.files[0]); });
+
+    processBtn.addEventListener('click', function(){
+        const validData = importDataCourses.filter(r => r.valid);
+        if (validData.length === 0) { alert('No valid records to import'); return; }
+        const form = document.createElement('form'); form.method='POST'; form.style.display='none';
+        const actionInput = document.createElement('input'); actionInput.type='hidden'; actionInput.name='action'; actionInput.value='bulk_import';
+        const dataInput = document.createElement('input'); dataInput.type='hidden'; dataInput.name='import_data'; dataInput.value = JSON.stringify(validData);
+        form.appendChild(actionInput); form.appendChild(dataInput); document.body.appendChild(form); form.submit();
+    });
+});
+</script>

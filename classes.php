@@ -1,536 +1,383 @@
 <?php
+$pageTitle = 'Classes Management';
+include 'includes/header.php';
+include 'includes/sidebar.php';
 
-// Determine the current page filename
-$currentPage = basename($_SERVER['PHP_SELF']);
-
-// Connect to the database
+// Database connection
 include 'connect.php';
 
-// Search functionality
-$search = isset($_GET['search']) ? $_GET['search'] : '';
-$searchQuery = "";
-if (!empty($search)) {
-    $search = $conn->real_escape_string($search);
-    $searchQuery = " WHERE class.class_name LIKE '%$search%' 
-                     OR class.department LIKE '%$search%'
-                     OR class.level LIKE '%$search%'
-                     OR course.course_name LIKE '%$search%'";
+// Check whether the `departments` table has a `short_name` column (some DBs may lack it)
+$dept_short_exists = false;
+$col_check = $conn->query("SHOW COLUMNS FROM departments LIKE 'short_name'");
+if ($col_check && $col_check->num_rows > 0) {
+    $dept_short_exists = true;
 }
 
-// Updated query with renamed primary key and search filter
-$sql = "SELECT 
-          class.class_id, 
-          class.class_name, 
-          class.department, 
-          class.level, 
-          class.class_session, 
-          class.anydis, 
-          class.capacity,
-          GROUP_CONCAT(DISTINCT CASE WHEN course.semester = '1' THEN course.course_name END SEPARATOR ', ') AS sem1_courses,
-          GROUP_CONCAT(DISTINCT CASE WHEN course.semester = '2' THEN course.course_name END SEPARATOR ', ') AS sem2_courses
-        FROM class
-        LEFT JOIN class_course ON class.class_id = class_course.class_id
-        LEFT JOIN course ON class_course.course_id = course.course_id
-        $searchQuery
-        GROUP BY class.class_id";
+// Fetch streams from database
+$streams_sql = "SELECT id, name, code FROM streams WHERE is_active = 1 ORDER BY name";
+$streams_result = $conn->query($streams_sql);
+
+// Handle form submission for adding new class
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $action = $_POST['action'] ?? null;
+    if ($action === 'add') {
+        // Current schema: classes has program_id and level_id
+        $program_id = $conn->real_escape_string($_POST['program_code'] ?? '');
+        $level_id = $conn->real_escape_string($_POST['level_id'] ?? '');
+        $total_capacity = intval($_POST['total_capacity'] ?? 0);
+        $stream_id = isset($_POST['stream_id']) ? $conn->real_escape_string($_POST['stream_id']) : 1;
+        $is_active = 1;
+
+        // Fetch program and level
+        $prog_stmt = $conn->prepare("SELECT id, name, code FROM programs WHERE id = ?");
+        $prog_stmt->bind_param("i", $program_id);
+        $prog_stmt->execute();
+        $prog_res = $prog_stmt->get_result();
+        $program = $prog_res->fetch_assoc();
+        $prog_stmt->close();
+
+        $lvl_stmt = $conn->prepare("SELECT id, name FROM levels WHERE id = ?");
+        $lvl_stmt->bind_param("i", $level_id);
+        $lvl_stmt->execute();
+        $lvl_res = $lvl_stmt->get_result();
+        $level = $lvl_res->fetch_assoc();
+        $lvl_stmt->close();
+
+        if ($program && $level) {
+            $num_classes = max(1, ceil($total_capacity / 100));
+            $success_count = 0;
+            $error_count = 0;
+
+            // Extract level numeric part for code (e.g., 'Level 100' -> '100')
+            preg_match('/(\d+)/', $level['name'], $m);
+            $level_num = $m[1] ?? '1';
+            $year_suffix = date('Y');
+
+            for ($i = 0; $i < $num_classes; $i++) {
+                $letter = chr(65 + $i);
+                $class_name = $program['name'] . ' ' . $level['name'] . ($num_classes > 1 ? $letter : '');
+                $class_code = ($program['code'] ?? 'PRG') . '-Y' . $level_num . '-' . $year_suffix . ($num_classes > 1 ? $letter : '');
+                $academic_year = date('Y') . '/' . (date('Y') + 1);
+                $semester = 'first';
+
+                $sql = "INSERT INTO classes (program_id, level_id, name, code, academic_year, semester, stream_id, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+                $stmt = $conn->prepare($sql);
+                $stmt->bind_param("iissssii", $program_id, $level_id, $class_name, $class_code, $academic_year, $semester, $stream_id, $is_active);
+
+                if ($stmt->execute()) {
+                    $success_count++;
+                } else {
+                    $error_count++;
+                }
+                $stmt->close();
+            }
+
+            if ($success_count > 0) {
+                $msg = "Successfully created $success_count classes!";
+                if ($error_count > 0) {
+                    $msg .= " ($error_count classes failed to create)";
+                }
+                redirect_with_flash('classes.php', 'success', $msg);
+            } else {
+                $error_message = "Failed to create any classes. Please check your input.";
+            }
+        } else {
+            $error_message = "Invalid program or level selected.";
+        }
+    } elseif ($action === 'delete' && isset($_POST['id'])) {
+        $id = $conn->real_escape_string($_POST['id']);
+        $sql = "UPDATE classes SET is_active = 0 WHERE id = ?";
+        $stmt = $conn->prepare($sql);
+        $stmt->bind_param("i", $id);
+        
+        if ($stmt->execute()) {
+            $stmt->close();
+            redirect_with_flash('classes.php', 'success', 'Class deleted successfully!');
+        } else {
+            $error_message = "Error deleting class: " . $conn->error;
+        }
+        $stmt->close();
+    }
+}
+
+// Include stream manager
+include 'includes/stream_manager.php';
+$streamManager = getStreamManager();
+
+// Fetch classes with related program, level and stream information
+// Detect commonly used foreign keys on `classes` and join accordingly
+$class_has_program = false;
+$class_has_level = false;
+$class_has_stream = false;
+$col = $conn->query("SHOW COLUMNS FROM classes LIKE 'program_id'");
+if ($col && $col->num_rows > 0) {
+    $class_has_program = true;
+}
+$col = $conn->query("SHOW COLUMNS FROM classes LIKE 'level_id'");
+if ($col && $col->num_rows > 0) {
+    $class_has_level = true;
+}
+$col = $conn->query("SHOW COLUMNS FROM classes LIKE 'stream_id'");
+if ($col && $col->num_rows > 0) {
+    $class_has_stream = true;
+}
+
+$select_extra = [];
+$from_clause = "FROM classes c ";
+
+// Join programs
+if ($class_has_program) {
+    $select_extra[] = "p.name as program_name";
+    $select_extra[] = "p.code as program_code";
+    $from_clause .= "LEFT JOIN programs p ON c.program_id = p.id ";
+}
+
+// Join levels
+if ($class_has_level) {
+    $select_extra[] = "l.name as level_name";
+    $from_clause .= "LEFT JOIN levels l ON c.level_id = l.id ";
+}
+
+// Join streams
+if ($class_has_stream) {
+    $select_extra[] = "s.name as stream_name";
+    $select_extra[] = "s.code as stream_code";
+    $from_clause .= "LEFT JOIN streams s ON c.stream_id = s.id ";
+}
+
+// Preserve department short selection (only used when programs/departments are linked)
+if ($dept_short_exists && !$class_has_program) {
+    // If we don't have program join, but departments are expected elsewhere, include department placeholder
+    $select_extra[] = $dept_short_exists ? "d.short_name as department_short" : "SUBSTRING(d.name,1,3) as department_short";
+}
+
+$select_clause = "c.*";
+if (!empty($select_extra)) {
+    $select_clause .= ", " . implode(', ', $select_extra);
+}
+
+$where_clause = "WHERE c.is_active = 1";
+if ($class_has_stream) {
+    $where_clause .= " AND c.stream_id = " . $streamManager->getCurrentStreamId();
+}
+
+$sql = "SELECT " . $select_clause . "\n        " . $from_clause . "\n        " . $where_clause . "\n        ORDER BY c.name";
 $result = $conn->query($sql);
+
+$dept_select_cols = $dept_short_exists ? "id, name, short_name" : "id, name";
+// Departments are global; do not filter by stream here
+$dept_sql = "SELECT " . $dept_select_cols . " FROM departments WHERE is_active = 1 ORDER BY name";
+$dept_result = $conn->query($dept_sql);
+
+// Fetch levels for dropdown
+// Use year_number for ordering when available, otherwise fall back to id
+$level_order_col = 'year_number';
+$col_check = $conn->query("SHOW COLUMNS FROM levels LIKE 'year_number'");
+if (!($col_check && $col_check->num_rows > 0)) {
+    $level_order_col = 'id';
+}
+$level_sql = "SELECT id, name FROM levels ORDER BY " . $level_order_col;
+$level_result = $conn->query($level_sql);
+
+
 ?>
 
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Classes Management - TimeTable Generator</title>
-  <!-- Bootstrap CSS -->
-  <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.2/css/bootstrap.min.css" rel="stylesheet" />
-  <!-- Font Awesome -->
-  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet" />
-  <style>
-    :root {
-      --primary-color: #800020;   /* AAMUSTED maroon */
-      --hover-color: #600010;       /* Darker maroon */
-      --accent-color: #FFD700;      /* Accent goldenrod */
-      --bg-color: #ffffff;          /* White background */
-      --sidebar-bg: #f8f8f8;         /* Light gray sidebar */
-      --footer-bg: #800020;         /* Footer same as primary */
-    }
-    /* Global Styles */
-    body {
-      font-family: 'Open Sans', sans-serif;
-      background-color: var(--bg-color);
-      margin: 0;
-      padding-top: 70px; /* For fixed header */
-      overflow: hidden;
-      font-size: 14px;
-    }
-    /* Header */
-    .navbar {
-      background-color: var(--primary-color);
-      position: fixed;
-      top: 0;
-      width: 100%;
-      z-index: 1050;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
-    .navbar-brand {
-      font-weight: 600;
-      font-size: 1.75rem;
-      display: flex;
-      align-items: center;
-    }
-    .navbar-brand img {
-      height: 40px;
-      margin-right: 10px;
-    }
-    #sidebarToggle {
-      border: none;
-      background: transparent;
-      color: #fff;
-      font-size: 1.5rem;
-      margin-right: 10px;
-    }
-    /* Sidebar */
-    .sidebar {
-      background-color: var(--sidebar-bg);
-      position: fixed;
-      top: 70px;
-      left: 0;
-      width: 250px;
-      height: calc(100vh - 70px);
-      padding: 20px;
-      box-shadow: 2px 0 5px rgba(0,0,0,0.1);
-      transition: transform 0.3s ease;
-      transform: translateX(-100%);
-    }
-    .sidebar.show {
-      transform: translateX(0);
-    }
-    .nav-links {
-      display: flex;
-      flex-direction: column;
-      gap: 5px;
-    }
-    .nav-links a {
-      display: block;
-      width: 100%;
-      padding: 5px 10px;
-      color: var(--primary-color);
-      text-decoration: none;
-      font-weight: 600;
-      font-size: 1rem;
-      transition: background-color 0.3s, color 0.3s;
-    }
-    .nav-links a:not(:last-child) {
-      border-bottom: 1px solid #ccc;
-      margin-bottom: 5px;
-      padding-bottom: 5px;
-    }
-    .nav-links a:hover,
-    .nav-links a.active {
-      background-color: var(--primary-color);
-      color: #fff;
-      border-radius: 4px;
-    }
-    /* Main Content */
-    .main-content {
-      transition: margin-left 0.3s ease;
-      margin-left: 0;
-      padding: 20px;
-      height: calc(100vh - 70px);
-      overflow: auto;
-    }
-    .main-content.shift {
-      margin-left: 250px;
-    }
-    /* Table Styles */
-    .table-custom {
-      background-color: var(--bg-color);
-      border-radius: 8px;
-      overflow: hidden;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-    }
-    .table-custom th {
-      background-color: var(--primary-color);
-      color: var(--accent-color);
-    }
-    /* Footer */
-    .footer {
-      background-color: var(--footer-bg);
-      color: #fff;
-      padding: 10px;
-      text-align: center;
-      position: fixed;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      transition: left 0.3s ease;
-    }
-    .footer.shift {
-      left: 250px;
-    }
-    /* Back to Top Button */
-    #backToTop {
-      position: fixed;
-      bottom: 30px;
-      right: 30px;
-      z-index: 9999;
-      display: none;
-      background: rgba(128, 0, 32, 0.7);
-      border: none;
-      outline: none;
-      width: 50px;
-      height: 50px;
-      border-radius: 50%;
-      cursor: pointer;
-      transition: background 0.3s ease, transform 0.3s ease;
-      padding: 0;
-      overflow: hidden;
-    }
-    #backToTop svg {
-      display: block;
-      width: 100%;
-      height: 100%;
-    }
-    #backToTop .arrow-icon {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      color: #FFD700;
-      font-size: 1.5rem;
-      pointer-events: none;
-    }
-    #backToTop:hover {
-      background: rgba(96, 0, 16, 0.9);
-      transform: scale(1.1);
-    }
-    /* Responsive Adjustments */
-    @media (max-width: 768px) {
-      .sidebar { width: 200px; }
-      .main-content.shift { margin-left: 200px; }
-      .footer.shift { left: 200px; }
-    }
-    @media (max-width: 576px) {
-      .sidebar { width: 250px; }
-      .main-content.shift { margin-left: 0; }
-      .footer.shift { left: 0; }
-    }
-  </style>
-</head>
-<body>
-  <!-- Header -->
-  <nav class="navbar navbar-dark">
-    <div class="container-fluid">
-      <button id="sidebarToggle"><i class="fas fa-bars"></i></button>
-      <a class="navbar-brand text-white" href="#">
-        <img src="images/aamustedLog.png" alt="AAMUSTED Logo">TimeTable Generator
-      </a>
-      <div class="ms-auto text-white" id="currentTime">12:00:00 PM</div>
-    </div>
-  </nav>
-  
-  <!-- Sidebar -->
-  <?php $currentPage = basename($_SERVER['PHP_SELF']); ?>
-  <div class="sidebar" id="sidebar">
-    <div class="nav-links">
-      <a href="index.php" class="<?= ($currentPage == 'index.php') ? 'active' : '' ?>"><i class="fas fa-home me-2"></i>Dashboard</a>
-      <a href="timetable.php" class="<?= ($currentPage == 'timetable.php') ? 'active' : '' ?>"><i class="fas fa-calendar-alt me-2"></i>Generate Timetable</a>
-      <a href="view_timetable.php" class="<?= ($currentPage == 'view_timetable.php') ? 'active' : '' ?>"><i class="fas fa-table me-2"></i>View Timetable</a>
-      <a href="department.php" class="<?= ($currentPage == 'department.php') ? 'active' : '' ?>"><i class="fas fa-building me-2"></i>Department</a>
-      <a href="lecturer.php" class="<?= ($currentPage == 'lecturer.php') ? 'active' : '' ?>"><i class="fas fa-chalkboard-teacher me-2"></i>Lecturers</a>
-      <a href="rooms.php" class="<?= ($currentPage == 'rooms.php') ? 'active' : '' ?>"><i class="fas fa-door-open me-2"></i>Rooms</a>
-      <a href="courses.php" class="<?= ($currentPage == 'courses.php') ? 'active' : '' ?>"><i class="fas fa-book me-2"></i>Course</a>
-      <a href="classes.php" class="<?= ($currentPage == 'classes.php') ? 'active' : '' ?>"><i class="fas fa-users me-2"></i>Classes</a>
-      <a href="buildings.php" class="<?= ($currentPage == 'buildings.php') ? 'active' : '' ?>"><i class="fas fa-city me-2"></i>Buildings</a>
-    </div>
-  </div>
-  
-  <!-- Main Content -->
-  <div class="main-content" id="mainContent">
-    <h2>Classes Management</h2>
-    <!-- Search & Action Buttons -->
-    <div class="d-flex justify-content-between align-items-center mb-4">
-      <div class="input-group" style="width: 300px;">
-        <span class="input-group-text"><i class="fas fa-search"></i></span>
-        <input type="text" id="searchInput" class="form-control" placeholder="Search for classes...">
-      </div>
-      <div>
-        <button class="btn btn-primary me-2" data-bs-toggle="modal" data-bs-target="#importModal">Import</button>
-        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#dataEntryModal">Add Class</button>
-      </div>
-    </div>
-    
-    <!-- Classes Table -->
-    <div class="table-responsive">
-      <table class="table table-striped table-custom" id="classesTable">
-        <thead>
-          <tr>
-            <th>Class Name</th>
-            <th>Department</th>
-            <th>Level</th>
-            <th>Session</th>
-            <th>Anydis</th>
-            <th>Capacity</th>
-            <th>Semester 1 Courses</th>
-            <th>Semester 2 Courses</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          <?php
-            if ($result) {
-              while ($row = $result->fetch_assoc()) { ?>
-                  <tr>
-                      <td><?php echo $row['class_name']; ?></td>
-                      <td><?php echo $row['department']; ?></td>
-                      <td><?php echo $row['level']; ?></td>
-                      <td><?php echo $row['class_session']; ?></td>
-                      <td><?php echo $row['anydis']; ?></td>
-                      <td><?php echo $row['capacity']; ?></td>
-                      <td><?php echo $row['sem1_courses'] ?: 'No Courses Assigned'; ?></td>
-                      <td><?php echo $row['sem2_courses'] ?: 'No Courses Assigned'; ?></td>
-                      <td>
-                          <a href="delete_class.php?class_name=<?php echo $row['class_name']; ?>" class="btn btn-danger btn-sm" onclick="return confirm('Are you sure you want to delete this class?');">Delete</a>
-                      </td>
-                  </tr>
-          <?php }
-            }
-            $conn->close();
-          ?>
-        </tbody>
-      </table>
-    </div>
-  </div>
-  
-  <!-- Footer -->
-  <div class="footer" id="footer">
-    &copy; 2025 TimeTable Generator
-  </div>
-  
-  <!-- Back to Top Button with Progress Indicator -->
-  <button id="backToTop">
-    <svg width="50" height="50" viewBox="0 0 50 50">
-      <circle id="progressCircle" cx="25" cy="25" r="20" fill="none" stroke="#FFD700" stroke-width="4" stroke-dasharray="126" stroke-dashoffset="126"/>
-    </svg>
-    <i class="fas fa-arrow-up arrow-icon"></i>
-  </button>
-  
-  <!-- Import Modal (Accept Only Excel Files) -->
-  <div class="modal fade" id="importModal" tabindex="-1" aria-labelledby="importModalLabel" aria-hidden="true">
-    <div class="modal-dialog">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h5 class="modal-title" id="importModalLabel">Import Classes</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+<div class="main-content" id="mainContent">
+    <div class="table-container">
+        <div class="table-header d-flex justify-content-between align-items-center">
+            <h4><i class="fas fa-users me-2"></i>Classes Management</h4>
+            <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addClassModal">
+                <i class="fas fa-plus me-2"></i>Add New Classes
+            </button>
         </div>
-        <div class="modal-body">
-          <form action="import_classes.php" method="POST" enctype="multipart/form-data">
-            <div class="mb-3">
-              <label for="file" class="form-label">Choose Excel File</label>
-              <input type="file" class="form-control" id="file" name="file" required accept=".xls, .xlsx">
+        
+        <?php if (isset($success_message)): ?>
+            <div class="alert alert-success alert-dismissible fade show m-3" role="alert">
+                <?php echo $success_message; ?>
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
             </div>
-            <button type="submit" class="btn btn-primary">Upload</button>
-          </form>
+        <?php endif; ?>
+        
+        <?php if (isset($error_message)): ?>
+            <div class="alert alert-danger alert-dismissible fade show m-3" role="alert">
+                <?php echo $error_message; ?>
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        <?php endif; ?>
+
+        <div class="search-container m-3">
+            <input type="text" class="search-input" placeholder="Search classes...">
         </div>
-      </div>
+
+        <div class="table-responsive">
+            <table class="table" id="classesTable">
+                <thead>
+                    <tr>
+                        <th>Class Name</th>
+                        <th>Level</th>
+                        <th>Program</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php if ($result && $result->num_rows > 0): ?>
+                        <?php while ($row = $result->fetch_assoc()): ?>
+                            <tr>
+                                <td><strong><?php echo htmlspecialchars($row['name']); ?></strong></td>
+                                <td><span class="badge bg-warning"><?php echo htmlspecialchars($row['level'] ?? ($row['level_name'] ?? 'N/A')); ?></span></td>
+                                <td>
+                                    <span class="badge bg-info"><?php echo htmlspecialchars($row['program_name'] ?? 'N/A'); ?></span>
+                                </td>
+                                <td>
+                                    <button class="btn btn-sm btn-outline-primary me-1" onclick="editClass(<?php echo $row['id']; ?>)">
+                                        <i class="fas fa-edit"></i>
+                                    </button>
+                                    <form method="POST" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this class?')">
+                                        <input type="hidden" name="action" value="delete">
+                                        <input type="hidden" name="id" value="<?php echo $row['id']; ?>">
+                                        <button type="submit" class="btn btn-sm btn-outline-danger">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </form>
+                                </td>
+                            </tr>
+                        <?php endwhile; ?>
+                    <?php else: ?>
+                        <tr>
+                            <td colspan="4" class="empty-state">
+                                <i class="fas fa-users"></i>
+                                <p>No classes found. Add your first classes to get started!</p>
+                            </td>
+                        </tr>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
     </div>
-  </div>
-  
-  <!-- Data Entry Modal -->
-  <div class="modal fade" id="dataEntryModal" tabindex="-1" aria-labelledby="dataEntryModalLabel" aria-hidden="true">
-    <div class="modal-dialog">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h5 class="modal-title" id="dataEntryModalLabel">Enter Class Details</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+</div>
+
+<!-- Add Classes Modal -->
+<div class="modal fade" id="addClassModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Add New Classes</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST">
+                <div class="modal-body">
+                    <input type="hidden" name="action" value="add">
+                    
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle me-2"></i>
+                        <strong>Auto-Class Generation:</strong> Select the program, level, and enter the number of students. The system will automatically create multiple classes (max 100 students per class) with proper naming convention.
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="program_code" class="form-label">Program Code *</label>
+                                <select class="form-select" id="program_code" name="program_code" required>
+                                    <option value="">Select Program</option>
+                                    <?php
+                                    // Fetch programs for dropdown
+                                    $programs_sql = "SELECT id, name, code FROM programs WHERE is_active = 1 ORDER BY name";
+                                    $programs_result = $conn->query($programs_sql);
+                                    if ($programs_result && $programs_result->num_rows > 0):
+                                        while ($program = $programs_result->fetch_assoc()):
+                                    ?>
+                                        <option value="<?php echo $program['id']; ?>" data-code="<?php echo htmlspecialchars($program['code']); ?>">
+                                            <?php echo htmlspecialchars($program['name']); ?> (<?php echo htmlspecialchars($program['code']); ?>)
+                                        </option>
+                                    <?php 
+                                        endwhile;
+                                    endif;
+                                    ?>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="level_id" class="form-label">Level *</label>
+                                <select class="form-select" id="level_id" name="level_id" required>
+                                    <option value="">Select Level</option>
+                                    <?php if ($level_result && $level_result->num_rows > 0): ?>
+                                        <?php while ($level = $level_result->fetch_assoc()): ?>
+                                            <option value="<?php echo $level['id']; ?>"><?php echo htmlspecialchars($level['name']); ?></option>
+                                        <?php endwhile; ?>
+                                    <?php endif; ?>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-12">
+                            <div class="mb-3">
+                                <label for="total_capacity" class="form-label">Number of Students *</label>
+                                <input type="number" class="form-control" id="total_capacity" name="total_capacity" min="1" max="1000" value="100" required>
+                                <small class="text-muted">The system will automatically create multiple classes (max 100 students per class)</small>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div id="classPreview" class="alert alert-secondary" style="display: none;">
+                        <strong>Class Preview:</strong> <span id="previewText"></span>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Generate Classes</button>
+                </div>
+            </form>
         </div>
-        <div class="modal-body">
-          <form action="addclassesform.php" method="POST">
-            <div class="mb-3">
-              <label for="class_name" class="form-label">Class Name</label>
-              <input type="text" class="form-control" id="class_name" name="class_name" placeholder="Enter Class Name" required>
-            </div>
-            <div class="mb-3">
-              <label for="department" class="form-label">Department</label>
-              <select class="form-select" id="department" name="department" required>
-                <option selected disabled>Select Department</option>
-                <?php
-                  include 'connect.php';
-                  $dept_query = "SELECT department_name FROM department";
-                  $dept_result = $conn->query($dept_query);
-                  if ($dept_result->num_rows > 0) {
-                      while ($dept_row = $dept_result->fetch_assoc()) {
-                          echo "<option value='{$dept_row['department_name']}'>{$dept_row['department_name']}</option>";
-                      }
-                  } else {
-                      echo "<option disabled>No departments available</option>";
-                  }
-                ?>
-              </select>
-            </div>
-            <div class="mb-3">
-              <label for="level" class="form-label">Level</label>
-              <select class="form-select" id="level" name="level" required>
-                <option selected disabled>Select Level</option>
-                <option value="100">100</option>
-                <option value="200">200</option>
-                <option value="300">300</option>
-                <option value="400">400</option>
-              </select>
-            </div>
-            <div class="mb-3">
-              <label for="class_session" class="form-label">Class Session</label>
-              <select class="form-select" id="class_session" name="class_session" required>
-                <option selected disabled>Select Class Session</option>
-                <option value="Regular">Regular</option>
-                <option value="Evening">Evening</option>
-                <option value="Weekend">Weekend</option>
-              </select>
-            </div>
-            <div class="mb-3">
-              <label for="anydis" class="form-label">Any Disabled?</label>
-              <select class="form-select" id="anydis" name="anydis" required>
-                <option selected disabled>Select If Any Disabled</option>
-                <option value="Yes">Yes</option>
-                <option value="No">No</option>
-              </select>
-            </div>
-            <div class="mb-3">
-              <label for="capacity" class="form-label">Capacity</label>
-              <input type="text" class="form-control" id="capacity" name="capacity" placeholder="Enter Capacity" required>
-            </div>
-            <!-- New fields for selecting Semester 1 and Semester 2 courses -->
-            <div class="mb-3">
-              <label for="sem1_courses" class="form-label">Select Semester 1 Courses</label>
-              <div class="dropdown">
-                <button class="btn btn-light w-100 dropdown-toggle" type="button" id="dropdownMenuSem1" data-bs-toggle="dropdown" aria-expanded="false">
-                  Select Semester 1 Courses
-                </button>
-                <ul class="dropdown-menu w-100" aria-labelledby="dropdownMenuSem1" style="max-height: 200px; overflow-y: auto;">
-                  <?php
-                    include 'connect.php';
-                    $querySem1 = "SELECT * FROM course WHERE semester = '1'";
-                    $resultSem1 = mysqli_query($conn, $querySem1);
-                    while ($rowSem1 = mysqli_fetch_assoc($resultSem1)) {
-                        echo "<li><input type='checkbox' name='sem1_courses[]' value='{$rowSem1['course_id']}'> {$rowSem1['course_name']}</li>";
-                    }
-                  ?>
-                </ul>
-              </div>
-            </div>
-            <div class="mb-3">
-              <label for="sem2_courses" class="form-label">Select Semester 2 Courses</label>
-              <div class="dropdown">
-                <button class="btn btn-light w-100 dropdown-toggle" type="button" id="dropdownMenuSem2" data-bs-toggle="dropdown" aria-expanded="false">
-                  Select Semester 2 Courses
-                </button>
-                <ul class="dropdown-menu w-100" aria-labelledby="dropdownMenuSem2" style="max-height: 200px; overflow-y: auto;">
-                  <?php
-                    include 'connect.php';
-                    $querySem2 = "SELECT * FROM course WHERE semester = '2'";
-                    $resultSem2 = mysqli_query($conn, $querySem2);
-                    while ($rowSem2 = mysqli_fetch_assoc($resultSem2)) {
-                        echo "<li><input type='checkbox' name='sem2_courses[]' value='{$rowSem2['course_id']}'> {$rowSem2['course_name']}</li>";
-                    }
-                  ?>
-                </ul>
-              </div>
-            </div>
-            <div class="modal-footer">
-              <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-              <button type="submit" class="btn btn-primary">Save changes</button>
-            </div>
-          </form>
-        </div>
-      </div>
     </div>
-  </div>
-  
-  <!-- Bootstrap Bundle with Popper JS -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.2/js/bootstrap.bundle.min.js"></script>
-  
-  <!-- Main Functionalities -->
-  <script>
-    document.addEventListener("DOMContentLoaded", function() {
-      // Update current time in header
-      function updateTime() {
-        const now = new Date();
-        const timeString = now.toLocaleTimeString('en-US', { 
-          hour12: true,
-          hour: '2-digit',
-          minute: '2-digit',
-          second: '2-digit'
-        });
-        document.getElementById('currentTime').textContent = timeString;
-      }
-      setInterval(updateTime, 1000);
-      updateTime();
+</div>
+
+<?php 
+$conn->close();
+include 'includes/footer.php'; 
+?>
+
+<script>
+function editClass(id) {
+    // TODO: Implement edit functionality
+    alert('Edit functionality will be implemented here for class ID: ' + id);
+}
+
+// Preview class names as user types
+document.getElementById('total_capacity').addEventListener('input', updateClassPreview);
+document.getElementById('program_code').addEventListener('change', updateClassPreview);
+document.getElementById('level_id').addEventListener('change', updateClassPreview);
+
+
+function updateClassPreview() {
+    const capacity = parseInt(document.getElementById('total_capacity').value) || 0;
+    const programSelect = document.getElementById('program_code');
+    const levelSelect = document.getElementById('level_id');
+    const previewDiv = document.getElementById('classPreview');
+    const previewText = document.getElementById('previewText');
     
-      // Toggle sidebar visibility
-      document.getElementById('sidebarToggle').addEventListener('click', function() {
-        const sidebar = document.getElementById('sidebar');
-        const mainContent = document.getElementById('mainContent');
-        const footer = document.getElementById('footer');
-        sidebar.classList.toggle('show');
-        if (sidebar.classList.contains('show')) {
-          mainContent.classList.add('shift');
-          footer.classList.add('shift');
-        } else {
-          mainContent.classList.remove('shift');
-          footer.classList.remove('shift');
-        }
-      });
-    
-      // Search functionality for classes table
-      document.getElementById('searchInput').addEventListener('keyup', function() {
-        let searchValue = this.value.toLowerCase();
-        let rows = document.querySelectorAll('#classesTable tbody tr');
-        rows.forEach(row => {
-          let cells = row.querySelectorAll('td');
-          let matchFound = false;
-          for (let i = 0; i < cells.length - 1; i++) {
-            if (cells[i].textContent.toLowerCase().includes(searchValue)) {
-              matchFound = true;
-              break;
-            }
-          }
-          row.style.display = matchFound ? '' : 'none';
-        });
-      });
-    
-      // Back to Top Button with Progress Indicator using mainContent scroll
-      const backToTopButton = document.getElementById("backToTop");
-      const progressCircle = document.getElementById("progressCircle");
-      const circumference = 2 * Math.PI * 20;
-      progressCircle.style.strokeDasharray = circumference;
-      progressCircle.style.strokeDashoffset = circumference;
-      
-      const mainContent = document.getElementById("mainContent");
-      mainContent.addEventListener("scroll", function() {
-        const scrollTop = mainContent.scrollTop;
-        if (scrollTop > 100) {
-          backToTopButton.style.display = "block";
-        } else {
-          backToTopButton.style.display = "none";
+    if (capacity > 0 && programSelect.value && levelSelect.value) {
+        const selectedOption = programSelect.options[programSelect.selectedIndex];
+        const programCode = selectedOption.dataset.code || selectedOption.text.match(/\(([^)]+)\)/)?.[1] || 'PROG';
+        const levelText = levelSelect.options[levelSelect.selectedIndex].text;
+        
+        // Extract just the number from level text (e.g., "Level 100" -> "100")
+        const levelNumber = levelText.match(/\d+/)?.[0] || levelText.replace(/\D/g, '');
+        
+        const numClasses = Math.ceil(capacity / 100);
+        const classes = [];
+        
+        for (let i = 0; i < numClasses; i++) {
+            const letter = String.fromCharCode(65 + i);
+            classes.push(programCode + levelNumber + letter);
         }
         
-        const scrollHeight = mainContent.scrollHeight - mainContent.clientHeight;
-        const scrollPercentage = scrollTop / scrollHeight;
-        const offset = circumference - (scrollPercentage * circumference);
-        progressCircle.style.strokeDashoffset = offset;
-      });
-      
-      backToTopButton.addEventListener("click", function() {
-        mainContent.scrollTo({ top: 0, behavior: "smooth" });
-      });
-    });
-  </script>
-  
-  <!-- Additional Back to Top Button Styling (Optional) -->
-  <style>
-    /* Optional additional styling */
-  </style>
-  
-</body>
-</html>
+        previewText.textContent = classes.join(', ');
+        previewDiv.style.display = 'block';
+    } else {
+        previewDiv.style.display = 'none';
+    }
+}
+</script>
