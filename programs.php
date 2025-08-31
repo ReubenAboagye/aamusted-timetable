@@ -9,129 +9,10 @@ include 'connect.php';
 // Handle bulk import and form submissions
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? null;
-    // Bulk import
-    if ($action === 'bulk_import' && isset($_POST['import_data'])) {
-        $import_data = json_decode($_POST['import_data'], true);
-        if ($import_data) {
-            $success_count = 0;
-            $ignored_count = 0;
-            $error_count = 0;
-
-            // Prepare check statements to detect existing programs
-            $check_name_dept_sql = "SELECT id FROM programs WHERE name = ? AND department_id = ?";
-            $check_code_sql = "SELECT id FROM programs WHERE code = ?";
-            $check_name_dept_stmt = $conn->prepare($check_name_dept_sql);
-            $check_code_stmt = $conn->prepare($check_code_sql);
-            // Prepared statement to verify department exists
-            $check_dept_stmt = $conn->prepare("SELECT id FROM departments WHERE id = ?");
-
-            foreach ($import_data as $row) {
-                $name = isset($row['name']) ? $conn->real_escape_string($row['name']) : '';
-                $department_id = isset($row['department_id']) ? (int)$row['department_id'] : 0;
-                $code = isset($row['code']) ? $conn->real_escape_string($row['code']) : '';
-                $duration = isset($row['duration']) ? (int)$row['duration'] : 0;
-                $is_active = isset($row['is_active']) ? (int)$row['is_active'] : 1;
-
-                if ($name === '' || $department_id === 0) {
-                    $error_count++;
-                    continue;
-                }
-
-                // Verify department exists
-                if ($check_dept_stmt) {
-                    $check_dept_stmt->bind_param("i", $department_id);
-                    $check_dept_stmt->execute();
-                    $dept_res = $check_dept_stmt->get_result();
-                    if (!$dept_res || $dept_res->num_rows === 0) {
-                        $error_count++;
-                        continue;
-                    }
-                }
-
-                // Generate a code if not provided
-                if (empty($code)) {
-                    $base_code = strtoupper(substr(preg_replace('/[^a-zA-Z0-9]/', '', $name), 0, 6));
-                    // Ensure uniqueness by adding department prefix if needed
-                    if (strlen($base_code) < 3) {
-                        $base_code = 'PRG' . $base_code;
-                    }
-                    
-                    $code = $base_code;
-                    $counter = 1;
-                    
-                    // Check if code exists and generate a unique one
-                    while (true) {
-                        $check_code_stmt->bind_param("s", $code);
-                        $check_code_stmt->execute();
-                        $existing_code = $check_code_stmt->get_result();
-                        if ($existing_code && $existing_code->num_rows > 0) {
-                            $code = $base_code . $counter;
-                            $counter++;
-                            // Prevent infinite loop
-                            if ($counter > 999) {
-                                $code = $base_code . time() % 1000;
-                                break;
-                            }
-                        } else {
-                            break;
-                        }
-                    }
-                }
-
-                // Skip if program with same name and department exists
-                if ($check_name_dept_stmt) {
-                    $check_name_dept_stmt->bind_param("si", $name, $department_id);
-                    $check_name_dept_stmt->execute();
-                    $existing_name_dept = $check_name_dept_stmt->get_result();
-                    if ($existing_name_dept && $existing_name_dept->num_rows > 0) {
-                        $ignored_count++;
-                        continue;
-                    }
-                }
-
-                // Skip if program with same code exists
-                if ($check_code_stmt) {
-                    $check_code_stmt->bind_param("s", $code);
-                    $check_code_stmt->execute();
-                    $existing_code = $check_code_stmt->get_result();
-                    if ($existing_code && $existing_code->num_rows > 0) {
-                        $ignored_count++;
-                        continue;
-                    }
-                }
-
-                $sql = "INSERT INTO programs (name, department_id, code, duration_years, is_active) VALUES (?, ?, ?, ?, ?)";
-                $stmt = $conn->prepare($sql);
-                if (!$stmt) { $error_count++; continue; }
-                $stmt->bind_param("sisii", $name, $department_id, $code, $duration, $is_active);
-                if ($stmt->execute()) {
-                    $success_count++;
-                } else {
-                    $error_count++;
-                }
-                $stmt->close();
-            }
-
-            if ($check_name_dept_stmt) $check_name_dept_stmt->close();
-            if ($check_code_stmt) $check_code_stmt->close();
-            if ($check_dept_stmt) $check_dept_stmt->close();
-
-            if ($success_count > 0) {
-                $msg = "Successfully imported $success_count programs!";
-                if ($ignored_count > 0) $msg .= " $ignored_count duplicates ignored.";
-                if ($error_count > 0) $msg .= " $error_count records failed to import.";
-                redirect_with_flash('programs.php', 'success', $msg);
-            } else {
-                if ($ignored_count > 0 && $error_count === 0) {
-                    $success_message = "No new programs imported. $ignored_count duplicates ignored.";
-                } else {
-                    $error_message = "No programs were imported. Please check your data.";
-                }
-            }
-        }
+    // Bulk import removed
 
     // Single add
-    } elseif ($action === 'add') {
+    if ($action === 'add') {
         $name = $conn->real_escape_string($_POST['name']);
         $department_id = (int)$_POST['department_id'];
         $code = $conn->real_escape_string($_POST['code'] ?? '');
@@ -263,9 +144,7 @@ $dept_result = $conn->query($dept_sql);
         <div class="table-header d-flex justify-content-between align-items-center">
             <h4><i class="fas fa-graduation-cap me-2"></i>Programs Management</h4>
             <div class="d-flex gap-2">
-                <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#importModal">
-                    <i class="fas fa-upload me-2"></i>Import
-                </button>
+                <!-- Import removed -->
             <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addProgramModal">
                 <i class="fas fa-plus me-2"></i>Add New Program
             </button>
@@ -460,58 +339,7 @@ $dept_result = $conn->query($dept_sql);
     </div>
 </div>
 
-<!-- Import Modal -->
-<div class="modal fade" id="importModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Import Programs</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-                <div class="text-center mb-4">
-                    <i class="fas fa-upload fa-3x text-primary mb-3"></i>
-                    <h6>Upload CSV File</h6>
-                    <p class="text-muted">Drop your CSV file here or click to browse</p>
-                </div>
-
-                <div class="mb-3">
-                    <div class="upload-area" id="uploadArea" style="border: 2px dashed #ccc; border-radius: 8px; padding: 40px; text-align: center; background: #f8f9fa; cursor: pointer;">
-                        <i class="fas fa-cloud-upload-alt fa-2x text-muted mb-3"></i>
-                        <p class="mb-2">Drop CSV file here or <strong>click to browse</strong></p>
-                        <small class="text-muted">Supported format: CSV (headers: name,department_id,code,duration,is_active)</small>
-                    </div>
-                    <input type="file" class="form-control d-none" id="csvFile" accept=",.csv">
-                </div>
-
-                <div class="mb-3">
-                    <h6>Preview (first 10 rows)</h6>
-                    <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
-                        <table class="table table-sm table-bordered" id="previewTable" style="min-width: 100%; margin-bottom: 0;">
-                            <thead class="table-light sticky-top" style="background-color: #f8f9fa;">
-                                <tr>
-                                    <th style="width: 5%; min-width: 40px;">#</th>
-                                    <th style="width: 20%; min-width: 120px;">Name</th>
-                                    <th style="width: 15%; min-width: 80px;">Code</th>
-                                    <th style="width: 15%; min-width: 80px;">Dept ID</th>
-                                    <th style="width: 10%; min-width: 80px;">Duration</th>
-                                    <th style="width: 10%; min-width: 80px;">Status</th>
-                                    <th style="width: 25%; min-width: 150px;">Validation</th>
-                                </tr>
-                            </thead>
-                            <tbody id="previewBody"></tbody>
-                        </table>
-                    </div>
-                </div>
-
-                <div class="d-flex justify-content-between">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="button" class="btn btn-primary" id="processBtn" disabled>Process File</button>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
+<!-- Import removed -->
 
 <?php 
 // Embed existing program data for client-side duplicate checks
@@ -606,18 +434,58 @@ document.addEventListener('DOMContentLoaded', function(){
     <?php endif; ?>
 });
 </script>
+// Import functionality removed - clear variables and functions
 let importDataPrograms = [];
 
 function parseCSVPrograms(csvText) {
+    // Normalize newlines and trim
+    csvText = csvText.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
     const lines = csvText.split('\n').filter(l => l.trim());
-    const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+    if (lines.length === 0) return [];
+
+    // Robust CSV line parser that honors quoted fields and escaped quotes
+    function parseCSVLine(line) {
+        const result = [];
+        let cur = '';
+        let inQuotes = false;
+        for (let i = 0; i < line.length; i++) {
+            const ch = line[i];
+            if (inQuotes) {
+                if (ch === '"') {
+                    if (line[i + 1] === '"') { // escaped quote
+                        cur += '"';
+                        i++; // skip next
+                    } else {
+                        inQuotes = false;
+                    }
+                } else {
+                    cur += ch;
+                }
+            } else {
+                if (ch === '"') {
+                    inQuotes = true;
+                } else if (ch === ',') {
+                    result.push(cur);
+                    cur = '';
+                } else {
+                    cur += ch;
+                }
+            }
+        }
+        result.push(cur);
+        return result.map(s => s.trim());
+    }
+
+    const headers = parseCSVLine(lines[0]).map(h => h.replace(/^"|"$/g, '').trim());
     const data = [];
 
     for (let i = 1; i < lines.length; i++) {
-        const values = lines[i].split(',').map(v => v.trim().replace(/"/g, ''));
+        // skip empty lines
+        if (!lines[i].trim()) continue;
+        const values = parseCSVLine(lines[i]);
         const row = {};
         headers.forEach((header, index) => {
-            row[header] = values[index] || '';
+            row[header] = values[index] !== undefined ? values[index] : '';
         });
         data.push(row);
     }
@@ -658,7 +526,7 @@ function validateProgramsData(data) {
 function showPreviewPrograms() {
     const tbody = document.getElementById('previewBody');
     if (!tbody) {
-        console.error('Preview table body not found');
+        // preview removed; silently return
         return;
     }
     tbody.innerHTML = '';
@@ -700,72 +568,17 @@ function showPreviewPrograms() {
     });
 
     // Update process button to show how many valid rows will be imported
-    const processBtn = document.getElementById('processBtn');
-    if (processBtn) {
-        if (validCount > 0) {
-            processBtn.disabled = false;
-            processBtn.textContent = `Process (${validCount})`;
-        } else {
-            processBtn.disabled = true;
-            processBtn.textContent = 'Process File';
-        }
-    }
+    // process button removed
 }
 
 function processProgramsFile(file) {
-    const reader = new FileReader();
-    reader.onload = function(e) {
-        const data = parseCSVPrograms(e.target.result);
-        importDataPrograms = validateProgramsData(data);
-        showPreviewPrograms();
-        // process button state is updated inside showPreviewPrograms
-    };
-    reader.readAsText(file);
+    // removed
 }
 
 // Set up drag/drop and file input
 document.addEventListener('DOMContentLoaded', function() {
-    const uploadArea = document.getElementById('uploadArea');
-    const fileInput = document.getElementById('csvFile');
-    const processBtn = document.getElementById('processBtn');
-
-    uploadArea.addEventListener('click', () => fileInput.click());
-    uploadArea.addEventListener('dragover', function(e){ e.preventDefault(); this.style.borderColor='#007bff'; this.style.background='#e3f2fd'; });
-    uploadArea.addEventListener('dragleave', function(e){ e.preventDefault(); this.style.borderColor='#ccc'; this.style.background='#f8f9fa'; });
-    uploadArea.addEventListener('drop', function(e){ e.preventDefault(); this.style.borderColor='#ccc'; this.style.background='#f8f9fa'; const files = e.dataTransfer.files; if (files.length) { fileInput.files = files; processProgramsFile(files[0]); } });
-    fileInput.addEventListener('change', function(){ if (this.files.length) processProgramsFile(this.files[0]); });
-
-    processBtn.addEventListener('click', function(){
-        const validData = importDataPrograms.filter(r => r.valid);
-        if (validData.length === 0) { alert('No valid records to import'); return; }
-        
-        // Ensure all required fields are present
-        const processedData = validData.map(row => ({
-            name: row.name,
-            department_id: row.department_id,
-            code: row.code,
-            duration: row.duration,
-            is_active: row.is_active
-        }));
-        
-        const form = document.createElement('form'); form.method='POST'; form.style.display='none';
-        const actionInput = document.createElement('input'); actionInput.type='hidden'; actionInput.name='action'; actionInput.value='bulk_import';
-        const dataInput = document.createElement('input'); dataInput.type='hidden'; dataInput.name='import_data'; dataInput.value = JSON.stringify(processedData);
-        form.appendChild(actionInput); form.appendChild(dataInput); document.body.appendChild(form); form.submit();
-    });
+    // upload handlers removed
     
-    // Ensure table is properly initialized when modal is shown
-    const importModal = document.getElementById('importModal');
-    if (importModal) {
-        importModal.addEventListener('shown.bs.modal', function() {
-            console.log('Import modal shown, initializing table');
-            // Clear any existing data
-            importDataPrograms = [];
-            const tbody = document.getElementById('previewBody');
-            if (tbody) {
-                tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">Upload a CSV file to see preview</td></tr>';
-            }
-        });
-    }
+    // Import modal removed; nothing to initialize
 });
 </script>

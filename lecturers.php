@@ -11,41 +11,71 @@ include 'includes/sidebar.php';
 
 // Handle form submission for adding/editing/deleting lecturer
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
-    if ($_POST['action'] === 'add') {
+    $action = $_POST['action'];
+    if ($action === 'add') {
         $name = $conn->real_escape_string($_POST['name']);
         $department_id = (int)$_POST['department_id'];
         $is_active = isset($_POST['is_active']) ? 1 : 0;
 
-        // Lecturers are global; do not assign stream_id
-        $sql = "INSERT INTO lecturers (name, department_id, is_active) VALUES (?, ?, ?)";
-        $stmt = $conn->prepare($sql);
-        $stmt->bind_param("sii", $name, $department_id, $is_active);
-
-        if ($stmt->execute()) {
-            $stmt->close();
-            redirect_with_flash('lecturers.php', 'success', 'Lecturer added successfully!');
-        } else {
-            $error_message = "Error adding lecturer: " . $conn->error;
+        // Verify department exists before inserting
+        $dept_check = $conn->prepare("SELECT id FROM departments WHERE id = ?");
+        if ($dept_check) {
+            $dept_check->bind_param("i", $department_id);
+            $dept_check->execute();
+            $dept_res = $dept_check->get_result();
+            if (!$dept_res || $dept_res->num_rows === 0) {
+                $error_message = "Selected department does not exist.";
+                $dept_check->close();
+            }
+            $dept_check->close();
         }
-        $stmt->close();
+
+        if (empty($error_message)) {
+            // Lecturers are global; do not assign stream_id
+            $sql = "INSERT INTO lecturers (name, department_id, is_active) VALUES (?, ?, ?)";
+            $stmt = $conn->prepare($sql);
+            $stmt->bind_param("sii", $name, $department_id, $is_active);
+
+            if ($stmt->execute()) {
+                $stmt->close();
+                redirect_with_flash('lecturers.php', 'success', 'Lecturer added successfully!');
+            } else {
+                $error_message = "Error adding lecturer: " . $conn->error;
+            }
+            $stmt->close();
+        }
 
     } elseif ($action === 'edit' && isset($_POST['id'])) {
         $id = (int)$_POST['id'];
         $name = $conn->real_escape_string($_POST['name']);
         $department_id = (int)$_POST['department_id'];
         $is_active = isset($_POST['is_active']) ? 1 : 0;
-
-        $sql = "UPDATE lecturers SET name = ?, department_id = ?, is_active = ? WHERE id = ?";
-        $stmt = $conn->prepare($sql);
-        $stmt->bind_param("siii", $name, $department_id, $is_active, $id);
-
-        if ($stmt->execute()) {
-            $stmt->close();
-            redirect_with_flash('lecturers.php', 'success', 'Lecturer updated successfully!');
-        } else {
-            $error_message = "Error updating lecturer: " . $conn->error;
+        // Verify department exists before updating
+        $dept_check = $conn->prepare("SELECT id FROM departments WHERE id = ?");
+        if ($dept_check) {
+            $dept_check->bind_param("i", $department_id);
+            $dept_check->execute();
+            $dept_res = $dept_check->get_result();
+            if (!$dept_res || $dept_res->num_rows === 0) {
+                $error_message = "Selected department does not exist.";
+                $dept_check->close();
+            }
+            $dept_check->close();
         }
-        $stmt->close();
+
+        if (empty($error_message)) {
+            $sql = "UPDATE lecturers SET name = ?, department_id = ?, is_active = ? WHERE id = ?";
+            $stmt = $conn->prepare($sql);
+            $stmt->bind_param("siii", $name, $department_id, $is_active, $id);
+
+            if ($stmt->execute()) {
+                $stmt->close();
+                redirect_with_flash('lecturers.php', 'success', 'Lecturer updated successfully!');
+            } else {
+                $error_message = "Error updating lecturer: " . $conn->error;
+            }
+            $stmt->close();
+        }
 
     } elseif ($action === 'delete' && isset($_POST['id'])) {
         $id = $conn->real_escape_string($_POST['id']);
