@@ -21,7 +21,8 @@ $departments_sql = "SELECT id, name FROM departments WHERE is_active = 1 ORDER B
 $departments_result = $conn->query($departments_sql);
 
 // Build the main query to fetch saved timetables
-$where_conditions = ["t.session_id IS NOT NULL"];
+// timetable no longer stores session_id; classes reference streams via c.stream_id
+$where_conditions = ["c.stream_id IS NOT NULL"];
 $params = [];
 $param_types = "";
 
@@ -44,12 +45,31 @@ if ($selected_department > 0) {
 
 $where_clause = implode(" AND ", $where_conditions);
 
+// Aggregate timetables by stream (classes.stream_id -> streams.id)
+// Detect whether timetable stores lecturer_course_id (newer schema) or lecturer_id (older schema)
+// Detect whether timetable stores lecturer_course_id (newer schema) or lecturer_id (older schema)
+$col = $conn->query("SHOW COLUMNS FROM timetable LIKE 'lecturer_course_id'");
+$has_lecturer_course = ($col && $col->num_rows > 0);
+if ($col) $col->close();
+
+// Detect whether timetable stores class_course_id (newer schema) or class_id/course_id (older schema)
+$col = $conn->query("SHOW COLUMNS FROM timetable LIKE 'class_course_id'");
+$has_class_course = ($col && $col->num_rows > 0);
+if ($col) $col->close();
+
+$lecturer_join = $has_lecturer_course
+    ? "\n    JOIN lecturer_courses lc ON t.lecturer_course_id = lc.id\n    JOIN lecturers l ON lc.lecturer_id = l.id"
+    : "\n    JOIN lecturers l ON t.lecturer_id = l.id";
+
+$class_join = $has_class_course
+    ? "\n    JOIN class_courses cc ON t.class_course_id = cc.id\n    JOIN classes c ON cc.class_id = c.id\n    JOIN courses co ON cc.course_id = co.id"
+    : "\n    JOIN classes c ON t.class_id = c.id\n    JOIN courses co ON t.course_id = co.id";
+
 $main_query = "
     SELECT DISTINCT
-        t.session_id,
-        s.semester_name,
-        s.academic_year,
-        s.semester_number,
+        c.stream_id AS stream_id,
+        s.name AS stream_name,
+        s.code AS stream_code,
         COUNT(DISTINCT t.id) as total_entries,
         COUNT(DISTINCT c.id) as total_classes,
         COUNT(DISTINCT co.id) as total_courses,
@@ -57,17 +77,14 @@ $main_query = "
         COUNT(DISTINCT r.id) as total_rooms,
         MAX(t.created_at) as last_updated
     FROM timetable t
-    JOIN sessions s ON t.session_id = s.id
-    JOIN class_courses cc ON t.class_course_id = cc.id
-    JOIN classes c ON cc.class_id = c.id
-    JOIN courses co ON cc.course_id = co.id
-    JOIN lecturer_courses lc ON t.lecturer_course_id = lc.id
-    JOIN lecturers l ON lc.lecturer_id = l.id
+    " . $class_join . "
+    JOIN streams s ON c.stream_id = s.id
+    " . $lecturer_join . "
     JOIN rooms r ON t.room_id = r.id" . $join_programs . "
     WHERE $where_clause
-    GROUP BY t.session_id, s.semester_name, s.academic_year, s.semester_number
-    ORDER BY s.academic_year DESC, s.semester_number DESC
-";
+    GROUP BY c.stream_id, s.name, s.code
+    ORDER BY last_updated DESC
+    ";
 
 $stmt = $conn->prepare($main_query);
 if (!empty($params)) {
@@ -81,24 +98,29 @@ $stmt->close();
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? null;
     if ($action === 'delete') {
-        $session_id = isset($_POST['session_id']) ? intval($_POST['session_id']) : 0;
+        $stream_id = isset($_POST['stream_id']) ? intval($_POST['stream_id']) : 0;
 
-        if ($session_id > 0) {
-            // Delete timetable entries for the session
-            $delete_stmt = $conn->prepare("DELETE FROM timetable WHERE session_id = ?");
-        $delete_stmt->bind_param('i', $session_id);
-        
+        if ($stream_id > 0) {
+            // Delete timetable entries for the given stream (classes in that stream)
+            $delete_stmt = $conn->prepare(
+                "DELETE t FROM timetable t
+                 JOIN class_courses cc ON t.class_course_id = cc.id
+                 JOIN classes c ON cc.class_id = c.id
+                 WHERE c.stream_id = ?"
+            );
+            $delete_stmt->bind_param('i', $stream_id);
+
             if ($delete_stmt->execute()) {
                 $delete_stmt->close();
                 $location = 'saved_timetable.php';
-            $params = [];
-            if ($selected_stream) $params['stream_id'] = $selected_stream;
-            if ($selected_department) $params['department_id'] = $selected_department;
-            if (!empty($params)) $location .= '?' . http_build_query($params);
-            redirect_with_flash($location, 'success', 'Timetable for the selected session has been deleted successfully.');
-        } else {
-            $error_message = "Error deleting timetable: " . $conn->error;
-        }
+                $params = [];
+                if ($selected_stream) $params['stream_id'] = $selected_stream;
+                if ($selected_department) $params['department_id'] = $selected_department;
+                if (!empty($params)) $location .= '?' . http_build_query($params);
+                redirect_with_flash($location, 'success', 'Timetable for the selected stream has been deleted successfully.');
+            } else {
+                $error_message = "Error deleting timetable: " . $conn->error;
+            }
             $delete_stmt->close();
         }
     }
@@ -245,17 +267,17 @@ $error_message = $_GET['error'] ?? '';
                                 <?php while ($timetable = $timetables_result->fetch_assoc()): ?>
                                     <tr>
                                         <td>
-                                            <strong><?php echo htmlspecialchars($timetable['semester_name']); ?></strong>
+                                            <strong><?php echo htmlspecialchars($timetable['stream_name']); ?></strong>
                                         </td>
                                         <td>
                                             <span class="badge bg-info"><?php echo htmlspecialchars($timetable['academic_year']); ?></span>
                                         </td>
                                         <td>
                                             <?php 
-                                            $semester_names = ['1' => 'First', '2' => 'Second', '3' => 'Summer'];
-                                            $semester_name = $semester_names[$timetable['semester_number']] ?? 'Unknown';
+                                            // Stream-based schema: show stream code as semester/label
+                                            $stream_label = htmlspecialchars($timetable['stream_code'] ?? $timetable['stream_name']);
                                             ?>
-                                            <span class="badge bg-secondary"><?php echo $semester_name; ?></span>
+                                            <span class="badge bg-secondary"><?php echo $stream_label; ?></span>
                                         </td>
                                         <td>
                                             <div class="row g-1">
@@ -277,16 +299,16 @@ $error_message = $_GET['error'] ?? '';
                                         <td>
                                             <div class="btn-group btn-group-sm" role="group">
                                                 <div class="btn-group" role="group" aria-label="Actions">
-                                                    <a href="view_timetable.php?session_id=<?php echo $timetable['session_id']; ?>" class="btn btn-sm btn-outline-primary" title="View Timetable">
+                                                    <a href="view_timetable.php?stream_id=<?php echo $timetable['stream_id']; ?>" class="btn btn-sm btn-outline-primary" title="View Timetable">
                                                         <i class="fas fa-eye"></i>
                                                     </a>
-                                                    <a href="export_timetable.php?session_id=<?php echo $timetable['session_id']; ?>" class="btn btn-sm btn-outline-success" title="Export" target="_blank">
+                                                    <a href="export_timetable.php?stream_id=<?php echo $timetable['stream_id']; ?>" class="btn btn-sm btn-outline-success" title="Export" target="_blank">
                                                         <i class="fas fa-download"></i>
                                                     </a>
-                                                    <button type="button" class="btn btn-sm btn-outline-info" title="Edit Session" onclick="openEditSessionModal(<?php echo $timetable['session_id']; ?>, '<?php echo addslashes($timetable['semester_name']); ?>', '<?php echo addslashes($timetable['academic_year']); ?>', <?php echo (int)$timetable['semester_number']; ?>)">
+                                                    <button type="button" class="btn btn-sm btn-outline-info" title="Edit Stream" onclick="openEditStreamModal(<?php echo $timetable['stream_id']; ?>, '<?php echo addslashes($timetable['stream_name']); ?>')">
                                                         <i class="fas fa-edit"></i>
                                                     </button>
-                                                    <button type="button" class="btn btn-sm btn-outline-danger" title="Delete Timetable" onclick="confirmDelete(<?php echo $timetable['session_id']; ?>, '<?php echo htmlspecialchars($timetable['semester_name'] . ' (' . $timetable['academic_year'] . ')'); ?>')">
+                                                    <button type="button" class="btn btn-sm btn-outline-danger" title="Delete Timetable" onclick="confirmDelete(<?php echo $timetable['stream_id']; ?>, '<?php echo htmlspecialchars($timetable['stream_name']); ?>')">
                                                         <i class="fas fa-trash"></i>
                                                     </button>
                                                 </div>
