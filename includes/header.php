@@ -8,7 +8,7 @@ if (session_status() == PHP_SESSION_NONE) {
   session_start();
 }
 
-<<<<<<< HEAD
+
 // Ensure database connection is available
 if (!isset($conn) || $conn === null) {
   $connectPath = __DIR__ . '/../connect.php';
@@ -17,7 +17,8 @@ if (!isset($conn) || $conn === null) {
   } else {
     include_once 'connect.php';
   }
-=======
+}
+
 // Suppress direct PHP error output so raw error dumps don't break the page layout
 ini_set('display_errors', '0');
 ini_set('display_startup_errors', '0');
@@ -90,7 +91,6 @@ register_shutdown_function(function() {
 $flashFile = __DIR__ . '/flash.php';
 if (file_exists($flashFile)) {
     include_once $flashFile;
->>>>>>> 9dd5360da70ebc24bcab50197e45dc14755ce2ba
 }
 
 // --- Handle stream switching (keep session key consistent with index.php) ---
