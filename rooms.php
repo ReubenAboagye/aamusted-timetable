@@ -1304,6 +1304,12 @@ function waitForBootstrap(callback, maxWait = 5000) {
             setTimeout(checkBootstrap, 50);
         } else {
             console.error('Bootstrap failed to load within timeout');
+            // Try to proceed anyway, but with error handling
+            try {
+                callback();
+            } catch (error) {
+                console.error('Error executing callback after Bootstrap timeout:', error);
+            }
         }
     }
 
@@ -1339,6 +1345,11 @@ function editRoom(id, name, buildingId, roomType, capacity, isActive) {
     if (!el) return console.error('editRoomModal element missing');
 
     try {
+        // Check if Bootstrap Modal is available
+        if (typeof bootstrap === 'undefined' || !bootstrap.Modal) {
+            console.error('Bootstrap Modal not available when trying to show edit modal');
+            return;
+        }
         var editModal = bootstrap.Modal.getOrCreateInstance(el);
         editModal.show();
     } catch (error) {
@@ -1707,8 +1718,8 @@ function processRoomsImport() {
 }
 
 // Set up drag/drop and file input
-waitForBootstrap(function() {
 document.addEventListener('DOMContentLoaded', function() {
+    waitForBootstrap(function() {
     // Load existing rooms for duplicate checking
     loadExistingRooms();
     
@@ -1777,11 +1788,12 @@ document.querySelector('.search-input').addEventListener('input', function() {
         const text = row.textContent.toLowerCase();
         row.style.display = text.includes(searchTerm) ? '' : 'none';
     });
+    });
 });
 
 // Enhanced form validation for room type
-waitForBootstrap(function() {
 document.addEventListener('DOMContentLoaded', function() {
+    waitForBootstrap(function() {
     const addRoomForm = document.querySelector('#addRoomModal form');
     if (addRoomForm) {
         addRoomForm.addEventListener('submit', function(e) {
@@ -1885,6 +1897,7 @@ function setupBulkEdit() {
     
     // Setup bulk edit modal functionality
     setupBulkEditModal();
+    });
 }
 
 function setupBulkEditModal() {
@@ -1972,6 +1985,11 @@ function showAddBuildingModal() {
     }
 
     try {
+        // Check if Bootstrap Modal is available
+        if (typeof bootstrap === 'undefined' || !bootstrap.Modal) {
+            console.error('Bootstrap Modal not available when trying to show add building modal');
+            return;
+        }
         // Use getOrCreateInstance to avoid re-initialization issues
         var modal = bootstrap.Modal.getOrCreateInstance(el);
         modal.show();
@@ -1981,8 +1999,8 @@ function showAddBuildingModal() {
 }
 
 // Bulk Add Rooms Functions
-waitForBootstrap(function() {
 document.addEventListener('DOMContentLoaded', function() {
+    waitForBootstrap(function() {
     // Setup bulk add rooms preview
     const bulkInputs = ['room_prefix', 'room_suffix', 'start_number', 'end_number'];
     bulkInputs.forEach(id => {
@@ -2033,7 +2051,7 @@ document.addEventListener('DOMContentLoaded', function() {
             document.getElementById('bulk_preview').className = '';
         });
     }
-});
+    });
 });
 
 function updateBulkPreview() {
