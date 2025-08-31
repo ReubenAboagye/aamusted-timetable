@@ -18,8 +18,9 @@ $streams_sql = "SELECT id, name, code FROM streams WHERE is_active = 1 ORDER BY 
 $streams_result = $conn->query($streams_sql);
 
 // Handle form submission for adding new class
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
-    if ($_POST['action'] === 'add') {
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $action = $_POST['action'] ?? null;
+    if ($action === 'add') {
         // Current schema: classes has program_id and level_id
         $program_id = $conn->real_escape_string($_POST['program_code'] ?? '');
         $level_id = $conn->real_escape_string($_POST['level_id'] ?? '');
@@ -72,24 +73,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             }
 
             if ($success_count > 0) {
-                $success_message = "Successfully created $success_count classes!";
+                $msg = "Successfully created $success_count classes!";
                 if ($error_count > 0) {
-                    $success_message .= " ($error_count classes failed to create)";
+                    $msg .= " ($error_count classes failed to create)";
                 }
+                redirect_with_flash('classes.php', 'success', $msg);
             } else {
                 $error_message = "Failed to create any classes. Please check your input.";
             }
         } else {
             $error_message = "Invalid program or level selected.";
         }
-    } elseif ($_POST['action'] === 'delete' && isset($_POST['id'])) {
+    } elseif ($action === 'delete' && isset($_POST['id'])) {
         $id = $conn->real_escape_string($_POST['id']);
         $sql = "UPDATE classes SET is_active = 0 WHERE id = ?";
         $stmt = $conn->prepare($sql);
         $stmt->bind_param("i", $id);
         
         if ($stmt->execute()) {
-            $success_message = "Class deleted successfully!";
+            $stmt->close();
+            redirect_with_flash('classes.php', 'success', 'Class deleted successfully!');
         } else {
             $error_message = "Error deleting class: " . $conn->error;
         }
@@ -161,9 +164,9 @@ if ($class_has_stream) {
 $sql = "SELECT " . $select_clause . "\n        " . $from_clause . "\n        " . $where_clause . "\n        ORDER BY c.name";
 $result = $conn->query($sql);
 
-// Fetch departments for dropdown (filtered by stream)
 $dept_select_cols = $dept_short_exists ? "id, name, short_name" : "id, name";
-$dept_sql = "SELECT " . $dept_select_cols . " FROM departments WHERE is_active = 1 AND stream_id = " . $streamManager->getCurrentStreamId() . " ORDER BY name";
+// Departments are global; do not filter by stream here
+$dept_sql = "SELECT " . $dept_select_cols . " FROM departments WHERE is_active = 1 ORDER BY name";
 $dept_result = $conn->query($dept_sql);
 
 // Fetch levels for dropdown

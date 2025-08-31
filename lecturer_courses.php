@@ -7,19 +7,20 @@ include 'connect.php';
 $success_message = '';
 $error_message = '';
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
-    if ($_POST['action'] === 'add') {
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $action = $_POST['action'] ?? null;
+    if ($action === 'add') {
         $lecturer_id = (int)($_POST['lecturer_id'] ?? 0);
         $course_id = (int)($_POST['course_id'] ?? 0);
         if ($lecturer_id > 0 && $course_id > 0) {
             $stmt = $conn->prepare("INSERT IGNORE INTO lecturer_courses (lecturer_id, course_id) VALUES (?, ?)");
             if ($stmt) {
                 $stmt->bind_param('ii', $lecturer_id, $course_id);
-                if ($stmt->execute()) { $success_message = 'Mapping added.'; } else { $error_message = 'Insert failed: ' . $conn->error; }
+                if ($stmt->execute()) { $stmt->close(); redirect_with_flash('lecturer_courses.php', 'success', 'Mapping added.'); } else { $error_message = 'Insert failed: ' . $conn->error; }
                 $stmt->close();
             } else { $error_message = 'Prepare failed: ' . $conn->error; }
         }
-    } elseif ($_POST['action'] === 'bulk_add') {
+    } elseif ($action === 'bulk_add') {
         $lecturer_id = (int)($_POST['lecturer_id'] ?? 0);
         $course_ids = isset($_POST['course_ids']) && is_array($_POST['course_ids']) ? array_map('intval', $_POST['course_ids']) : [];
         if ($lecturer_id > 0 && !empty($course_ids)) {
@@ -30,7 +31,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     $stmt->execute();
                 }
                 $stmt->close();
-                $success_message = 'Bulk mappings added.';
+                redirect_with_flash('lecturer_courses.php', 'success', 'Bulk mappings added.');
             } else { $error_message = 'Prepare failed: ' . $conn->error; }
         }
     }
@@ -42,10 +43,18 @@ $selected_department = isset($_GET['department_id']) ? (int)$_GET['department_id
 
 $lecturers = $conn->query("SELECT id, name, department_id FROM lecturers WHERE is_active = 1 ORDER BY name");
 
-$courses_query = "SELECT c.id, c.name, c.code, d.name AS department_name FROM courses c JOIN departments d ON d.id = c.department_id WHERE c.is_active = 1";
-if ($selected_department > 0) { $courses_query .= " AND c.department_id = " . $selected_department; }
-$courses_query .= " ORDER BY c.name";
+// Build courses query defensively: some DB schemas include department_id on courses, others don't
+$courses_query = "SELECT c.id, c.name, c.code FROM courses c WHERE c.is_active = 1 ORDER BY c.name";
 $courses = $conn->query($courses_query);
+if ($courses === false) {
+    error_log('courses query failed: ' . $conn->error . ' -- Query: ' . $courses_query);
+}
+// If the above failed (schema mismatch), fall back to a simpler courses query
+if ($courses === false) {
+    // Log error for debugging (do not expose DB errors to users in production)
+    error_log('courses query failed: ' . $conn->error . ' -- Query: ' . $courses_query);
+    $courses = $conn->query("SELECT c.id, c.name, c.code, NULL AS department_name FROM courses c WHERE c.is_active = 1 ORDER BY c.name");
+}
 $mappings = $conn->query("SELECT l.id as lecturer_id, l.name AS lecturer_name, 
                           GROUP_CONCAT(c.code ORDER BY c.code SEPARATOR ', ') AS course_codes
                           FROM lecturers l
@@ -184,8 +193,10 @@ function editMapping(lecturerId) {
     populateCourseLists();
     
     // Use Bootstrap 5 modal methods instead of jQuery
-    const modal = new bootstrap.Modal(document.getElementById('editModal'));
-    modal.show();
+    const el = document.getElementById('editModal');
+    if (!el) return console.error('editModal element missing');
+    if (typeof bootstrap === 'undefined' || !bootstrap.Modal) return console.error('Bootstrap Modal not available');
+    bootstrap.Modal.getOrCreateInstance(el).show();
 }
 
 function populateCourseLists() {
