@@ -24,6 +24,18 @@ ini_set('display_errors', '0');
 ini_set('display_startup_errors', '0');
 error_reporting(E_ALL);
 
+// --- Prepare embedded logo data URI for error UI (preferred filename aamusted-logo.png)
+$logoDataUri = '';
+$preferredLogo = __DIR__ . '/..//images/aamusted-logo.png';
+$fallbackLogo = __DIR__ . '/../images/aamustedLog.png';
+if (file_exists($preferredLogo)) {
+    $b = @file_get_contents($preferredLogo);
+    if ($b !== false) $logoDataUri = 'data:image/png;base64,' . base64_encode($b);
+} elseif (file_exists($fallbackLogo)) {
+    $b = @file_get_contents($fallbackLogo);
+    if ($b !== false) $logoDataUri = 'data:image/png;base64,' . base64_encode($b);
+}
+
 // Convert warnings/notices to exceptions so they can be handled uniformly
 set_error_handler(function($severity, $message, $file, $line) {
     if (!(error_reporting() & $severity)) {
@@ -41,8 +53,28 @@ set_exception_handler(function($ex) {
     // Render a visible HTML error card immediately (avoid complex JS string interpolation)
     echo "<div id=\"mainContent\" class=\"main-content\">";
     echo "<div class=\"card border-danger mb-3\"><div class=\"card-body\">";
+    // Embed logo as data URI so it always displays on error pages regardless of request path
+    $preferred = __DIR__ . '/../images/aamusted-logo.png';
+    $fallback = __DIR__ . '/../images/aamustedLog.png';
+    $dataUri = '';
+    if (file_exists($preferred)) {
+        $bin = @file_get_contents($preferred);
+        if ($bin !== false) {
+            $dataUri = 'data:image/png;base64,' . base64_encode($bin);
+        }
+    } elseif (file_exists($fallback)) {
+        $bin = @file_get_contents($fallback);
+        if ($bin !== false) {
+            $dataUri = 'data:image/png;base64,' . base64_encode($bin);
+        }
+    }
+    // Place logo above the error header
+    if ($dataUri !== '') {
+        $imgEsc = htmlspecialchars($dataUri, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        echo "<div style=\"text-align:center;margin-bottom:12px;\"><img src=\"" . $imgEsc . "\" alt=\"Logo\" style=\"max-height:96px;\"/></div>";
+    }
     echo "<div style=\"display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;\">";
-    echo "<h5 class=\"card-title text-danger\" style=\"margin:0;\">An error occurred</h5>";
+    echo "<h5 class=\"card-title text-danger\" style=\"margin:0;font-size:1.125rem\">Unexpected system error</h5>";
     echo "<div><button class=\"btn btn-sm btn-outline-secondary copyErrorBtn\" title=\"Copy error\"><i class=\"fas fa-copy\"></i></button></div>";
     echo "</div>";
     echo "<pre class=\"error-pre\" style=\"white-space:pre-wrap;color:#a00;margin:0;\">" . $escaped . "</pre>";
