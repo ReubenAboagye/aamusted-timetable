@@ -311,7 +311,7 @@ CREATE TABLE `timetable` (
   `room_id` int NOT NULL,
   `day_id` int NOT NULL,
   `time_slot_id` int NOT NULL,
-  `semester` enum('first','second','summer') NOT NULL,
+  `semester` enum('first','second') NOT NULL,
   `academic_year` varchar(9) NOT NULL,
   `timetable_type` enum('lecture','exam') NOT NULL DEFAULT 'lecture',
   `is_active` tinyint(1) DEFAULT '1',
