@@ -1293,6 +1293,35 @@ function ensureBootstrapLoaded() {
     return true;
 }
 
+// Safe modal initialization that prevents external widget conflicts
+function safeModalInit(element, options = {}) {
+    try {
+        if (!element) {
+            console.error('Modal element not found');
+            return null;
+        }
+        
+        if (!ensureBootstrapLoaded()) {
+            console.error('Bootstrap not loaded, cannot initialize modal');
+            return null;
+        }
+        
+        // Create modal with explicit options to prevent backdrop conflicts
+        const modalOptions = {
+            backdrop: true,
+            keyboard: true,
+            focus: true,
+            ...options
+        };
+        
+        const modal = new bootstrap.Modal(element, modalOptions);
+        return modal;
+    } catch (error) {
+        console.error('Error initializing modal:', error);
+        return null;
+    }
+}
+
 // Wait for Bootstrap to be available (with timeout)
 function waitForBootstrap(callback, maxWait = 5000) {
     const startTime = Date.now();
