@@ -104,6 +104,130 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     }
 
+    // Bulk import handler (expects JSON array in 'import_data')
+    if (isset($_POST['action']) && $_POST['action'] === 'bulk_import') {
+        $import_json = $_POST['import_data'] ?? '';
+        $import_data = json_decode($import_json, true);
+
+        if (!$import_data || !is_array($import_data)) {
+            redirect_with_flash('rooms.php', 'error', 'Invalid import data.');
+            exit;
+        }
+
+        // Room type mapping from form labels to database values
+        $room_type_mappings = [
+            'Classroom' => 'classroom',
+            'Lecture Hall' => 'lecture_hall',
+            'Laboratory' => 'laboratory',
+            'Computer Lab' => 'computer_lab',
+            'Seminar Room' => 'seminar_room',
+            'Auditorium' => 'auditorium'
+        ];
+
+        $insert_sql = "INSERT INTO rooms (name, room_type, capacity, building_id, building, is_active) VALUES (?, ?, ?, ?, ?, ?)";
+        $insert_stmt = $conn->prepare($insert_sql);
+
+        $check_sql = "SELECT id FROM rooms WHERE name = ? AND building_id = ? LIMIT 1";
+        $check_stmt = $conn->prepare($check_sql);
+
+        $imported = 0;
+        $skipped = 0;
+        $errors = [];
+
+        foreach ($import_data as $idx => $row) {
+            $name = trim($row['name'] ?? '');
+            $room_type_input = trim($row['room_type'] ?? '');
+            $capacity = isset($row['capacity']) ? (int)$row['capacity'] : 0;
+            $is_active = isset($row['is_active']) ? (int)$row['is_active'] : 1;
+
+            if ($name === '') {
+                $skipped++;
+                $errors[] = "Row {$idx}: empty name";
+                continue;
+            }
+
+            if ($capacity < 1 || $capacity > 500) {
+                $capacity = 30;
+            }
+
+            // Resolve building_id
+            $building_id = 1;
+            if (!empty($row['building_id']) && (int)$row['building_id'] > 0) {
+                $building_id = (int)$row['building_id'];
+            } elseif (!empty($row['building'])) {
+                $bname = trim($row['building']);
+                $bst = $conn->prepare("SELECT id FROM buildings WHERE name = ? LIMIT 1");
+                if ($bst) {
+                    $bst->bind_param('s', $bname);
+                    $bst->execute();
+                    $bres = $bst->get_result();
+                    if ($bres && $bres->num_rows > 0) {
+                        $brow = $bres->fetch_assoc();
+                        $building_id = (int)$brow['id'];
+                    }
+                    $bst->close();
+                }
+            }
+
+            // Resolve building name for insert (some schemas include 'building' column)
+            $building_name = '';
+            if (!empty($row['building'])) {
+                $building_name = trim($row['building']);
+            } else {
+                $bst2 = $conn->prepare("SELECT name FROM buildings WHERE id = ? LIMIT 1");
+                if ($bst2) {
+                    $bst2->bind_param('i', $building_id);
+                    $bst2->execute();
+                    $bres2 = $bst2->get_result();
+                    if ($bres2 && $bres2->num_rows > 0) {
+                        $brow2 = $bres2->fetch_assoc();
+                        $building_name = $brow2['name'];
+                    }
+                    $bst2->close();
+                }
+            }
+
+            // Map room type
+            $db_room_type = $room_type_mappings[$room_type_input] ?? strtolower(str_replace(' ', '_', $room_type_input));
+
+            // Duplicate check
+            if ($check_stmt) {
+                $check_stmt->bind_param('si', $name, $building_id);
+                $check_stmt->execute();
+                $cres = $check_stmt->get_result();
+                if ($cres && $cres->num_rows > 0) {
+                    $skipped++;
+                    continue;
+                }
+            }
+
+            if ($insert_stmt) {
+                $insert_stmt->bind_param('ssiisi', $name, $db_room_type, $capacity, $building_id, $building_name, $is_active);
+                if ($insert_stmt->execute()) {
+                    $imported++;
+                } else {
+                    $errors[] = "Row {$idx}: insert failed: " . $insert_stmt->error;
+                }
+            } else {
+                $errors[] = "Row {$idx}: insert statement not prepared";
+            }
+        }
+
+        if ($insert_stmt) $insert_stmt->close();
+        if ($check_stmt) $check_stmt->close();
+
+        $message = "Imported {$imported} rooms.";
+        if ($skipped > 0) $message .= " {$skipped} skipped.";
+        if (!empty($errors)) {
+            // store up to first 10 errors in session
+            $short_errors = array_slice($errors, 0, 10);
+            redirect_with_flash('rooms.php', 'error', $message . ' Errors: ' . implode(' | ', $short_errors));
+        } else {
+            redirect_with_flash('rooms.php', 'success', $message);
+        }
+        exit;
+    }
+
 
 }
 $pageTitle = 'Rooms Management';
@@ -141,6 +265,83 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? null;
     // Debug: Log all POST data
     error_log("POST action: " . ($action ?? 'NULL'));
+    // Handle multi-add (client sets action to 'add_multiple')
+    if ($action === 'add_multiple') {
+        // Expect building_id, multi_count, multi_start, room_type, capacity, is_active
+        $building_id = isset($_POST['building_id']) ? (int)$_POST['building_id'] : 0;
+        $multi_count = isset($_POST['multi_count']) ? (int)$_POST['multi_count'] : 0;
+        $multi_start = isset($_POST['multi_start']) ? (int)$_POST['multi_start'] : 1;
+        $room_type = trim($conn->real_escape_string($_POST['room_type'] ?? 'Classroom'));
+        $capacity = isset($_POST['capacity']) ? (int)$_POST['capacity'] : 30;
+        $is_active = isset($_POST['is_active']) ? 1 : 0;
+
+        if ($building_id <= 0 || $multi_count <= 0) {
+            $_SESSION['error_message'] = 'Invalid building or count for multiple add.';
+            header('Location: rooms.php'); exit;
+        }
+
+        // Map room type
+        $room_type_mappings = [
+            'Classroom' => 'classroom',
+            'Lecture Hall' => 'lecture_hall',
+            'Laboratory' => 'laboratory',
+            'Computer Lab' => 'computer_lab',
+            'Seminar Room' => 'seminar_room',
+            'Auditorium' => 'auditorium'
+        ];
+        $db_room_type = $room_type_mappings[$room_type] ?? strtolower(str_replace(' ', '_', $room_type));
+
+        // Lookup building code
+        $bcode = '';
+        $bst = $conn->prepare("SELECT code, name FROM buildings WHERE id = ? LIMIT 1");
+        if ($bst) {
+            $bst->bind_param('i', $building_id);
+            $bst->execute();
+            $bres = $bst->get_result();
+            if ($bres && $bres->num_rows > 0) {
+                $brow = $bres->fetch_assoc();
+                $bcode = trim($brow['code'] ?? '') ?: preg_replace('/\s+/', '', strtoupper($brow['name']));
+            }
+            $bst->close();
+        }
+
+        if ($bcode === '') $bcode = 'B' . $building_id;
+
+        // Prepare statements
+        $insert_sql = "INSERT INTO rooms (name, room_type, capacity, building_id, is_active) VALUES (?, ?, ?, ?, ?)";
+        $insert_stmt = $conn->prepare($insert_sql);
+        $check_sql = "SELECT id FROM rooms WHERE name = ? AND building_id = ? LIMIT 1";
+        $check_stmt = $conn->prepare($check_sql);
+
+        $imported = 0; $skipped = 0; $errors = [];
+        for ($i = 0; $i < $multi_count; $i++) {
+            $num = $multi_start + $i;
+            // Insert a space between building code and room number (e.g., "MAIN 101")
+            $room_name = $bcode . ' ' . $num;
+
+            // Duplicate check
+            if ($check_stmt) {
+                $check_stmt->bind_param('si', $room_name, $building_id);
+                $check_stmt->execute();
+                $cres = $check_stmt->get_result();
+                if ($cres && $cres->num_rows > 0) { $skipped++; continue; }
+            }
+
+            if ($insert_stmt) {
+                $insert_stmt->bind_param('ssiii', $room_name, $db_room_type, $capacity, $building_id, $is_active);
+                if ($insert_stmt->execute()) { $imported++; } else { $errors[] = 'Insert failed for ' . $room_name . ': ' . $insert_stmt->error; }
+            } else {
+                $errors[] = 'Insert statement prepare failed';
+            }
+        }
+        if ($insert_stmt) $insert_stmt->close();
+        if ($check_stmt) $check_stmt->close();
+
+        $msg = "Added {$imported} rooms."; if ($skipped) $msg .= " {$skipped} skipped.";
+        if (!empty($errors)) { $_SESSION['error_message'] = $msg . ' Errors: ' . implode(' | ', array_slice($errors,0,10)); }
+        else { $_SESSION['success_message'] = $msg; }
+        header('Location: rooms.php'); exit;
+    }
     if (isset($_POST['room_type'])) {
         error_log("Raw room_type from POST: '" . $_POST['room_type'] . "'");
         error_log("Raw room_type length: " . strlen($_POST['room_type']));
@@ -202,10 +403,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } else {
                 error_log("SUCCESS: Single Add - Valid room type '$db_room_type'");
 
-                // Check for duplicates
-                $check_sql = "SELECT id FROM rooms WHERE name = ? AND building = ?";
+                // Check for duplicates using building_id (current schema)
+                $check_sql = "SELECT id FROM rooms WHERE name = ? AND building_id = ?";
                 $check_stmt = $conn->prepare($check_sql);
-                $check_stmt->bind_param("ss", $name, $building);
+                $check_stmt->bind_param("si", $name, $building_id);
                 $check_stmt->execute();
                 $check_result = $check_stmt->get_result();
 
@@ -237,7 +438,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                                 $sql = "INSERT INTO rooms (name, room_type, capacity, building_id, is_active) VALUES (?, ?, ?, ?, ?)";
                         $stmt = $conn->prepare($sql);
                         if ($stmt) {
-                            $building_id = 1; // Default to main building
+                            // Use provided building_id from form; do not override with hardcoded default
                             $stmt->bind_param("ssiii", $name, $db_room_type, $capacity, $building_id, $is_active);
                             error_log("Single Add - Binding: name='$name', room_type='$db_room_type', capacity=$capacity, building_id=$building_id, is_active=$is_active");
 
@@ -296,10 +497,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } else {
                 error_log("SUCCESS: Edit - Valid room type '$db_room_type'");
 
-                // Check for duplicates
-                $check_sql = "SELECT id FROM rooms WHERE name = ? AND building = ? AND id != ?";
+                // Check for duplicates - use building_id column (current schema) and correct parameter
+                $check_sql = "SELECT id FROM rooms WHERE name = ? AND building_id = ? AND id != ?";
                 $check_stmt = $conn->prepare($check_sql);
-                $check_stmt->bind_param("ssi", $name, $building, $id);
+                $check_stmt->bind_param("sii", $name, $building_id, $id);
                 $check_stmt->execute();
                 $check_result = $check_stmt->get_result();
 
@@ -311,7 +512,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $sql = "UPDATE rooms SET name = ?, room_type = ?, capacity = ?, building_id = ?, is_active = ? WHERE id = ?";
                     $stmt = $conn->prepare($sql);
                     if ($stmt) {
-                        $building_id = 1; // Default to main building
+                        // Use provided building_id from form; do not override with hardcoded default
                         $stmt->bind_param("ssiiii", $name, $db_room_type, $capacity, $building_id, $is_active, $id);
                         error_log("Edit - Binding: name='$name', room_type='$db_room_type', capacity=$capacity, building_id=$building_id, is_active=$is_active, id=$id");
 
@@ -451,7 +652,7 @@ $sql = "SELECT r.id, r.name, b.name as building_name, r.room_type, r.capacity, r
 $result = $conn->query($sql);
 
 // Fetch buildings for dropdown
- $buildings_sql = "SELECT id, name FROM buildings WHERE is_active = 1 ORDER BY name";
+ $buildings_sql = "SELECT id, name, code FROM buildings WHERE is_active = 1 ORDER BY name";
  $buildings_result = $conn->query($buildings_sql);
 ?>
 
@@ -462,6 +663,9 @@ $result = $conn->query($sql);
             <div class="d-flex gap-2">
                 <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addRoomModal">
                     <i class="fas fa-plus me-2"></i>Add New Room
+                </button>
+                <button class="btn btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#importModal">
+                    <i class="fas fa-file-import me-2"></i>Import CSV
                 </button>
             </div>
         </div>
@@ -594,7 +798,10 @@ $result = $conn->query($sql);
                                     if ($buildings_result && $buildings_result->num_rows > 0) {
                                         mysqli_data_seek($buildings_result, 0); // Reset pointer
                                         while ($building = $buildings_result->fetch_assoc()) {
-                                            echo '<option value="' . $building['id'] . '">' . htmlspecialchars($building['name']) . '</option>';
+                                            // Keep building code available via data attribute for client-side generation
+                                            $bname_esc = htmlspecialchars($building['name']);
+                                            $bcode_esc = htmlspecialchars($building['code'] ?? '');
+                                            echo '<option value="' . $building['id'] . '" data-code="' . $bcode_esc . '">' . $bname_esc . '</option>';
                                         }
                                     }
                                     ?>
@@ -603,11 +810,30 @@ $result = $conn->query($sql);
                                     <a href="#" class="text-decoration-none open-add-building">
                                         <i class="fas fa-plus-circle me-1"></i>Add New Building
                                     </a>
+                                    &nbsp;|&nbsp;
+                                    <a href="#" class="text-decoration-none" id="addMultipleLink">
+                                        <i class="fas fa-layer-group me-1"></i>Add Multiple
+                                    </a>
                                 </small>
                             </div>
                         </div>
                     </div>
                     
+                    <div id="multipleOptions" style="display:none;" class="mb-3">
+                        <label class="form-label">Add multiple rooms</label>
+                        <div class="row">
+                            <div class="col-md-4">
+                                <input type="number" class="form-control" id="multi_start" name="multi_start" min="1" value="1" placeholder="Start number">
+                            </div>
+                            <div class="col-md-4">
+                                <input type="number" class="form-control" id="multi_count" name="multi_count" min="1" value="5" placeholder="Count">
+                            </div>
+                            <div class="col-md-4">
+                                <button type="button" class="btn btn-sm btn-outline-primary" id="applyGenerate">Generate Names</button>
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="row">
                         <div class="col-md-6">
                             <div class="mb-3">
@@ -656,6 +882,34 @@ $result = $conn->query($sql);
         </div>
     </div>
 </div>
+<!-- Import Modal -->
+<div class="modal fade" id="importModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Import Rooms (CSV)</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="uploadArea" class="p-4 border rounded text-center" style="cursor:pointer;">
+                    <p>Click or drag a CSV file here to upload</p>
+                    <input type="file" id="csvFile" accept=".csv" style="display:none">
+                </div>
+
+                <div class="mt-3">
+                    <table class="table" id="importPreviewTable">
+                        <thead><tr><th>#</th><th>Name</th><th>Type</th><th>Capacity</th><th>Building</th><th>Status</th></tr></thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="processBtn">Import Selected</button>
+            </div>
+        </div>
+    </div>
+</div>
 <!-- Edit Room Modal -->
 <div class="modal fade" id="editRoomModal" tabindex="-1">
     <div class="modal-dialog modal-lg">
@@ -684,8 +938,12 @@ $result = $conn->query($sql);
                                     <?php 
                                     if ($buildings_result && $buildings_result->num_rows > 0) {
                                         mysqli_data_seek($buildings_result, 0); // Reset pointer
+                                        mysqli_data_seek($buildings_result, 0);
                                         while ($building = $buildings_result->fetch_assoc()) {
-                                            echo '<option value="' . $building['id'] . '">' . htmlspecialchars($building['name']) . '</option>';
+                                            // Keep building code available via data attribute for client-side generation
+                                            $bname_esc = htmlspecialchars($building['name']);
+                                            $bcode_esc = htmlspecialchars($building['code'] ?? '');
+                                            echo '<option value="' . $building['id'] . '" data-code="' . $bcode_esc . '">' . $bname_esc . '</option>';
                                         }
                                     }
                                     ?>
@@ -1334,6 +1592,61 @@ function showAddBuildingModal() {
         }
     });
 }
+
+// Multi-add handlers
+document.addEventListener('DOMContentLoaded', function() {
+    const addMultipleLink = document.getElementById('addMultipleLink');
+    const multipleOptions = document.getElementById('multipleOptions');
+    const applyGenerate = document.getElementById('applyGenerate');
+    const buildingSelect = document.getElementById('building_id');
+    const nameInput = document.getElementById('name');
+
+    if (addMultipleLink && multipleOptions) {
+        addMultipleLink.addEventListener('click', function(e) {
+            e.preventDefault();
+            multipleOptions.style.display = multipleOptions.style.display === 'none' ? '' : 'none';
+        });
+    }
+
+    if (applyGenerate && buildingSelect && nameInput) {
+        applyGenerate.addEventListener('click', function() {
+            const start = parseInt(document.getElementById('multi_start').value) || 1;
+            const count = parseInt(document.getElementById('multi_count').value) || 1;
+            const selectedOption = buildingSelect.options[buildingSelect.selectedIndex];
+            const bcode = selectedOption ? (selectedOption.getAttribute('data-code') || '') : '';
+            if (!bcode) {
+                alert('Please select a building with a code before generating multiple rooms.');
+                return;
+            }
+            // Fill name input with first generated value and store generated list on the button for later submit
+            const firstName = bcode + ' ' + start;
+            nameInput.value = firstName;
+
+            // store generated names in dataset for use when submitting (client will submit form normally as single add)
+            const generated = [];
+            for (let i = 0; i < count; i++) { generated.push(bcode + ' ' + (start + i)); }
+            applyGenerate.dataset.generated = JSON.stringify(generated);
+            alert('Generated ' + generated.length + ' room names. Click Add Room to create them (will create multiple if detected).');
+        });
+    }
+
+    // Intercept add room form submission to switch to multi-add when the multiple options are visible
+    const addRoomForm = document.querySelector('#addRoomModal form');
+    if (addRoomForm) {
+        addRoomForm.addEventListener('submit', function(e) {
+            const multipleOptionsEl = document.getElementById('multipleOptions');
+            const multiCountEl = document.getElementById('multi_count');
+            const actionInput = this.querySelector('input[name="action"]');
+            if (multipleOptionsEl && multiCountEl && multipleOptionsEl.style.display !== 'none' && parseInt(multiCountEl.value) > 0) {
+                // Switch to multi-add action
+                if (actionInput) actionInput.value = 'add_multiple';
+            } else {
+                if (actionInput) actionInput.value = 'add';
+            }
+            // allow normal submit to proceed
+        });
+    }
+});
 
 
 </script>
