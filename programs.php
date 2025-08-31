@@ -22,6 +22,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $check_code_sql = "SELECT id FROM programs WHERE code = ?";
             $check_name_dept_stmt = $conn->prepare($check_name_dept_sql);
             $check_code_stmt = $conn->prepare($check_code_sql);
+            // Prepared statement to verify department exists
+            $check_dept_stmt = $conn->prepare("SELECT id FROM departments WHERE id = ?");
 
             foreach ($import_data as $row) {
                 $name = isset($row['name']) ? $conn->real_escape_string($row['name']) : '';
@@ -33,6 +35,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($name === '' || $department_id === 0) {
                     $error_count++;
                     continue;
+                }
+
+                // Verify department exists
+                if ($check_dept_stmt) {
+                    $check_dept_stmt->bind_param("i", $department_id);
+                    $check_dept_stmt->execute();
+                    $dept_res = $check_dept_stmt->get_result();
+                    if (!$dept_res || $dept_res->num_rows === 0) {
+                        $error_count++;
+                        continue;
+                    }
                 }
 
                 // Generate a code if not provided
@@ -101,6 +114,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if ($check_name_dept_stmt) $check_name_dept_stmt->close();
             if ($check_code_stmt) $check_code_stmt->close();
+            if ($check_dept_stmt) $check_dept_stmt->close();
 
             if ($success_count > 0) {
                 $msg = "Successfully imported $success_count programs!";
@@ -123,6 +137,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $code = $conn->real_escape_string($_POST['code'] ?? '');
         $duration = isset($_POST['duration']) ? (int)$_POST['duration'] : 0;
         $is_active = isset($_POST['is_active']) ? 1 : 0; // default inactive unless checked
+
+        // Verify department exists before inserting
+        $dept_check = $conn->prepare("SELECT id FROM departments WHERE id = ?");
+        if ($dept_check) {
+            $dept_check->bind_param("i", $department_id);
+            $dept_check->execute();
+            $dept_res = $dept_check->get_result();
+            if (!$dept_res || $dept_res->num_rows === 0) {
+                $error_message = "Selected department does not exist.";
+                $dept_check->close();
+            }
+            $dept_check->close();
+        }
 
         // Check if program with same name and department exists
         $check_sql = "SELECT id FROM programs WHERE name = ? AND department_id = ?";
@@ -160,6 +187,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $code = $conn->real_escape_string($_POST['code'] ?? '');
         $duration = isset($_POST['duration']) ? (int)$_POST['duration'] : 0;
         $is_active = isset($_POST['is_active']) ? 1 : 0;
+
+        // Verify department exists before updating
+        $dept_check = $conn->prepare("SELECT id FROM departments WHERE id = ?");
+        if ($dept_check) {
+            $dept_check->bind_param("i", $department_id);
+            $dept_check->execute();
+            $dept_res = $dept_check->get_result();
+            if (!$dept_res || $dept_res->num_rows === 0) {
+                $error_message = "Selected department does not exist.";
+                $dept_check->close();
+            }
+            $dept_check->close();
+        }
 
         // Check duplicates for other records
         $check_sql = "SELECT id FROM programs WHERE name = ? AND department_id = ? AND id != ?";
@@ -319,13 +359,20 @@ $dept_result = $conn->query($dept_sql);
                     
                     <div class="mb-3">
                         <label for="department_id" class="form-label">Department *</label>
+                        <?php if ($dept_result && $dept_result->num_rows > 0): ?>
                         <select class="form-select" id="department_id" name="department_id" required>
                             <option value="">Select Department</option>
                             <?php while ($dept = $dept_result->fetch_assoc()): ?>
                                 <option value="<?php echo $dept['id']; ?>"><?php echo htmlspecialchars($dept['name']); ?></option>
                             <?php endwhile; ?>
                         </select>
+                        <?php else: ?>
+                        <div class="alert alert-warning mb-0">
+                            No departments found. <a href="department.php" class="btn btn-sm btn-primary ms-2">Create Department</a>
+                        </div>
+                        <?php endif; ?>
                     </div>
+                    <div id="addFormAlert"></div>
                     
                     <div class="mb-3">
                         <label for="duration" class="form-label">Duration (Years) *</label>
@@ -373,17 +420,24 @@ $dept_result = $conn->query($dept_sql);
                     
                     <div class="mb-3">
                         <label for="edit_department_id" class="form-label">Department *</label>
+                        <?php
+                            // Re-fetch departments for the edit modal options
+                            $dept_list = $conn->query("SELECT id, name FROM departments WHERE is_active = 1 ORDER BY name");
+                        ?>
+                        <?php if ($dept_list && $dept_list->num_rows > 0): ?>
                         <select class="form-select" id="edit_department_id" name="department_id" required>
                             <option value="">Select Department</option>
-                            <?php
-                                // Re-fetch departments for the edit modal options
-                                $dept_list = $conn->query("SELECT id, name FROM departments WHERE is_active = 1 ORDER BY name");
-                                while ($d = $dept_list->fetch_assoc()):
-                            ?>
+                            <?php while ($d = $dept_list->fetch_assoc()): ?>
                                 <option value="<?php echo $d['id']; ?>"><?php echo htmlspecialchars($d['name']); ?></option>
                             <?php endwhile; ?>
                         </select>
+                        <?php else: ?>
+                        <div class="alert alert-warning mb-0">
+                            No departments found. <a href="department.php" class="btn btn-sm btn-primary ms-2">Create Department</a>
+                        </div>
+                        <?php endif; ?>
                     </div>
+                    <div id="editFormAlert"></div>
                     
                     <div class="mb-3">
                         <label for="edit_duration" class="form-label">Duration (Years) *</label>
@@ -504,6 +558,54 @@ function editProgram(id, name, departmentId, isActive, code, duration) {
 </script>
 
 <script>
+// Client-side validation and server error display handling
+document.addEventListener('DOMContentLoaded', function(){
+    var addForm = document.querySelector('#addProgramModal form');
+    var editForm = document.querySelector('#editProgramModal form');
+
+    if (addForm) {
+        addForm.addEventListener('submit', function(e){
+            var dept = document.getElementById('department_id');
+            var alertEl = document.getElementById('addFormAlert');
+            if (dept && dept.value === '') {
+                e.preventDefault();
+                if (alertEl) alertEl.innerHTML = '<div class="alert alert-danger">Please select a department.</div>';
+                return false;
+            }
+        });
+    }
+
+    if (editForm) {
+        editForm.addEventListener('submit', function(e){
+            var dept = document.getElementById('edit_department_id');
+            var alertEl = document.getElementById('editFormAlert');
+            if (dept && dept.value === '') {
+                e.preventDefault();
+                if (alertEl) alertEl.innerHTML = '<div class="alert alert-danger">Please select a department.</div>';
+                return false;
+            }
+        });
+    }
+
+    // If server returned an error message, show it inside the modal
+    <?php if (isset($error_message) && !empty($error_message)): ?>
+        (function(){
+            var em = <?php echo json_encode($error_message); ?>;
+            // Try to reopen add or edit modal based on posted action
+            var action = <?php echo json_encode($_POST['action'] ?? ''); ?>;
+            if (action === 'add') {
+                var addAlert = document.getElementById('addFormAlert');
+                if (addAlert) addAlert.innerHTML = '<div class="alert alert-danger">'+em+'</div>';
+                var el = document.getElementById('addProgramModal'); if (el && typeof bootstrap !== 'undefined') bootstrap.Modal.getOrCreateInstance(el).show();
+            } else if (action === 'edit') {
+                var editAlert = document.getElementById('editFormAlert');
+                if (editAlert) editAlert.innerHTML = '<div class="alert alert-danger">'+em+'</div>';
+                var el = document.getElementById('editProgramModal'); if (el && typeof bootstrap !== 'undefined') bootstrap.Modal.getOrCreateInstance(el).show();
+            }
+        })();
+    <?php endif; ?>
+});
+</script>
 let importDataPrograms = [];
 
 function parseCSVPrograms(csvText) {
