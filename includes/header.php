@@ -8,6 +8,16 @@ if (session_status() == PHP_SESSION_NONE) {
   session_start();
 }
 
+// Ensure database connection is available
+if (!isset($conn) || $conn === null) {
+  $connectPath = __DIR__ . '/../connect.php';
+  if (file_exists($connectPath)) {
+    include_once $connectPath;
+  } else {
+    include_once 'connect.php';
+  }
+}
+
 // --- Handle stream switching (keep session key consistent with index.php) ---
 if (isset($_GET['stream_id'])) {
     $_SESSION['active_stream'] = intval($_GET['stream_id']);
