@@ -104,93 +104,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     }
 
-    // Bulk Add Rooms
-    if ($action === 'bulk_add_rooms') {
-        $building_id = (int)$_POST['building_id'];
-        $room_type = trim($conn->real_escape_string($_POST['room_type']));
-        $capacity = (int)$_POST['capacity'];
-        $room_prefix = trim($conn->real_escape_string($_POST['room_prefix']));
-        $room_suffix = trim($conn->real_escape_string($_POST['room_suffix']));
-        $start_number = (int)$_POST['start_number'];
-        $end_number = (int)$_POST['end_number'];
-        
-        if ($building_id <= 0 || empty($room_type) || $capacity <= 0 || empty($room_prefix) || $start_number <= 0 || $end_number <= 0) {
-            $_SESSION['error_message'] = "All required fields must be filled.";
-        } elseif ($start_number > $end_number) {
-            $_SESSION['error_message'] = "Start number must be less than or equal to end number.";
-        } elseif (($end_number - $start_number + 1) > 100) {
-            $_SESSION['error_message'] = "Cannot create more than 100 rooms at once.";
-        } else {
-            // Convert room type to database format
-            $room_type_mappings = [
-                'Classroom' => 'classroom',
-                'Lecture Hall' => 'lecture_hall',
-                'Laboratory' => 'laboratory',
-                'Computer Lab' => 'computer_lab',
-                'Seminar Room' => 'seminar_room',
-                'Auditorium' => 'auditorium'
-            ];
-            $db_room_type = $room_type_mappings[$room_type] ?? 'classroom';
-            
-            $success_count = 0;
-            $error_count = 0;
-            $duplicate_count = 0;
-            
-            // Prepare the insert statement
-            $sql = "INSERT INTO rooms (name, room_type, capacity, building_id, is_active) VALUES (?, ?, ?, ?, 1)";
-            $stmt = $conn->prepare($sql);
-            
-            for ($i = $start_number; $i <= $end_number; $i++) {
-                $room_name = $room_prefix . $i . $room_suffix;
-                
-                // Check if room already exists
-                $check_sql = "SELECT id FROM rooms WHERE name = ? AND building_id = ? AND is_active = 1";
-                $check_stmt = $conn->prepare($check_sql);
-                $check_stmt->bind_param("si", $room_name, $building_id);
-                $check_stmt->execute();
-                $check_result = $check_stmt->get_result();
-                
-                if ($check_result && $check_result->num_rows > 0) {
-                    $duplicate_count++;
-                    $check_stmt->close();
-                    continue;
-                }
-                $check_stmt->close();
-                
-                // Insert the room
-                $stmt->bind_param("ssii", $room_name, $db_room_type, $capacity, $building_id);
-                if ($stmt->execute()) {
-                    $success_count++;
-                } else {
-                    $error_count++;
-                    error_log("ERROR: Bulk Add Rooms - Failed to insert room: $room_name");
-                }
-            }
-            
-            $stmt->close();
-            
-            // Create success message
-            $message_parts = [];
-            if ($success_count > 0) {
-                $message_parts[] = "$success_count rooms created successfully";
-            }
-            if ($duplicate_count > 0) {
-                $message_parts[] = "$duplicate_count rooms skipped (already exist)";
-            }
-            if ($error_count > 0) {
-                $message_parts[] = "$error_count rooms failed to create";
-            }
-            
-            if ($success_count > 0) {
-                redirect_with_flash('rooms.php', 'success', implode(', ', $message_parts) . '.');
-            } else {
-                $_SESSION['error_message'] = implode(', ', $message_parts) . '.';
-            }
-        }
-        // Redirect to prevent form resubmission
-        header('Location: rooms.php');
-        exit;
-    }
+
 }
 $pageTitle = 'Rooms Management';
 include 'includes/header.php';
@@ -221,7 +135,7 @@ if (isset($_GET['test_room_type'])) {
     exit;
 }
 
-// Handle bulk import and form submissions
+// Handle form submissions
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Normalize action to avoid undefined index notices
     $action = $_POST['action'] ?? null;
@@ -232,151 +146,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         error_log("Raw room_type length: " . strlen($_POST['room_type']));
         error_log("Raw room_type ASCII: " . implode(',', array_map('ord', str_split($_POST['room_type']))));
     }
-    // Bulk import
-    if ($action === 'bulk_import' && isset($_POST['import_data'])) {
-        $import_data = json_decode($_POST['import_data'], true);
-        if ($import_data) {
-            $success_count = 0;
-            $ignored_count = 0;
-            $error_count = 0;
-
-            // Prepare a check statement to detect existing (name + building)
-            $check_sql = "SELECT id FROM rooms WHERE name = ? AND building = ?";
-            $check_stmt = $conn->prepare($check_sql);
-
-            // Hardcoded room type mappings for CSV import
-            $room_type_mappings = [
-                'classroom' => 'classroom',
-                'class room' => 'classroom',
-                'class' => 'classroom',
-                'lecture_hall' => 'lecture_hall',
-                'lecture hall' => 'lecture_hall',
-                'lecture' => 'lecture_hall',
-                'hall' => 'lecture_hall',
-                'laboratory' => 'laboratory',
-                'lab' => 'laboratory',
-                'computer_lab' => 'computer_lab',
-                'computer lab' => 'computer_lab',
-                'computer' => 'computer_lab',
-                'comp lab' => 'computer_lab',
-                'seminar_room' => 'seminar_room',
-                'seminar room' => 'seminar_room',
-                'seminar' => 'seminar_room',
-                'auditorium' => 'auditorium'
-            ];
-
-            foreach ($import_data as $row) {
-                // Debug: Log the raw row data
-                error_log("Bulk Import - Raw row data: " . json_encode($row));
-                
-                // Sanitize and trim inputs
-                $name = isset($row['name']) ? trim($conn->real_escape_string($row['name'])) : '';
-                $room_type = isset($row['room_type']) ? trim($conn->real_escape_string($row['room_type'])) : 'classroom';
-                $capacity = isset($row['capacity']) ? (int)$row['capacity'] : 30;
-                $building_id = 1; // Default to main building since we only have one
-
-                // Debug: Log the processed data
-                error_log("Bulk Import - Processing row: name='$name', room_type='$room_type', capacity=$capacity, building_id=$building_id");
-
-                $is_active = isset($row['is_active']) ? (int)(strtolower(trim($row['is_active'])) === '1' || strtolower(trim($row['is_active'])) === 'true') : 1;
-
-                if ($name === '') {
-                    error_log("ERROR: Bulk Import - Missing name");
-                    $error_count++;
-                    continue;
-                }
-
-                // Convert and validate room_type
-                if (empty($room_type) || $room_type === null) {
-                    error_log("ERROR: Bulk Import - Room type is empty or null, using default 'classroom'");
-                    $room_type = 'classroom';
-                }
-                
-                $room_type_lower = strtolower(trim($room_type));
-                $db_room_type = isset($room_type_mappings[$room_type_lower]) ? $room_type_mappings[$room_type_lower] : 'classroom';
-                error_log("Bulk Import - Original room_type: '$room_type', Lowercase: '$room_type_lower', Converted to: '$db_room_type'");
-                error_log("Bulk Import - Available mappings: " . implode(', ', array_keys($room_type_mappings)));
-
-                // Application-level validation (hardcoded)
-                $valid_room_types = ['classroom', 'lecture_hall', 'laboratory', 'computer_lab', 'seminar_room', 'auditorium'];
-                if (!in_array($db_room_type, $valid_room_types)) {
-                    error_log("ERROR: Bulk Import - Invalid room type '$db_room_type' from original '$room_type'");
-                    error_log("ERROR: Bulk Import - Falling back to 'classroom'");
-                    $db_room_type = 'classroom';
-                }
-                error_log("SUCCESS: Bulk Import - Final room type: '$db_room_type'");
-
-                // Skip if room with same name and building exists
-                if ($check_stmt) {
-                    $check_stmt->bind_param("ss", $name, $building);
-                    $check_stmt->execute();
-                    $existing = $check_stmt->get_result();
-                    if ($existing && $existing->num_rows > 0) {
-                        error_log("Bulk Import - Skipping duplicate: name='$name', building='$building'");
-                        $ignored_count++;
-                        continue;
-                    }
-                }
-
-                // Final validation before insert
-                error_log("Bulk Import - Final validation - room_type: '$db_room_type', valid types: " . implode(', ', $valid_room_types));
-                if (!in_array($db_room_type, $valid_room_types)) {
-                    error_log("ERROR: Bulk Import - Final validation failed for room_type: '$db_room_type'");
-                    $error_count++;
-                    continue;
-                }
-                
-                // Check room type length and format
-                if (strlen($db_room_type) > 20) {
-                    error_log("ERROR: Bulk Import - Room type too long: '$db_room_type' (length: " . strlen($db_room_type) . ")");
-                    $error_count++;
-                    continue;
-                }
-                
-                // Check for invalid characters in room type
-                if (!preg_match('/^[a-z_]+$/', $db_room_type)) {
-                    error_log("ERROR: Bulk Import - Room type contains invalid characters: '$db_room_type'");
-                    $error_count++;
-                    continue;
-                }
-
-                $sql = "INSERT INTO rooms (name, room_type, capacity, building_id, is_active) VALUES (?, ?, ?, ?, ?)";
-                $stmt = $conn->prepare($sql);
-                if (!$stmt) {
-                    error_log("ERROR: Bulk Import - Prepare failed: " . $conn->error);
-                    $error_count++;
-                    continue;
-                }
-
-                error_log("Bulk Import - Binding: name='$name', room_type='$db_room_type', capacity=$capacity, building_id=$building_id, is_active=$is_active");
-
-                $stmt->bind_param("ssiii", $name, $db_room_type, $capacity, $building_id, $is_active);
-                if ($stmt->execute()) {
-                    $success_count++;
-                } else {
-                    error_log("ERROR: Bulk Import - Insert failed: " . $stmt->error);
-                    error_log("ERROR: Bulk Import - Failed values: name='$name', room_type='$db_room_type', capacity=$capacity, building_id=$building_id, is_active=$is_active");
-                    $error_count++;
-                }
-                $stmt->close();
-            }
-
-            if ($check_stmt) $check_stmt->close();
-
-            if ($success_count > 0) {
-                $msg = "Successfully imported $success_count rooms!";
-                if ($ignored_count > 0) $msg .= " $ignored_count duplicates ignored.";
-                if ($error_count > 0) $msg .= " $error_count records failed to import.";
-                redirect_with_flash('rooms.php', 'success', $msg);
-            } else {
-                if ($ignored_count > 0 && $error_count === 0) {
-                    $success_message = "No new rooms imported. $ignored_count duplicates ignored.";
-                } else {
-                    $error_message = "No rooms were imported. Please check your data.";
-                }
-            }
-        }
-
+    
     // Single add
     } elseif ($action === 'add') {
         // Debug: Log all POST data
@@ -681,10 +451,8 @@ $sql = "SELECT r.id, r.name, b.name as building_name, r.room_type, r.capacity, r
 $result = $conn->query($sql);
 
 // Fetch buildings for dropdown
-$buildings_sql = "SELECT id, name FROM buildings WHERE is_active = 1 ORDER BY name";
-$buildings_result = $conn->query($buildings_sql);
-
-}
+ $buildings_sql = "SELECT id, name FROM buildings WHERE is_active = 1 ORDER BY name";
+ $buildings_result = $conn->query($buildings_sql);
 ?>
 
 <div class="main-content" id="mainContent">
@@ -692,12 +460,6 @@ $buildings_result = $conn->query($buildings_sql);
         <div class="table-header d-flex justify-content-between align-items-center">
             <h4><i class="fas fa-door-open me-2"></i>Rooms Management</h4>
             <div class="d-flex gap-2">
-                <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#importModal">
-                    <i class="fas fa-upload me-2"></i>Import
-                </button>
-                <button class="btn btn-info" data-bs-toggle="modal" data-bs-target="#bulkAddRoomsModal">
-                    <i class="fas fa-layer-group me-2"></i>Bulk Add Rooms
-                </button>
                 <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addRoomModal">
                     <i class="fas fa-plus me-2"></i>Add New Room
                 </button>
@@ -838,7 +600,7 @@ $buildings_result = $conn->query($buildings_sql);
                                     ?>
                                 </select>
                                 <small class="text-muted">
-                                    <a href="#" onclick="showAddBuildingModal()" class="text-decoration-none">
+                                    <a href="#" class="text-decoration-none open-add-building">
                                         <i class="fas fa-plus-circle me-1"></i>Add New Building
                                     </a>
                                 </small>
@@ -929,7 +691,7 @@ $buildings_result = $conn->query($buildings_sql);
                                     ?>
                                 </select>
                                 <small class="text-muted">
-                                    <a href="#" onclick="showAddBuildingModal()" class="text-decoration-none">
+                                    <a href="#" class="text-decoration-none open-add-building">
                                         <i class="fas fa-plus-circle me-1"></i>Add New Building
                                     </a>
                                 </small>
@@ -985,62 +747,7 @@ $buildings_result = $conn->query($buildings_sql);
     </div>
 </div>
 
-<!-- Import Modal -->
-<div class="modal fade" id="importModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Import Rooms</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-                <div class="text-center mb-4">
-                    <i class="fas fa-upload fa-3x text-primary mb-3"></i>
-                    <h6>Upload CSV File</h6>
-                    <p class="text-muted">Drop your CSV file here or click to browse</p>
-                </div>
 
-                <div class="mb-3">
-                    <div class="upload-area" id="uploadArea" style="border: 2px dashed #ccc; border-radius: 8px; padding: 40px; text-align: center; background: #f8f9fa; cursor: pointer;">
-                        <i class="fas fa-cloud-upload-alt fa-2x text-muted mb-3"></i>
-                        <p class="mb-2">Drop CSV file here or <strong>click to browse</strong></p>
-                        <small class="text-muted">Supported format: CSV with headers: name,room_type,capacity,is_active</small>
-                        <br><small class="text-muted">Room types: classroom, lecture_hall, laboratory, computer_lab, seminar_room, auditorium</small>
-                        <br><small class="text-muted">All rooms will be assigned to the main building automatically</small>
-                    </div>
-                    <input type="file" class="form-control d-none" id="csvFile" accept=".csv">
-                </div>
-
-                <div class="mb-3">
-                    <h6>Preview (first 10 rows)</h6>
-                    <div class="table-responsive">
-                        <table class="table table-sm" id="previewTable">
-                            <thead>
-                                <tr>
-                                    <th>#</th>
-                                    <th>Name</th>
-                                    <th>Building</th>
-                                    <th>Type</th>
-                                    <th>Capacity</th>
-
-
-                                    <th>Status</th>
-                                    <th>Validation</th>
-                                </tr>
-                            </thead>
-                            <tbody id="previewBody"></tbody>
-                        </table>
-                    </div>
-                </div>
-
-                <div class="d-flex justify-content-between">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="button" class="btn btn-primary" id="processBtn" disabled>Process File</button>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
 
 <!-- Bulk Edit Modal -->
 <div class="modal fade" id="bulkEditModal" tabindex="-1">
@@ -1155,121 +862,9 @@ $buildings_result = $conn->query($buildings_sql);
                             </div>
                                 </div>
 
-<!-- Bulk Add Rooms Modal -->
-<div class="modal fade" id="bulkAddRoomsModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Bulk Add Rooms</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                            </div>
-            <form method="POST">
-                <div class="modal-body">
-                    <input type="hidden" name="action" value="bulk_add_rooms">
-                    
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label for="bulk_building_id" class="form-label">Building *</label>
-                                <select class="form-select" id="bulk_building_id" name="building_id" required>
-                                    <option value="">Select Building</option>
-                                    <?php
-                                    if ($buildings_result && $buildings_result->num_rows > 0) {
-                                        mysqli_data_seek($buildings_result, 0); // Reset pointer
-                                        while ($building = $buildings_result->fetch_assoc()) {
-                                            echo '<option value="' . $building['id'] . '" data-code="' . htmlspecialchars($building['code']) . '">' . htmlspecialchars($building['name']) . '</option>';
-                                        }
-                                    }
-                                    ?>
-                                </select>
-                                </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label for="bulk_room_type" class="form-label">Room Type *</label>
-                                <select class="form-select" id="bulk_room_type" name="room_type" required>
-                                    <option value="">Select Type *</option>
-                                    <option value="Classroom">Classroom</option>
-                                    <option value="Lecture Hall">Lecture Hall</option>
-                                    <option value="Laboratory">Laboratory</option>
-                                    <option value="Computer Lab">Computer Lab</option>
-                                    <option value="Seminar Room">Seminar Room</option>
-                                    <option value="Auditorium">Auditorium</option>
-                                </select>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="row">
-                        <div class="col-md-4">
-                    <div class="mb-3">
-                                <label for="bulk_capacity" class="form-label">Capacity *</label>
-                                <input type="number" class="form-control" id="bulk_capacity" name="capacity" min="1" max="500" required>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                            <div class="mb-3">
-                                <label for="room_prefix" class="form-label">Room Prefix *</label>
-                                <input type="text" class="form-control" id="room_prefix" name="room_prefix" required readonly>
-                                <small class="text-muted">Automatically set to selected building's code</small>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                            <div class="mb-3">
-                                <label for="room_suffix" class="form-label">Room Suffix</label>
-                                <input type="text" class="form-control" id="room_suffix" name="room_suffix" placeholder="e.g., A, B">
-                                <small class="text-muted">Optional text after the number</small>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="row">
-                        <div class="col-md-6">
-                    <div class="mb-3">
-                                <label for="start_number" class="form-label">Start Number *</label>
-                                <input type="number" class="form-control" id="start_number" name="start_number" min="1" required>
-                                <small class="text-muted">Starting room number</small>
-                        </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label for="end_number" class="form-label">End Number *</label>
-                                <input type="number" class="form-control" id="end_number" name="end_number" min="1" required>
-                                <small class="text-muted">Ending room number</small>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="alert alert-info">
-                        <i class="fas fa-info-circle me-2"></i>
-                        <strong>Room Names Preview:</strong><br>
-                        <span id="bulk_preview">Select a building and enter room range to see preview</span>
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Create Rooms</button>
-                </div>
-            </form>
-        </div>
-    </div>
-</div>
 
-<?php 
-// Embed existing room name+building for client-side duplicate checks
-$existing_name_building = [];
-$rooms_res = $conn->query("SELECT name, building FROM rooms WHERE is_active = 1");
-if ($rooms_res) {
-    while ($r = $rooms_res->fetch_assoc()) {
-        $existing_name_building[] = ['name' => $r['name'], 'building' => $r['building']];
-    }
-}
-?>
-<script>
-var existingRoomNameBuilding = <?php echo json_encode($existing_name_building); ?> || [];
-var existingRoomNameBuildingSet = {};
-existingRoomNameBuilding.forEach(function(item){ if (item.name && item.building) existingRoomNameBuildingSet[(item.name.trim().toUpperCase() + '|' + item.building.trim().toUpperCase())] = true; });
-</script>
+
+
 
 <?php 
 $conn->close();
@@ -1448,432 +1043,18 @@ function editRoom(id, name, buildingId, roomType, capacity, isActive) {
     }
 }
 
-let importDataRooms = [];
-let existingRooms = [];
-
-// Function to load existing rooms for duplicate checking
-function loadExistingRooms() {
-    console.log('Loading existing rooms for duplicate checking...');
-    
-    fetch('rooms.php?action=get_existing_rooms')
-        .then(response => {
-            console.log('Response status:', response.status);
-            console.log('Response headers:', response.headers);
-            
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            
-            return response.text().then(text => {
-                console.log('Raw response:', text.substring(0, 200) + '...');
-                
-                try {
-                    return JSON.parse(text);
-                } catch (e) {
-                    console.error('Failed to parse JSON:', e);
-                    console.error('Response text:', text);
-                    throw new Error('Invalid JSON response');
-                }
-            });
-        })
-        .then(data => {
-            console.log('Successfully loaded existing rooms:', data);
-            existingRooms = data;
-        })
-        .catch(error => {
-            console.error('Error loading existing rooms:', error);
-            // Set empty array as fallback
-            existingRooms = [];
-        });
-}
-
-function parseCSVRooms(csvText) {
-    console.log('Parsing CSV text, length:', csvText.length);
-    console.log('CSV preview:', csvText.substring(0, 500));
-    
-    const lines = csvText.split('\n').filter(l => l.trim());
-    console.log('Number of non-empty lines:', lines.length);
-    
-    if (lines.length === 0) {
-        console.log('No lines found in CSV');
-        return data;
-    }
-    
-    // Parse headers - handle quoted CSV properly
-    const headers = parseCSVLine(lines[0]).map(h => h.trim().toLowerCase().replace(/"/g, ''));
-    console.log('Parsed headers:', headers);
-    console.log('Expected headers: name, room_type, capacity, is_active');
-    
-    // Check if headers match expected format
-    const expectedHeaders = ['name', 'room_type', 'capacity', 'is_active'];
-    const missingHeaders = expectedHeaders.filter(h => !headers.includes(h));
-    if (missingHeaders.length > 0) {
-        console.warn('Missing headers:', missingHeaders);
-    }
-    
-    const data = [];
-    for (let i = 1; i < lines.length; i++) {
-        console.log(`Processing line ${i}:`, lines[i].substring(0, 100));
-        const values = parseCSVLine(lines[i]);
-        console.log(`Line ${i} values:`, values);
-        
-        const row = {};
-        headers.forEach((header, index) => {
-            row[header] = values[index] ? values[index].trim() : '';
-        });
-        data.push(row);
-        console.log(`Line ${i} parsed row:`, row);
-    }
-    
-    console.log('Final parsed data:', data);
-    return data;
-}
-
-// Helper function to parse CSV line with proper quote handling
-function parseCSVLine(line) {
-    console.log('parseCSVLine called with:', line);
-    
-    const result = [];
-    let current = '';
-    let inQuotes = false;
-    
-    for (let i = 0; i < line.length; i++) {
-        const char = line[i];
-        
-        if (char === '"') {
-            inQuotes = !inQuotes;
-        } else if (char === ',' && !inQuotes) {
-            result.push(current);
-            current = '';
-        } else {
-            current += char;
-        }
-    }
-    
-    result.push(current);
-    console.log('parseCSVLine result:', result);
-    return result;
-}
-
-function validateRoomsData(data) {
-    console.log('Validating rooms data:', data);
-    console.log('Data type:', typeof data);
-    console.log('Data length:', data ? data.length : 'undefined');
-    
-    if (!data || !Array.isArray(data)) {
-        console.error('Invalid data format - expected array');
-        return [];
-    }
-    
-    const roomTypeMappings = {
-        'classroom': 'classroom',
-        'class room': 'classroom',
-        'class': 'classroom',
-        'lecture_hall': 'lecture_hall',
-        'lecture hall': 'lecture_hall',
-        'lecture': 'lecture_hall',
-        'hall': 'lecture_hall',
-        'laboratory': 'laboratory',
-        'lab': 'laboratory',
-        'computer_lab': 'computer_lab',
-        'computer lab': 'computer_lab',
-        'computer': 'computer_lab',
-        'comp lab': 'computer_lab',
-        'seminar_room': 'seminar_room',
-        'seminar room': 'seminar_room',
-        'seminar': 'seminar_room',
-        'auditorium': 'auditorium'
-    };
-
-    return data.map(row => {
-        console.log('Processing row:', row);
-        
-        const validated = {
-            name: row.name || row.Name || '',
-            room_type: row.room_type || row.roomType || row.room_type || 'classroom',
-            capacity: row.capacity || row.Capacity || '30',
-            is_active: (row.is_active || row.isActive || '1') === '1' ? '1' : '0'
-        };
-        
-        console.log('Validated row:', validated);
-        validated.valid = true;
-        validated.errors = [];
-
-        if (!validated.name.trim()) {
-            validated.valid = false;
-            validated.errors.push('Name required');
-        }
-        if (!validated.building.trim()) {
-            validated.valid = false;
-            validated.errors.push('Building required');
-        }
-
-        // Validate room_type
-        const room_type_lower = validated.room_type.toLowerCase().trim();
-        validated.room_type = roomTypeMappings[room_type_lower] || 'classroom';
-        const validRoomTypes = ['classroom', 'lecture_hall', 'laboratory', 'computer_lab', 'seminar_room', 'auditorium'];
-        if (!validRoomTypes.includes(validated.room_type)) {
-            validated.valid = false;
-            validated.errors.push(`Invalid room type: ${validated.room_type}`);
-        }
-
-        // Validate capacity
-        const capacityNum = parseInt(validated.capacity);
-        if (isNaN(capacityNum) || capacityNum < 1 || capacityNum > 500) {
-            validated.valid = false;
-            validated.errors.push('Capacity must be between 1 and 500');
-        }
-        validated.capacity = capacityNum;
 
 
 
-        // Check for duplicate name+building (only if we have existing rooms data)
-        if (existingRooms && existingRooms.length > 0) {
-            const existingRoom = existingRooms.find(r => 
-                r.name.toLowerCase() === validated.name.toLowerCase() && 
-                r.building.toLowerCase() === validated.building.toLowerCase()
-            );
-            if (existingRoom) {
-                validated.valid = false;
-                validated.errors.push('Room name and building combination already exists.');
-            }
-        } else {
-            console.log('Skipping duplicate check - no existing rooms data available');
-        }
-
-        return validated;
-    });
-}
-
-// Helper function to format array fields for display
-function formatArrayField(field) {
-    if (!field || field === '[]') {
-        return '<span class="text-muted">None</span>';
-    }
-    
-    try {
-        if (typeof field === 'string') {
-            // If it's already a JSON string, parse it
-            const parsed = JSON.parse(field);
-            if (Array.isArray(parsed)) {
-                if (parsed.length === 0) {
-                    return '<span class="text-muted">None</span>';
-                }
-                return parsed.map(item => `<span class="badge bg-info me-1">${item}</span>`).join('');
-            }
-        } else if (Array.isArray(field)) {
-            if (field.length === 0) {
-                return '<span class="text-muted">None</span>';
-            }
-            return field.map(item => `<span class="badge bg-info me-1">${item}</span>`).join('');
-        }
-    } catch (e) {
-        // If parsing fails, treat as comma-separated string
-        if (typeof field === 'string' && field.includes(',')) {
-            const items = field.split(',').map(item => item.trim()).filter(item => item);
-            if (items.length === 0) {
-                return '<span class="text-muted">None</span>';
-            }
-            return items.map(item => `<span class="badge bg-info me-1">${item}</span>`).join('');
-        }
-    }
-    
-    // Fallback: display as is
-    return field || '<span class="text-muted">None</span>';
-}
-
-function showPreviewRooms() {
-    console.log('showPreviewRooms called');
-    console.log('importDataRooms:', importDataRooms);
-    console.log('importDataRooms length:', importDataRooms ? importDataRooms.length : 'undefined');
-    
-    const tbody = document.getElementById('previewBody');
-    if (!tbody) {
-        console.error('previewBody element not found');
-        return;
-    }
-    
-    tbody.innerHTML = '';
-    const previewRows = importDataRooms.slice(0, 10);
-    let validCount = 0;
-    
-    console.log('Showing preview for rooms:', previewRows);
-
-    previewRows.forEach((row, idx) => {
-        const tr = document.createElement('tr');
-        tr.className = row.valid ? '' : 'table-danger';
-
-        let validationHtml = '';
-        if (row.valid) {
-            validationHtml = '<span class="text-success">✓ Valid</span>';
-            validCount++;
-        } else {
-            const isExisting = row.errors && row.errors.some(e => e.toLowerCase().includes('already exists'));
-            if (isExisting) {
-                validationHtml = '<span class="badge bg-secondary">Skipped (exists)</span>';
-            } else {
-                validationHtml = '<span class="text-danger">✗ ' + (row.errors ? row.errors.join(', ') : 'Invalid') + '</span>';
-            }
-        }
-
-        tr.innerHTML = `
-            <td>${idx+1}</td>
-            <td>${row.name}</td>
-            <td>${row.building}</td>
-            <td>${row.room_type}</td>
-            <td>${row.capacity}</td>
 
 
-            <td>${row.is_active === '1' ? '<span class="badge bg-success">Active</span>' : '<span class="badge bg-secondary">Inactive</span>'}</td>
-            <td>${validationHtml}</td>
-        `;
-        tbody.appendChild(tr);
-    });
 
-    const processBtn = document.getElementById('processBtn');
-    if (processBtn) {
-        if (validCount > 0) {
-            processBtn.disabled = false;
-            processBtn.textContent = `Process (${validCount})`;
-        } else {
-            processBtn.disabled = true;
-            processBtn.textContent = 'Process File';
-        }
-    }
-}
 
-function processRoomsFile(file) {
-    console.log('Processing file:', file.name, 'Size:', file.size, 'Type:', file.type);
-    
-    const reader = new FileReader();
-    reader.onload = function(e) {
-        console.log('File loaded, content length:', e.target.result.length);
-        console.log('File content preview:', e.target.result.substring(0, 500));
-        
-        try {
-            const data = parseCSVRooms(e.target.result);
-            console.log('Parsed CSV data:', data);
-            
-            if (data && data.length > 0) {
-                importDataRooms = validateRoomsData(data);
-                console.log('Validated data:', importDataRooms);
-                showPreviewRooms();
-            } else {
-                console.error('No data parsed from CSV');
-                alert('No data could be parsed from the CSV file. Please check the file format.');
-            }
-        } catch (error) {
-            console.error('Error processing CSV file:', error);
-            alert('Error processing CSV file: ' + error.message);
-        }
-    };
-    
-    reader.onerror = function() {
-        console.error('Error reading file');
-        alert('Error reading the file. Please try again.');
-    };
-    
-    reader.readAsText(file);
-}
-
-function processRoomsImport() {
-    if (importDataRooms.length === 0) {
-        alert('No data to import');
-        return;
-    }
-    
-    const validData = importDataRooms.filter(row => row.valid);
-    if (validData.length === 0) {
-        alert('No valid data to import');
-        return;
-    }
-    
-    // Send data to server
-    const formData = new FormData();
-    formData.append('action', 'bulk_import');
-    formData.append('import_data', JSON.stringify(validData));
-    
-    fetch('rooms.php', {
-        method: 'POST',
-        body: formData
-    })
-    .then(response => response.text())
-    .then(data => {
-        // Reload page to show results
-        location.reload();
-    })
-    .catch(error => {
-        console.error('Error importing rooms:', error);
-        alert('Error importing rooms. Please try again.');
-    });
-}
-
-// Set up drag/drop and file input
-document.addEventListener('DOMContentLoaded', function() {
-    waitForBootstrap(function() {
-    // Initialize modals manually to prevent conflicts
-    initializeModalsManually();
-    
-    // Load existing rooms for duplicate checking
-    loadExistingRooms();
-    
-    // Retry loading existing rooms if it fails
-    setTimeout(() => {
-        if (existingRooms.length === 0) {
-            console.log('Retrying to load existing rooms...');
-            loadExistingRooms();
-        }
-    }, 2000);
-    
-    const uploadArea = document.getElementById('uploadArea');
-    const fileInput = document.getElementById('csvFile');
-    const processBtn = document.getElementById('processBtn');
-
-    uploadArea.addEventListener('click', () => fileInput.click());
-    uploadArea.addEventListener('dragover', function(e){ e.preventDefault(); this.style.borderColor='#007bff'; this.style.background='#e3f2fd'; });
-    uploadArea.addEventListener('dragleave', function(e){ e.preventDefault(); this.style.borderColor='#ccc'; this.style.background='#f8f9fa'; });
-    uploadArea.addEventListener('drop', function(e){ e.preventDefault(); this.style.borderColor='#ccc'; this.style.background='#f8f9fa'; const files = e.dataTransfer.files; if (files.length) { fileInput.files = files; processRoomsFile(files[0]); } });
-    fileInput.addEventListener('change', function(){ 
-        console.log('File input change event triggered');
-        console.log('Files selected:', this.files);
-        if (this.files.length) {
-            console.log('Processing file:', this.files[0]);
-            processRoomsFile(this.files[0]);
-        } else {
-            console.log('No files selected');
-        }
-    });
-
-    processBtn.addEventListener('click', function(){
-        const validData = importDataRooms.filter(r => r.valid);
-        if (validData.length === 0) { alert('No valid records to import'); return; }
-        
-        console.log('Processing import with data:', validData);
-        
-        const form = document.createElement('form'); 
-        form.method='POST'; 
-        form.style.display='none';
-        
-        const actionInput = document.createElement('input'); 
-        actionInput.type='hidden'; 
-        actionInput.name='action'; 
-        actionInput.value='bulk_import';
-        
-        const dataInput = document.createElement('input'); 
-        dataInput.type='hidden'; 
-        dataInput.name='import_data'; 
-        dataInput.value = JSON.stringify(validData);
-        
-        form.appendChild(actionInput); 
-        form.appendChild(dataInput); 
-        document.body.appendChild(form); 
-        form.submit();
-    });
-});
-});
+// Unified initialization block removed duplicate/conflict content; initialization handled below
 
 // Add search functionality
-document.querySelector('.search-input').addEventListener('input', function() {
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelector('.search-input')?.addEventListener('input', function() {
     const searchTerm = this.value.toLowerCase();
     const table = document.getElementById('roomsTable');
     const rows = table.querySelectorAll('tbody tr');
@@ -1882,6 +1063,39 @@ document.querySelector('.search-input').addEventListener('input', function() {
         const text = row.textContent.toLowerCase();
         row.style.display = text.includes(searchTerm) ? '' : 'none';
     });
+    });
+
+    // Attach delegated handler for add-building links (works even if functions load later)
+    document.body.addEventListener('click', function(e) {
+        const target = e.target.closest && e.target.closest('.open-add-building');
+        if (target) {
+            e.preventDefault();
+            // If function exists, call it; otherwise wait briefly and retry
+            if (typeof showAddBuildingModal === 'function') {
+                showAddBuildingModal();
+            } else {
+                // Wait a short time for scripts to initialize
+                setTimeout(function() {
+                    if (typeof showAddBuildingModal === 'function') {
+                        showAddBuildingModal();
+                    } else {
+                        console.error('showAddBuildingModal not available');
+                        // Fallback: open the modal element directly if present
+                        const el = document.getElementById('addBuildingModal');
+                        if (el) {
+                            el.classList.add('show');
+                            el.style.display = 'block';
+                            document.body.classList.add('modal-open');
+                            if (!document.querySelector('.modal-backdrop')) {
+                                const backdrop = document.createElement('div');
+                                backdrop.className = 'modal-backdrop fade show';
+                                document.body.appendChild(backdrop);
+                            }
+                        }
+                    }
+                }, 50);
+            }
+        }
     });
 });
 
@@ -1991,7 +1205,6 @@ function setupBulkEdit() {
     
     // Setup bulk edit modal functionality
     setupBulkEditModal();
-    });
 }
 
 function setupBulkEditModal() {
@@ -2070,131 +1283,57 @@ function setupBulkEditModal() {
 
 // Add Building Modal Functions
 function showAddBuildingModal() {
-    if (!ensureBootstrapLoaded()) return;
-
-    var el = document.getElementById('addBuildingModal');
-    if (!el) {
-        console.error('showAddBuildingModal: addBuildingModal element not found');
-        return;
-    }
-
-    try {
-        var modal = safeModalInit(el);
-        if (modal) {
-            modal.show();
-        }
-    } catch (error) {
-        console.error('Error showing add building modal:', error);
-    }
-}
-
-// Bulk Add Rooms Functions
-document.addEventListener('DOMContentLoaded', function() {
+    // Wait for Bootstrap to be available, then attempt to show the modal.
     waitForBootstrap(function() {
-    // Setup bulk add rooms preview
-    const bulkInputs = ['room_prefix', 'room_suffix', 'start_number', 'end_number'];
-    bulkInputs.forEach(id => {
-        const element = document.getElementById(id);
-        if (element) {
-            element.addEventListener('input', updateBulkPreview);
+        var el = document.getElementById('addBuildingModal');
+        if (!el) {
+            console.error('showAddBuildingModal: addBuildingModal element not found');
+            return;
         }
-    });
 
-    // Setup building selection to auto-populate room prefix
-    const bulkBuildingSelect = document.getElementById('bulk_building_id');
-    if (bulkBuildingSelect) {
-        bulkBuildingSelect.addEventListener('change', function() {
-            const selectedOption = this.options[this.selectedIndex];
-            const buildingCode = selectedOption.getAttribute('data-code');
+        try {
+            // Try safe initialization first
+            var modal = null;
+            try {
+                modal = safeModalInit(el);
+            } catch (e) {
+                console.warn('safeModalInit failed for addBuildingModal:', e);
+            }
 
-            if (buildingCode) {
-                const roomPrefixInput = document.getElementById('room_prefix');
-                if (roomPrefixInput) {
-                    roomPrefixInput.value = buildingCode;
-                    // Trigger preview update
-                    updateBulkPreview();
-                }
-            } else {
-                // Clear prefix if no building selected
-                const roomPrefixInput = document.getElementById('room_prefix');
-                if (roomPrefixInput) {
-                    roomPrefixInput.value = '';
-                    updateBulkPreview();
+            if (modal) {
+                modal.show();
+                return;
+            }
+
+            // Try native Bootstrap constructor if available
+            if (typeof bootstrap !== 'undefined' && bootstrap.Modal) {
+                try {
+                    var nativeModal = new bootstrap.Modal(el);
+                    nativeModal.show();
+                    return;
+                } catch (e) {
+                    console.warn('Native Bootstrap Modal failed for addBuildingModal:', e);
                 }
             }
-        });
-    }
 
-    // Setup bulk add rooms modal to reset when opened
-    const bulkAddRoomsModal = document.getElementById('bulkAddRoomsModal');
-    if (bulkAddRoomsModal) {
-        bulkAddRoomsModal.addEventListener('show.bs.modal', function() {
-            // Reset form fields
-            document.getElementById('bulk_building_id').value = '';
-            document.getElementById('bulk_room_type').value = '';
-            document.getElementById('bulk_capacity').value = '';
-            document.getElementById('room_prefix').value = '';
-            document.getElementById('room_suffix').value = '';
-            document.getElementById('start_number').value = '';
-            document.getElementById('end_number').value = '';
-            document.getElementById('bulk_preview').textContent = 'Select a building and enter room range to see preview';
-            document.getElementById('bulk_preview').className = '';
-        });
-    }
+            // Last-resort fallback: toggle modal classes manually so user can still interact
+            el.classList.add('show');
+            el.style.display = 'block';
+            el.setAttribute('aria-modal', 'true');
+            el.removeAttribute('aria-hidden');
+            document.body.classList.add('modal-open');
+
+            // Add backdrop element if none exists
+            if (!document.querySelector('.modal-backdrop')) {
+                var backdrop = document.createElement('div');
+                backdrop.className = 'modal-backdrop fade show';
+                document.body.appendChild(backdrop);
+            }
+        } catch (error) {
+            console.error('Error showing add building modal:', error);
+        }
     });
-});
-
-function updateBulkPreview() {
-    const prefix = document.getElementById('room_prefix')?.value || '';
-    const suffix = document.getElementById('room_suffix')?.value || '';
-    const start = parseInt(document.getElementById('start_number')?.value) || 0;
-    const end = parseInt(document.getElementById('end_number')?.value) || 0;
-    const previewElement = document.getElementById('bulk_preview');
-
-    if (!prefix || start <= 0 || end <= 0) {
-        previewElement.textContent = 'Select a building and enter room range to see preview';
-        return;
-    }
-    
-    if (start > end) {
-        previewElement.textContent = 'Start number must be less than or equal to end number';
-        previewElement.className = 'text-danger';
-        return;
-    }
-    
-    const count = end - start + 1;
-    if (count > 100) {
-        previewElement.textContent = 'Cannot create more than 100 rooms at once';
-        previewElement.className = 'text-danger';
-        return;
-    }
-    
-    // Show preview of first few and last few rooms
-    let preview = '';
-    if (count <= 10) {
-        // Show all rooms
-        const rooms = [];
-        for (let i = start; i <= end; i++) {
-            rooms.push(`${prefix}${i}${suffix}`);
-        }
-        preview = rooms.join(', ');
-    } else {
-        // Show first 3, ..., last 3
-        const firstRooms = [];
-        const lastRooms = [];
-        
-        for (let i = start; i < start + 3; i++) {
-            firstRooms.push(`${prefix}${i}${suffix}`);
-        }
-        
-        for (let i = end - 2; i <= end; i++) {
-            lastRooms.push(`${prefix}${i}${suffix}`);
-        }
-        
-        preview = `${firstRooms.join(', ')}, ..., ${lastRooms.join(', ')} (${count} rooms total)`;
-    }
-    
-    previewElement.textContent = preview;
-    previewElement.className = '';
 }
+
+
 </script>

@@ -1,0 +1,5 @@
+# Auto-prepend custom error handler so fatal/parse errors are caught and displayed
+# Ensure this path is correct relative to the webroot
+php_value auto_prepend_file "includes/custom_error_handler.php"
+
+
