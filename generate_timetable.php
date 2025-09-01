@@ -380,11 +380,171 @@ $total_courses = $conn->query("SELECT COUNT(*) as count FROM courses WHERE is_ac
             </div>
         </div>
 
+        <?php
+        // Check if timetable has been generated
+        $has_timetable = $total_timetable_entries > 0;
+        
+        // Get readiness conditions for pre-generation
+        $total_rooms = $conn->query("SELECT COUNT(*) as count FROM rooms WHERE is_active = 1")->fetch_assoc()['count'];
+        $total_days = $conn->query("SELECT COUNT(*) as count FROM days WHERE is_active = 1")->fetch_assoc()['count'];
+        
+        // Get stream-specific time slots count (with error handling for missing table)
+        $stream_time_slots_count = 0;
+        $schema_error = null;
+        
+        try {
+            if (!empty($current_stream_id)) {
+                $sts_result = $conn->query("SELECT COUNT(*) as count FROM stream_time_slots WHERE stream_id = " . intval($current_stream_id) . " AND is_active = 1");
+                $stream_time_slots_count = $sts_result ? $sts_result->fetch_assoc()['count'] : 0;
+            }
+            if ($stream_time_slots_count == 0) {
+                // Fallback to mandatory global slots
+                $stream_time_slots_count = $conn->query("SELECT COUNT(*) as count FROM time_slots WHERE is_mandatory = 1")->fetch_assoc()['count'];
+            }
+        } catch (Exception $e) {
+            $schema_error = "Database schema issue: " . $e->getMessage();
+            // Fallback to basic time slots check
+            try {
+                $stream_time_slots_count = $conn->query("SELECT COUNT(*) as count FROM time_slots WHERE is_mandatory = 1")->fetch_assoc()['count'];
+            } catch (Exception $e2) {
+                $stream_time_slots_count = 0;
+                $schema_error = "Critical database error: " . $e2->getMessage();
+            }
+        }
+        
+        // Check lecturer-course mappings
+        $total_lecturer_courses = $conn->query("SELECT COUNT(*) as count FROM lecturer_courses WHERE is_active = 1")->fetch_assoc()['count'];
+        
+        // Readiness checks
+        $readiness_issues = [];
+        if ($schema_error) $readiness_issues[] = $schema_error;
+        if ($total_assignments == 0) $readiness_issues[] = "No class-course assignments";
+        if ($stream_time_slots_count == 0) $readiness_issues[] = "No time slots available";
+        if ($total_rooms == 0) $readiness_issues[] = "No active rooms";
+        if ($total_days == 0) $readiness_issues[] = "No active days";
+        if ($total_lecturer_courses == 0) $readiness_issues[] = "No lecturer-course assignments";
+        
+        $is_ready = count($readiness_issues) == 0;
+        ?>
+
+        <!-- Pre-Generation Conditions (show when no timetable exists or has issues) -->
+        <?php if (!$has_timetable || !$is_ready): ?>
         <div class="row m-3">
             <div class="col-12">
                 <div class="card mt-3">
                     <div class="card-header">
-                        <h6 class="mb-0">Overview</h6>
+                        <h6 class="mb-0">
+                            <i class="fas fa-check-circle me-2"></i>Pre-Generation Conditions
+                            <?php if ($is_ready): ?>
+                                <span class="badge bg-success ms-2">Ready</span>
+                            <?php else: ?>
+                                <span class="badge bg-warning ms-2">Issues Found</span>
+                            <?php endif; ?>
+                        </h6>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-2 d-flex">
+                                <div class="card theme-card <?php echo $total_assignments > 0 ? 'bg-theme-green text-white' : 'bg-theme-secondary text-dark'; ?> text-center mb-2 w-100 h-100">
+                                    <div class="card-body">
+                                        <div class="stat-number"><?php echo $total_assignments; ?></div>
+                                        <div>
+                                            Assignments
+                                            <i class="fas fa-info-circle ms-1" data-bs-toggle="tooltip" title="Class-course pairings that need scheduling"></i>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-2 d-flex">
+                                <div class="card theme-card <?php echo $stream_time_slots_count > 0 ? 'bg-theme-green text-white' : 'bg-theme-secondary text-dark'; ?> text-center mb-2 w-100 h-100">
+                                    <div class="card-body">
+                                        <div class="stat-number"><?php echo $stream_time_slots_count; ?></div>
+                                        <div>
+                                            Time Slots
+                                            <i class="fas fa-info-circle ms-1" data-bs-toggle="tooltip" title="Available time periods for current stream"></i>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-2 d-flex">
+                                <div class="card theme-card <?php echo $total_rooms > 0 ? 'bg-theme-green text-white' : 'bg-theme-secondary text-dark'; ?> text-center mb-2 w-100 h-100">
+                                    <div class="card-body">
+                                        <div class="stat-number"><?php echo $total_rooms; ?></div>
+                                        <div>
+                                            Rooms
+                                            <i class="fas fa-info-circle ms-1" data-bs-toggle="tooltip" title="Active rooms available for scheduling"></i>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-2 d-flex">
+                                <div class="card theme-card <?php echo $total_days > 0 ? 'bg-theme-green text-white' : 'bg-theme-secondary text-dark'; ?> text-center mb-2 w-100 h-100">
+                                    <div class="card-body">
+                                        <div class="stat-number"><?php echo $total_days; ?></div>
+                                        <div>
+                                            Days
+                                            <i class="fas fa-info-circle ms-1" data-bs-toggle="tooltip" title="Active days for scheduling"></i>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-2 d-flex">
+                                <div class="card theme-card <?php echo $total_lecturer_courses > 0 ? 'bg-theme-green text-white' : 'bg-theme-secondary text-dark'; ?> text-center mb-2 w-100 h-100">
+                                    <div class="card-body">
+                                        <div class="stat-number"><?php echo $total_lecturer_courses; ?></div>
+                                        <div>
+                                            Lecturers
+                                            <i class="fas fa-info-circle ms-1" data-bs-toggle="tooltip" title="Lecturer-course assignments available"></i>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-2 d-flex">
+                                <div class="card theme-card <?php echo $is_ready ? 'bg-theme-green text-white' : 'bg-theme-warning text-dark'; ?> text-center mb-2 w-100 h-100">
+                                    <div class="card-body">
+                                        <div class="stat-number">
+                                            <?php if ($is_ready): ?>
+                                                <i class="fas fa-check"></i>
+                                            <?php else: ?>
+                                                <i class="fas fa-exclamation-triangle"></i>
+                                            <?php endif; ?>
+                                        </div>
+                                        <div>
+                                            Status
+                                            <i class="fas fa-info-circle ms-1" data-bs-toggle="tooltip" title="Overall readiness for generation"></i>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <?php if (!$is_ready): ?>
+                        <div class="mt-3">
+                            <div class="alert alert-warning">
+                                <h6 class="mb-2"><i class="fas fa-exclamation-triangle me-2"></i>Issues to Resolve:</h6>
+                                <ul class="mb-0">
+                                    <?php foreach ($readiness_issues as $issue): ?>
+                                        <li><?php echo htmlspecialchars($issue); ?></li>
+                                    <?php endforeach; ?>
+                                </ul>
+                            </div>
+                        </div>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <?php endif; ?>
+
+        <!-- Post-Generation Statistics (show when timetable exists) -->
+        <?php if ($has_timetable): ?>
+        <div class="row m-3">
+            <div class="col-12">
+                <div class="card mt-3">
+                    <div class="card-header">
+                        <h6 class="mb-0">
+                            <i class="fas fa-chart-bar me-2"></i>Post-Generation Statistics
+                        </h6>
                     </div>
                     <div class="card-body">
                         <div class="row">
@@ -497,6 +657,7 @@ $total_courses = $conn->query("SELECT COUNT(*) as count FROM courses WHERE is_ac
                 </div>
             </div>
         </div>
+        <?php endif; ?>
 
         <?php if ($total_assignments > 0): ?>
             <div class="row m-3">
