@@ -418,7 +418,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     // Final debug before INSERT
                     error_log("Single Add - Final values before INSERT:");
                     error_log("  name: '$name'");
-                    error_log("  building: '$building'");
+                    error_log("  building_id: '$building_id'");
                     error_log("  room_type: '$db_room_type'");
                     error_log("  room_type length: " . strlen($db_room_type));
                     error_log("  room_type bytes: " . implode(',', array_map('ord', str_split($db_room_type))));
@@ -458,6 +458,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
         }
+        
+        // Redirect to prevent form resubmission
+        if (isset($error_message)) {
+            $_SESSION['error_message'] = $error_message;
+        }
+        header('Location: rooms.php');
+        exit;
 
     // Edit
     } elseif ($action === 'edit' && isset($_POST['id'])) {
@@ -531,6 +538,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
         }
+        
+        // Redirect to prevent form resubmission
+        if (isset($error_message)) {
+            $_SESSION['error_message'] = $error_message;
+        }
+        header('Location: rooms.php');
+        exit;
 
     // Bulk Edit
     } elseif ($action === 'bulk_edit' && isset($_POST['room_ids'])) {
@@ -624,6 +638,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $error_message = "No rooms were updated. Please check your selection.";
             }
         }
+        
+        // Redirect to prevent form resubmission
+        if (isset($success_message)) {
+            $_SESSION['success_message'] = $success_message;
+        } elseif (isset($error_message)) {
+            $_SESSION['error_message'] = $error_message;
+        }
+        header('Location: rooms.php');
+        exit;
     
     // Delete (soft delete: set is_active = 0)
     } elseif ($action === 'delete' && isset($_POST['id'])) {
@@ -639,8 +662,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error_message = "Error deleting room: " . $conn->error;
         }
         $stmt->close();
-    
-
+        
+        // Redirect to prevent form resubmission
+        if (isset($error_message)) {
+            $_SESSION['error_message'] = $error_message;
+        }
+        header('Location: rooms.php');
+        exit;
 }
 
 // Fetch rooms with all fields from current schema, joining with buildings table
