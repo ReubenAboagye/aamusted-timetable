@@ -123,20 +123,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             while ($stream = $streams_result->fetch_assoc()) {
                 $stream_id = $stream['id'];
 
-                // Determine days for this stream (use stream_days if available otherwise fallback to all days)
-                $days = $all_days;
-                if ($stream_days_enabled) {
-                    $stream_days_stmt->bind_param('i', $stream_id);
-                    $stream_days_stmt->execute();
-                    $sd_result = $stream_days_stmt->get_result();
-                    $stream_specific_days = [];
-                    while ($d = $sd_result->fetch_assoc()) {
-                        $stream_specific_days[] = $d;
-                    }
-                    if (count($stream_specific_days) > 0) {
-                        $days = $stream_specific_days;
+                // Determine days for this stream using active_days JSON from streams table
+                $days = $all_days; // Default to all active days
+                
+                // Get stream's active days preference
+                $stream_days_sql = "SELECT active_days FROM streams WHERE id = ?";
+                $stream_days_stmt = $conn->prepare($stream_days_sql);
+                $stream_days_stmt->bind_param('i', $stream_id);
+                $stream_days_stmt->execute();
+                $stream_result = $stream_days_stmt->get_result();
+                
+                if ($stream_row = $stream_result->fetch_assoc()) {
+                    $active_days_json = $stream_row['active_days'];
+                    if (!empty($active_days_json)) {
+                        $active_days_array = json_decode($active_days_json, true);
+                        if (is_array($active_days_array) && count($active_days_array) > 0) {
+                            // Filter all_days to only include stream's selected days
+                            $stream_specific_days = [];
+                            foreach ($all_days as $day) {
+                                if (in_array($day['name'], $active_days_array)) {
+                                    $stream_specific_days[] = $day;
+                                }
+                            }
+                            if (count($stream_specific_days) > 0) {
+                                $days = $stream_specific_days;
+                            }
+                        }
                     }
                 }
+                $stream_days_stmt->close();
 
                 // Load time slots for this stream from mapping (fallback to global if none selected)
                 $stream_slots = [];
@@ -386,7 +401,28 @@ $total_courses = $conn->query("SELECT COUNT(*) as count FROM courses WHERE is_ac
         
         // Get readiness conditions for pre-generation
         $total_rooms = $conn->query("SELECT COUNT(*) as count FROM rooms WHERE is_active = 1")->fetch_assoc()['count'];
-        $total_days = $conn->query("SELECT COUNT(*) as count FROM days WHERE is_active = 1")->fetch_assoc()['count'];
+        
+        // Get days count - consider stream-specific days if available
+        $total_days = 0;
+        if (!empty($current_stream_id)) {
+            // Check if stream has specific active days
+            $stream_days_check = $conn->query("SELECT active_days FROM streams WHERE id = " . intval($current_stream_id));
+            if ($stream_days_row = $stream_days_check->fetch_assoc()) {
+                $active_days_json = $stream_days_row['active_days'];
+                if (!empty($active_days_json)) {
+                    $active_days_array = json_decode($active_days_json, true);
+                    if (is_array($active_days_array) && count($active_days_array) > 0) {
+                        // Count stream-specific active days
+                        $stream_days_sql = "SELECT COUNT(*) as count FROM days WHERE is_active = 1 AND name IN ('" . implode("','", $active_days_array) . "')";
+                        $total_days = $conn->query($stream_days_sql)->fetch_assoc()['count'];
+                    }
+                }
+            }
+        }
+        if ($total_days == 0) {
+            // Fallback to all active days
+            $total_days = $conn->query("SELECT COUNT(*) as count FROM days WHERE is_active = 1")->fetch_assoc()['count'];
+        }
         
         // Get stream-specific time slots count (with error handling for missing table)
         $stream_time_slots_count = 0;
