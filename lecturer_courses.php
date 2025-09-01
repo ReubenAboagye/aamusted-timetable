@@ -98,8 +98,8 @@ $mappings = $conn->query("SELECT l.id as lecturer_id, l.name AS lecturer_name,
                     <?php if ($mappings && $mappings->num_rows > 0): ?>
                         <?php while ($m = $mappings->fetch_assoc()): ?>
                             <tr>
-                                <td><?php echo htmlspecialchars($m['lecturer_name']); ?></td>
-                                <td><?php echo htmlspecialchars($m['course_codes']); ?></td>
+                                <td><?php echo htmlspecialchars($m['lecturer_name'] ?? ''); ?></td>
+                                <td><?php echo htmlspecialchars($m['course_codes'] ?? ''); ?></td>
                                 <td>
                                     <button class="btn btn-sm btn-outline-primary" onclick="editMapping(<?php echo $m['lecturer_id']; ?>)">
                                         <i class="fas fa-edit"></i>

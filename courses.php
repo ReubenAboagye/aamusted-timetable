@@ -144,8 +144,16 @@ $sql = "SELECT c.*, d.name as department_name, d.code as department_code
 $result = $conn->query($sql);
 
 // Fetch departments for dropdown
-$dept_sql = "SELECT id, name FROM departments WHERE is_active = 1 ORDER BY name";
+$dept_sql = "SELECT id, name, code FROM departments WHERE is_active = 1 ORDER BY name";
 $dept_result = $conn->query($dept_sql);
+
+// Build departments list for client-side validation
+$departments_list = [];
+if ($dept_result) {
+    while ($d = $dept_result->fetch_assoc()) {
+        $departments_list[] = $d;
+    }
+}
 
 // Get course statistics
 $stats_sql = "
@@ -165,9 +173,6 @@ $stats = $stats_result ? $stats_result->fetch_assoc() : ['total_courses' => 0, '
         <div class="table-header d-flex justify-content-between align-items-center">
             <h4><i class="fas fa-book me-2"></i>Courses Management</h4>
             <div class="d-flex gap-2">
-                <a href="assign_course_departments.php" class="btn btn-warning">
-                    <i class="fas fa-link me-2"></i>Assign Departments
-                </a>
                 <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#importModal">
                     <i class="fas fa-upload me-2"></i>Import
                 </button>
@@ -339,31 +344,18 @@ $stats = $stats_result ? $stats_result->fetch_assoc() : ['total_courses' => 0, '
                                 <label for="level" class="form-label">Level *</label>
                                 <select class="form-select" id="level" name="level" required>
                                     <option value="">Select Level</option>
-                                    <option value="100">100 Level</option>
-                                    <option value="200">200 Level</option>
-                                    <option value="300">300 Level</option>
-                                    <option value="400">400 Level</option>
-                                    <option value="500">500 Level</option>
-                                    <option value="600">600 Level</option>
+                                    <option value="100">100 </option>
+                                    <option value="200">200 </option>
+                                    <option value="300">300 </option>
+                                    <option value="400">400 </option>
+                                    <option value="500">500 </option>
+                                    <option value="600">600 </option>
                                 </select>
                             </div>
                         </div>
                     </div>
                     
                     <div class="row">
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label for="credits" class="form-label">Credits *</label>
-                                <select class="form-select" id="credits" name="credits" required>
-                                    <option value="">Select Credits</option>
-                                    <option value="1">1 Credit</option>
-                                    <option value="2">2 Credits</option>
-                                    <option value="3">3 Credits</option>
-                                    <option value="4">4 Credits</option>
-                                    <option value="6">6 Credits</option>
-                                </select>
-                            </div>
-                        </div>
                         <div class="col-md-6">
                             <div class="mb-3">
                                 <label for="hours_per_week" class="form-label">Hours Per Week *</label>
@@ -430,7 +422,7 @@ $stats = $stats_result ? $stats_result->fetch_assoc() : ['total_courses' => 0, '
                     <div class="upload-area" id="uploadArea" style="border: 2px dashed #ccc; border-radius: 8px; padding: 40px; text-align: center; background: #f8f9fa; cursor: pointer;">
                         <i class="fas fa-cloud-upload-alt fa-2x text-muted mb-3"></i>
                         <p class="mb-2">Drop CSV file here or <strong>click to browse</strong></p>
-                        <small class="text-muted">Supported format: CSV (headers: name,code,credits,hours_per_week,level,preferred_room_type,is_active)</small>
+                        <small class="text-muted">Supported format: CSV (headers: name,code,department_id,hours_per_week )</small>
                     </div>
                     <input type="file" class="form-control d-none" id="csvFile" accept=",.csv">
                 </div>
@@ -441,16 +433,10 @@ $stats = $stats_result ? $stats_result->fetch_assoc() : ['total_courses' => 0, '
                         <table class="table table-sm" id="previewTable">
                             <thead>
                                 <tr>
-                                    <th>#</th>
-                                    <th>Name</th>
-                                    <th>Code</th>
-                                    <th>Department ID</th>
-                                    <th>Credits</th>
-                                    <th>Hours/Week</th>
-                                    <th>Level</th>
-                                    <th>Room Type</th>
-                                    <th>Status</th>
-                                    <th>Validation</th>
+                                    <th>name</th>
+                                    <th>code</th>
+                                    <th>department_id</th>
+                                    <th>hours_per_week</th>
                                 </tr>
                             </thead>
                             <tbody id="previewBody"></tbody>
@@ -468,7 +454,7 @@ $stats = $stats_result ? $stats_result->fetch_assoc() : ['total_courses' => 0, '
 </div>
 
 <?php 
-// Embed existing course codes for client-side duplicate checks
+// Embed existing course codes and departments for client-side validation
 // Courses are global; do not filter by stream
 $existing_codes = [];
 $codes_res = $conn->query("SELECT code FROM courses WHERE is_active = 1");
@@ -482,6 +468,15 @@ if ($codes_res) {
 var existingCourseCodes = <?php echo json_encode($existing_codes); ?> || [];
 var existingCourseCodesSet = {};
 existingCourseCodes.forEach(function(code){ if (code) existingCourseCodesSet[code.trim().toUpperCase()] = true; });
+
+// Departments list for matching by name or code
+var departmentsList = <?php echo json_encode($departments_list); ?> || [];
+var deptNameToId = {};
+var deptCodeToId = {};
+departmentsList.forEach(function(d){
+    if (d.name) deptNameToId[d.name.trim().toUpperCase()] = d.id;
+    if (d.code) deptCodeToId[d.code.trim().toUpperCase()] = d.id;
+});
 </script>
 
 <?php 
@@ -500,12 +495,14 @@ function editCourse(id) {
 let importDataCourses = [];
 
 function parseCSVCourses(csvText) {
-    const lines = csvText.split('\n').filter(l => l.trim());
-    const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+    // Accept either comma or tab separated files; normalize to tabs for header parsing
+    const rawLines = csvText.split('\n').filter(l => l.trim());
+    // Detect delimiter from first line (tab or comma)
+    const delimiter = rawLines[0].includes('\t') ? '\t' : ',';
+    const headers = rawLines[0].split(delimiter).map(h => h.trim().replace(/"/g, ''));
     const data = [];
-
-    for (let i = 1; i < lines.length; i++) {
-        const values = lines[i].split(',').map(v => v.trim().replace(/"/g, ''));
+    for (let i = 1; i < rawLines.length; i++) {
+        const values = rawLines[i].split(delimiter).map(v => v.trim().replace(/"/g, ''));
         const row = {};
         headers.forEach((header, index) => {
             row[header] = values[index] || '';
@@ -518,21 +515,32 @@ function parseCSVCourses(csvText) {
 function validateCoursesData(data) {
     return data.map(row => {
         const validated = {
-            course_name: row.course_name || row.courseName || row.name || row.Name || '',
-            course_code: row.course_code || row.courseCode || row.code || row.Code || '',
-            // department_id removed: courses are not department-scoped
-            department_id: '',
+            name: row['name'] || row['Name'] || row.course_name || row.courseName || '',
+            code: row['code'] || row['Code'] || row.course_code || row.courseCode || '',
+            department_id: row['department_id'] || row['Department_ID'] || row.department || row.Department || '',
             credits: row.credits || row.Credits || '3',
-            hours_per_week: row.hours_per_week || row.hoursPerWeek || row.hours_per_week || '3',
+            hours_per_week: row['hours_per_week'] || row['Hours/Week'] || row.hours_per_week || row.hoursPerWeek || '3',
             level: row.level || row.Level || '100',
             preferred_room_type: row.preferred_room_type || row.preferredRoomType || row.preferred_room_type || 'classroom',
             is_active: (row.is_active || row.isActive || '1') === '1' ? '1' : '0'
         };
         validated.valid = true;
         validated.errors = [];
-        if (!validated.course_name.trim()) { validated.valid = false; validated.errors.push('Course name required'); }
-        if (!validated.course_code.trim()) { validated.valid = false; validated.errors.push('Course code required'); }
-        // department_id validation removed
+        // Required fields: name, code, department_id, hours_per_week
+        if (!validated.name.trim()) { validated.valid = false; validated.errors.push('name required'); }
+        if (!validated.code.trim()) { validated.valid = false; validated.errors.push('code required'); }
+        if (!validated.department_id.toString().trim()) { validated.valid = false; validated.errors.push('department_id required'); }
+        if (!validated.hours_per_week.toString().trim()) { validated.valid = false; validated.errors.push('hours_per_week required'); }
+
+        // If department_id provided, ensure it matches one of the known departments
+        const deptIdKey = validated.department_id.toString().trim();
+        if (deptIdKey) {
+            const found = departmentsList.some(function(d){ return d.id.toString() === deptIdKey; });
+            if (!found) {
+                validated.valid = false;
+                validated.errors.push('department_id not found');
+            }
+        }
 
         // Check for duplicate code
         if (existingCourseCodesSet[validated.code.trim().toUpperCase()]) {
@@ -568,16 +576,10 @@ function showPreviewCourses() {
         }
 
         tr.innerHTML = `
-            <td>${idx+1}</td>
-            <td>${row.course_name}</td>
-            <td>${row.course_code}</td>
-            <!-- department_id removed -->
-            <td>${row.credits}</td>
+            <td>${row.name}</td>
+            <td>${row.code}</td>
+            <td>${row.department_id || ''}</td>
             <td>${row.hours_per_week}</td>
-            <td>${row.level}</td>
-            <td>${row.preferred_room_type}</td>
-            <td><span class="badge ${row.is_active === '1' ? 'bg-success' : 'bg-secondary'}">${row.is_active === '1' ? 'Active' : 'Inactive'}</span></td>
-            <td>${validationHtml}</td>
         `;
         tbody.appendChild(tr);
     });
