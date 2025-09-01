@@ -4,6 +4,7 @@ include 'connect.php';
 // Page title and layout includes
 $pageTitle = 'Class Course Management';
 include 'includes/header.php';
+include 'includes/sidebar.php';
 
 // Handle single assignment
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -99,9 +100,9 @@ if ($existing_assignments_result) {
 }
 ?>
 
-<!-- Bootstrap CSS and JS are included globally in includes/header.php -->
-<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-<link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet">
+<!-- Page-specific styles and assets (loaded in body so header remains authoritative) -->
+<div class="main-content" id="mainContent">
+    <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet">
     <style>
         :root {
             --brand-maroon: #7a0b1c;
@@ -156,9 +157,7 @@ if ($existing_assignments_result) {
             background: transparent;
         }
     </style>
-</head>
-<body>
-    <div class="container-fluid mt-4">
+    <div class="container-fluid mt-2">
         <div class="row">
             <div class="col-12">
                 <div class="card">
