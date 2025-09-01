@@ -165,9 +165,6 @@ $stats = $stats_result ? $stats_result->fetch_assoc() : ['total_courses' => 0, '
         <div class="table-header d-flex justify-content-between align-items-center">
             <h4><i class="fas fa-book me-2"></i>Courses Management</h4>
             <div class="d-flex gap-2">
-                <a href="assign_course_departments.php" class="btn btn-warning">
-                    <i class="fas fa-link me-2"></i>Assign Departments
-                </a>
                 <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#importModal">
                     <i class="fas fa-upload me-2"></i>Import
                 </button>
