@@ -2,6 +2,7 @@
 $pageTitle = 'Programs Management';
 include 'includes/header.php';
 include 'includes/sidebar.php';
+include 'includes/flash.php';
 
 // Database connection
 include 'connect.php';
@@ -478,8 +479,22 @@ $dept_result = $conn->query($dept_sql);
                     <h6>Preview (first 10 rows)</h6>
                     <div class="table-responsive" style="max-height:300px;overflow:auto">
                         <table class="table table-sm table-bordered">
-                            <thead class="table-light"><tr><th>#</th><th>Name</th><th>Code</th><th>Dept ID</th><th>Duration</th><th>Status</th><th>Validation</th></tr></thead>
-                            <tbody id="previewBody"><tr><td colspan="7" class="text-center text-muted">Upload a CSV file to preview</td></tr></tbody>
+                            <thead class="table-light">
+                                <tr>
+                                    <th>#</th>
+                                    <th>Name</th>
+                                    <th>Code</th>
+                                    <th>Dept ID</th>
+                                    <th>Duration</th>
+                                    <th>Status</th>
+                                    <th>Validation</th>
+                                </tr>
+                            </thead>
+                            <tbody id="previewBody">
+                                <tr>
+                                    <td colspan="7" class="text-center text-muted">Upload a CSV file to preview</td>
+                                </tr>
+                            </tbody>
                         </table>
                     </div>
                 </div>
@@ -517,6 +532,23 @@ existingProgramCodes.forEach(function(code){ if (code) existingProgramCodesSet[c
 $conn->close();
 include 'includes/footer.php'; 
 ?>
+
+<style>
+.upload-area {
+    border: 2px dashed #ccc !important;
+    transition: all 0.3s ease;
+}
+
+.upload-area:hover {
+    border-color: #007bff !important;
+    background-color: #f8f9fa;
+}
+
+.upload-area.dragover {
+    border-color: #007bff !important;
+    background-color: #e3f2fd !important;
+}
+</style>
 
 <script>
 function editProgram(id, name, departmentId, isActive, code, duration) {
@@ -585,7 +617,7 @@ document.addEventListener('DOMContentLoaded', function(){
     <?php endif; ?>
 });
 </script>
-// Import functionality removed - clear variables and functions
+// Import functionality
 let importDataPrograms = [];
 
 function parseCSVPrograms(csvText) {
@@ -676,10 +708,13 @@ function validateProgramsData(data) {
 
 function showPreviewPrograms() {
     const tbody = document.getElementById('previewBody');
+    const processBtn = document.getElementById('processBtn');
+    
     if (!tbody) {
         console.error('previewBody missing');
         return;
     }
+    
     tbody.innerHTML = '';
     const previewRows = importDataPrograms.slice(0, 10);
     let validCount = 0;
@@ -718,8 +753,17 @@ function showPreviewPrograms() {
         tbody.appendChild(tr);
     });
 
-    // Update process button to show how many valid rows will be imported
-    // process button removed
+    // Update process button
+    if (processBtn) {
+        const validData = importDataPrograms.filter(r => r.valid);
+        if (validData.length > 0) {
+            processBtn.disabled = false;
+            processBtn.textContent = `Process ${validData.length} Records`;
+        } else {
+            processBtn.disabled = true;
+            processBtn.textContent = 'Process File';
+        }
+    }
 }
 
 function processProgramsFile(file) {
@@ -752,30 +796,65 @@ document.addEventListener('DOMContentLoaded', function() {
             return false;
         });
 
-        uploadArea.addEventListener('dragover', function(e){ e.preventDefault(); e.stopPropagation(); this.style.borderColor='#007bff'; this.style.background='#e3f2fd'; });
-        uploadArea.addEventListener('dragleave', function(e){ e.preventDefault(); e.stopPropagation(); this.style.borderColor=''; this.style.background=''; });
+        uploadArea.addEventListener('dragover', function(e){ 
+            e.preventDefault(); 
+            e.stopPropagation(); 
+            this.classList.add('dragover');
+        });
+        
+        uploadArea.addEventListener('dragleave', function(e){ 
+            e.preventDefault(); 
+            e.stopPropagation(); 
+            this.classList.remove('dragover');
+        });
+        
         uploadArea.addEventListener('drop', function(e){
-            e.preventDefault(); e.stopPropagation();
-            this.style.borderColor=''; this.style.background='';
+            e.preventDefault(); 
+            e.stopPropagation();
+            this.classList.remove('dragover');
             const files = e.dataTransfer.files; 
-            if (files && files.length) { fileInput.files = files; processProgramsFile(files[0]); }
+            if (files && files.length) { 
+                fileInput.files = files; 
+                processProgramsFile(files[0]); 
+            }
         });
     } else {
         console.debug('Import: uploadArea or csvFile not found in DOM');
     }
-    if (fileInput) fileInput.addEventListener('change', function(){ if (this.files.length) processProgramsFile(this.files[0]); });
+    
+    if (fileInput) {
+        fileInput.addEventListener('change', function(){ 
+            if (this.files.length) processProgramsFile(this.files[0]); 
+        });
+    }
 
     if (processBtn) {
         processBtn.addEventListener('click', function(){
             const validData = importDataPrograms.filter(r => r.valid);
-            if (validData.length === 0) { alert('No valid records to import'); return; }
-            const form = document.createElement('form'); form.method='POST'; form.style.display='none';
-            const actionInput = document.createElement('input'); actionInput.type='hidden'; actionInput.name='action'; actionInput.value='bulk_import';
-            const dataTextarea = document.createElement('textarea'); dataTextarea.name='import_data'; dataTextarea.style.display='none'; dataTextarea.textContent = JSON.stringify(validData);
-            form.appendChild(actionInput); form.appendChild(dataTextarea); document.body.appendChild(form); form.submit();
+            if (validData.length === 0) { 
+                alert('No valid records to import'); 
+                return; 
+            }
+            
+            const form = document.createElement('form'); 
+            form.method='POST'; 
+            form.style.display='none';
+            
+            const actionInput = document.createElement('input'); 
+            actionInput.type='hidden'; 
+            actionInput.name='action'; 
+            actionInput.value='bulk_import';
+            
+            const dataTextarea = document.createElement('textarea'); 
+            dataTextarea.name='import_data'; 
+            dataTextarea.style.display='none'; 
+            dataTextarea.textContent = JSON.stringify(validData);
+            
+            form.appendChild(actionInput); 
+            form.appendChild(dataTextarea); 
+            document.body.appendChild(form); 
+            form.submit();
         });
     }
-    
-    // Import modal removed; nothing to initialize
 });
 </script>
