@@ -342,12 +342,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         else { $_SESSION['success_message'] = $msg; }
         header('Location: rooms.php'); exit;
     }
-    if (isset($_POST['room_type'])) {
-        error_log("Raw room_type from POST: '" . $_POST['room_type'] . "'");
-        error_log("Raw room_type length: " . strlen($_POST['room_type']));
-        error_log("Raw room_type ASCII: " . implode(',', array_map('ord', str_split($_POST['room_type']))));
-    }
-    
     // Single add
     } elseif ($action === 'add') {
         // Debug: Log all POST data
@@ -1281,7 +1275,7 @@ function editRoom(id, name, buildingId, roomType, capacity, isActive) {
         'seminar_room': 'Seminar Room',
         'auditorium': 'Auditorium'
     };
-    editRoomType.value = roomTypeMappings[roomType] || 'Classroom';
+    editRoomType.value = roomTypeMappings[roomType] || roomType || 'Classroom';
 
 
 
