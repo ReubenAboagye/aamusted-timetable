@@ -25,74 +25,21 @@ CREATE TABLE `buildings` (
 
 
 --
--- Table structure for table `class_courses`
+-- Table structure for table `departments`
 --
 
 
-CREATE TABLE `class_courses` (
+CREATE TABLE `departments` (
   `id` int NOT NULL AUTO_INCREMENT,
-  `class_id` int NOT NULL,
-  `course_id` int NOT NULL,
-  `lecturer_id` int NOT NULL,
-  `semester` enum('first','second','summer') NOT NULL,
-  `academic_year` varchar(9) NOT NULL,
-  `is_active` tinyint(1) DEFAULT '1',
-  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uq_class_course_semester_year` (`class_id`,`course_id`,`semester`,`academic_year`),
-  KEY `course_id` (`course_id`),
-  KEY `lecturer_id` (`lecturer_id`),
-  CONSTRAINT `class_courses_ibfk_1` FOREIGN KEY (`class_id`) REFERENCES `classes` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `class_courses_ibfk_2` FOREIGN KEY (`course_id`) REFERENCES `courses` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `class_courses_ibfk_3` FOREIGN KEY (`lecturer_id`) REFERENCES `lecturers` (`id`) ON DELETE CASCADE
-);
-
-
---
--- Table structure for table `classes`
---
-
-
-CREATE TABLE `classes` (
-  `id` int NOT NULL AUTO_INCREMENT,
-  `program_id` int NOT NULL,
-  `level_id` int NOT NULL,
   `name` varchar(100) NOT NULL,
   `code` varchar(20) NOT NULL,
-  `academic_year` varchar(9) NOT NULL,
-  `semester` enum('first','second','summer') NOT NULL,
-  `stream_id` int NOT NULL,
+  `description` text,
   `is_active` tinyint(1) DEFAULT '1',
   `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uq_class_code_year_semester` (`code`,`academic_year`,`semester`),
-  KEY `program_id` (`program_id`),
-  KEY `level_id` (`level_id`),
-  KEY `stream_id` (`stream_id`),
-  CONSTRAINT `classes_ibfk_1` FOREIGN KEY (`program_id`) REFERENCES `programs` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `classes_ibfk_2` FOREIGN KEY (`level_id`) REFERENCES `levels` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `classes_ibfk_3` FOREIGN KEY (`stream_id`) REFERENCES `streams` (`id`) ON DELETE CASCADE
-);
-
-
---
--- Table structure for table `course_room_types`
---
-
-
-CREATE TABLE `course_room_types` (
-  `id` int NOT NULL AUTO_INCREMENT,
-  `course_id` int NOT NULL,
-  `room_type_id` int NOT NULL,
-  `is_active` tinyint(1) DEFAULT '1',
-  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uq_course_room_type` (`course_id`,`room_type_id`),
-  KEY `room_id` (`room_type_id`),
-  CONSTRAINT `course_room_types_ibfk_1` FOREIGN KEY (`course_id`) REFERENCES `courses` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `course_room_types_ibfk_2` FOREIGN KEY (`room_type_id`) REFERENCES `room_types` (`id`) ON DELETE CASCADE
+  UNIQUE KEY `uq_dept_code` (`code`),
+  UNIQUE KEY `uq_dept_name` (`name`)
 );
 
 
@@ -114,60 +61,6 @@ CREATE TABLE `courses` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_course_code` (`code`),
   KEY `idx_courses_department_id` (`department_id`)
-);
-
-
---
--- Table structure for table `days`
---
-
-
-CREATE TABLE `days` (
-  `id` int NOT NULL AUTO_INCREMENT,
-  `name` varchar(20) NOT NULL,
-  `is_active` tinyint(1) DEFAULT '1',
-  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uq_day_name` (`name`)
-);
-
-
---
--- Table structure for table `departments`
---
-
-
-CREATE TABLE `departments` (
-  `id` int NOT NULL AUTO_INCREMENT,
-  `name` varchar(100) NOT NULL,
-  `code` varchar(20) NOT NULL,
-  `description` text,
-  `is_active` tinyint(1) DEFAULT '1',
-  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uq_dept_code` (`code`),
-  UNIQUE KEY `uq_dept_name` (`name`)
-);
-
-
---
--- Table structure for table `lecturer_courses`
---
-   
-
-CREATE TABLE `lecturer_courses` (
-  `id` int NOT NULL AUTO_INCREMENT,
-  `lecturer_id` int NOT NULL,
-  `course_id` int NOT NULL,
-  `is_active` tinyint(1) DEFAULT '1',
-  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uq_lecturer_course` (`lecturer_id`,`course_id`),
-  KEY `course_id` (`course_id`),
-  CONSTRAINT `lecturer_courses_ibfk_1` FOREIGN KEY (`lecturer_id`) REFERENCES `lecturers` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `lecturer_courses_ibfk_2` FOREIGN KEY (`course_id`) REFERENCES `courses` (`id`) ON DELETE CASCADE
 );
 
 
@@ -206,6 +99,28 @@ CREATE TABLE `levels` (
 );
 
 --
+-- Table structure for table `streams`
+--
+
+CREATE TABLE `streams` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `name` varchar(50) NOT NULL,
+  `code` varchar(20) NOT NULL,
+  `description` text,
+  `active_days` json DEFAULT NULL,
+  `period_start` time DEFAULT NULL,
+  `period_end` time DEFAULT NULL,
+  `break_start` time DEFAULT NULL,
+  `break_end` time DEFAULT NULL,
+  `is_active` tinyint(1) DEFAULT '1',
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `name` (`name`),
+  UNIQUE KEY `code` (`code`)
+    );
+
+--
 -- Table structure for table `programs`
 --
 
@@ -230,6 +145,59 @@ CREATE TABLE `programs` (
 );
 
 --
+-- Table structure for table `classes`
+--
+
+
+CREATE TABLE `classes` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `program_id` int NOT NULL,
+  `level_id` int NOT NULL,
+  `name` varchar(100) NOT NULL,
+  `code` varchar(20) NOT NULL,
+  `academic_year` varchar(9) NOT NULL,
+  `semester` enum('first','second','summer') NOT NULL,
+  `stream_id` int NOT NULL,
+  `is_active` tinyint(1) DEFAULT '1',
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_class_code_year_semester` (`code`,`academic_year`,`semester`),
+  KEY `program_id` (`program_id`),
+  KEY `level_id` (`level_id`),
+  KEY `stream_id` (`stream_id`),
+  CONSTRAINT `classes_ibfk_1` FOREIGN KEY (`program_id`) REFERENCES `programs` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `classes_ibfk_2` FOREIGN KEY (`level_id`) REFERENCES `levels` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `classes_ibfk_3` FOREIGN KEY (`stream_id`) REFERENCES `streams` (`id`) ON DELETE CASCADE
+);
+
+
+--
+-- Table structure for table `class_courses`
+--
+
+
+CREATE TABLE `class_courses` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `class_id` int NOT NULL,
+  `course_id` int NOT NULL,
+  `lecturer_id` int NOT NULL,
+  `semester` enum('first','second','summer') NOT NULL,
+  `academic_year` varchar(9) NOT NULL,
+  `is_active` tinyint(1) DEFAULT '1',
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_class_course_semester_year` (`class_id`,`course_id`,`semester`,`academic_year`),
+  KEY `course_id` (`course_id`),
+  KEY `lecturer_id` (`lecturer_id`),
+  CONSTRAINT `class_courses_ibfk_1` FOREIGN KEY (`class_id`) REFERENCES `classes` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `class_courses_ibfk_2` FOREIGN KEY (`course_id`) REFERENCES `courses` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `class_courses_ibfk_3` FOREIGN KEY (`lecturer_id`) REFERENCES `lecturers` (`id`) ON DELETE CASCADE
+);
+
+
+--
 -- Table structure for table `room_types`
 --
 
@@ -241,6 +209,59 @@ CREATE TABLE `room_types` (
   `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_room_type_name` (`name`)
+);
+
+--
+-- Table structure for table `course_room_types`
+--
+
+
+CREATE TABLE `course_room_types` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `course_id` int NOT NULL,
+  `room_type_id` int NOT NULL,
+  `is_active` tinyint(1) DEFAULT '1',
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_course_room_type` (`course_id`,`room_type_id`),
+  KEY `room_id` (`room_type_id`),
+  CONSTRAINT `course_room_types_ibfk_1` FOREIGN KEY (`course_id`) REFERENCES `courses` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `course_room_types_ibfk_2` FOREIGN KEY (`room_type_id`) REFERENCES `room_types` (`id`) ON DELETE CASCADE
+);
+
+
+--
+-- Table structure for table `days`
+--
+
+
+CREATE TABLE `days` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `name` varchar(20) NOT NULL,
+  `is_active` tinyint(1) DEFAULT '1',
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_day_name` (`name`)
+);
+
+
+--
+-- Table structure for table `lecturer_courses`
+--
+   
+
+CREATE TABLE `lecturer_courses` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `lecturer_id` int NOT NULL,
+  `course_id` int NOT NULL,
+  `is_active` tinyint(1) DEFAULT '1',
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_lecturer_course` (`lecturer_id`,`course_id`),
+  KEY `course_id` (`course_id`),
+  CONSTRAINT `lecturer_courses_ibfk_1` FOREIGN KEY (`lecturer_id`) REFERENCES `lecturers` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `lecturer_courses_ibfk_2` FOREIGN KEY (`course_id`) REFERENCES `courses` (`id`) ON DELETE CASCADE
 );
 
 --
@@ -261,28 +282,6 @@ CREATE TABLE `rooms` (
   KEY `fk_rooms_building_id` (`building_id`),
   CONSTRAINT `fk_rooms_building_id` FOREIGN KEY (`building_id`) REFERENCES `buildings` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE
 );
-
---
--- Table structure for table `streams`
---
-
-CREATE TABLE `streams` (
-  `id` int NOT NULL AUTO_INCREMENT,
-  `name` varchar(50) NOT NULL,
-  `code` varchar(20) NOT NULL,
-  `description` text,
-  `active_days` json DEFAULT NULL,
-  `period_start` time DEFAULT NULL,
-  `period_end` time DEFAULT NULL,
-  `break_start` time DEFAULT NULL,
-  `break_end` time DEFAULT NULL,
-  `is_active` tinyint(1) DEFAULT '1',
-  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `name` (`name`),
-  UNIQUE KEY `code` (`code`)
-    );
 
 --
 -- Table structure for table `time_slots`
