@@ -131,12 +131,20 @@ $days_result = $conn->query("SELECT id, name FROM days ORDER BY id");
 $rooms_result = $conn->query("SELECT id, name FROM rooms WHERE is_active = 1 ORDER BY name");
 $streams_result = $conn->query("SELECT id, name FROM streams WHERE is_active = 1 ORDER BY name");
 // Use selected stream's slots via mapping; fallback to mandatory global slots when no stream filter
-if (!empty($resolved_stream_id)) {
-    $time_slots_result = $conn->query("SELECT ts.id, ts.start_time, ts.end_time FROM stream_time_slots sts JOIN time_slots ts ON ts.id = sts.time_slot_id WHERE sts.stream_id = " . intval($resolved_stream_id) . " AND sts.is_active = 1 ORDER BY ts.start_time");
-    if (!$time_slots_result || $time_slots_result->num_rows === 0) {
+// Add error handling for missing stream_time_slots table
+$time_slots_result = null;
+try {
+    if (!empty($resolved_stream_id)) {
+        $time_slots_result = $conn->query("SELECT ts.id, ts.start_time, ts.end_time FROM stream_time_slots sts JOIN time_slots ts ON ts.id = sts.time_slot_id WHERE sts.stream_id = " . intval($resolved_stream_id) . " AND sts.is_active = 1 ORDER BY ts.start_time");
+        if (!$time_slots_result || $time_slots_result->num_rows === 0) {
+            $time_slots_result = $conn->query("SELECT id, start_time, end_time FROM time_slots WHERE is_mandatory = 1 ORDER BY start_time");
+        }
+    } else {
         $time_slots_result = $conn->query("SELECT id, start_time, end_time FROM time_slots WHERE is_mandatory = 1 ORDER BY start_time");
     }
-} else {
+} catch (Exception $e) {
+    // Fallback to basic time slots if stream_time_slots table doesn't exist
+    error_log("Schema issue in view_timetable.php: " . $e->getMessage());
     $time_slots_result = $conn->query("SELECT id, start_time, end_time FROM time_slots WHERE is_mandatory = 1 ORDER BY start_time");
 }
 
