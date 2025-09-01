@@ -295,9 +295,31 @@ CREATE TABLE `time_slots` (
   `duration` int NOT NULL,
   `is_break` tinyint(1) DEFAULT '0',
   `is_mandatory` tinyint(1) DEFAULT '0',
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_times` (`start_time`,`end_time`)
 );
+
+-- Mapping table: streams -> time slots (normalize stream-specific selection)
+CREATE TABLE `stream_time_slots` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `stream_id` int NOT NULL,
+  `time_slot_id` int NOT NULL,
+  `is_active` tinyint(1) DEFAULT '1',
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_stream_timeslot` (`stream_id`,`time_slot_id`),
+  KEY `idx_stream_timeslot_stream_id` (`stream_id`),
+  KEY `idx_stream_timeslot_time_slot_id` (`time_slot_id`),
+  CONSTRAINT `fk_stream_time_slots_stream` FOREIGN KEY (`stream_id`) REFERENCES `streams` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_stream_time_slots_slot` FOREIGN KEY (`time_slot_id`) REFERENCES `time_slots` (`id`) ON DELETE CASCADE
+);
+
+--
+-- Time slots are global and constant in `time_slots`.
+-- Streams select applicable hours via `stream_time_slots` mapping.
+--
 
 --
 -- Table structure for table `timetable`

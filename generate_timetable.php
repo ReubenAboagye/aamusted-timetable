@@ -55,18 +55,13 @@ $error_message = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? null;
-    if ($action === 'generate_timetable') {
+    if ($action === 'generate_lecture_timetable') {
         // Clear existing timetable
         $clear_sql = "DELETE FROM timetable";
         $conn->query($clear_sql);
 
-        // Get available time slots
-        $time_slots_sql = "SELECT id, start_time, end_time FROM time_slots WHERE is_mandatory = 1 ORDER BY start_time";
-        $time_slots_result = $conn->query($time_slots_sql);
-        $time_slots = [];
-        while ($slot = $time_slots_result->fetch_assoc()) {
-            $time_slots[] = $slot;
-        }
+        // Prepare to fetch time slots per stream using mapping
+        $time_slots_by_stream = [];
 
         // Get all days (used as a fallback if a stream has no specific days)
         $days_sql = "SELECT id, name FROM days WHERE is_active = 1 ORDER BY id";
@@ -143,6 +138,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
 
+                // Load time slots for this stream from mapping (fallback to global if none selected)
+                $stream_slots = [];
+                $ts_rs = $conn->query("SELECT ts.id, ts.start_time, ts.end_time FROM stream_time_slots sts JOIN time_slots ts ON ts.id = sts.time_slot_id WHERE sts.stream_id = " . intval($stream_id) . " AND sts.is_active = 1 ORDER BY ts.start_time");
+                if ($ts_rs && $ts_rs->num_rows > 0) {
+                    while ($s = $ts_rs->fetch_assoc()) { $stream_slots[] = $s; }
+                } else {
+                    // Fallback: use all mandatory global slots
+                    $ts_rs2 = $conn->query("SELECT id, start_time, end_time FROM time_slots WHERE is_mandatory = 1 ORDER BY start_time");
+                    while ($s2 = $ts_rs2->fetch_assoc()) { $stream_slots[] = $s2; }
+                }
+
                 // Fetch assignments for classes in this stream
                 $assignments_stmt->bind_param('i', $stream_id);
                 $assignments_stmt->execute();
@@ -157,7 +163,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 foreach ($assignments_list as $assignment) {
                     // Assign to a random time slot and a day from this stream's allowed days
-                    if (empty($time_slots) || empty($days) || empty($rooms)) {
+                    if (empty($stream_slots) || empty($days) || empty($rooms)) {
                         $error_count++;
                         continue;
                     }
@@ -166,7 +172,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $max_attempts = 10;
                     for ($attempt = 0; $attempt < $max_attempts && !$placed; $attempt++) {
                         // pick random slot/day/room (shuffle sources to reduce bias)
-                        $time_slot = $time_slots[array_rand($time_slots)];
+                        $time_slot = $stream_slots[array_rand($stream_slots)];
                         $day = $days[array_rand($days)];
                         $room = $rooms[array_rand($rooms)];
 
@@ -242,6 +248,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         } else {
             $error_message = "No active streams found. Please create streams first.";
+        }
+    } elseif ($action === 'generate_exams_timetable') {
+        // Placeholder: exams timetable generation not implemented yet
+        if (function_exists('redirect_with_flash')) {
+            redirect_with_flash('generate_timetable.php', 'danger', 'Exams timetable generation is not implemented yet.');
+        } else {
+            $error_message = 'Exams timetable generation is not implemented yet.';
         }
     }
 }
@@ -333,12 +346,20 @@ $total_courses = $conn->query("SELECT COUNT(*) as count FROM courses WHERE is_ac
                     <div class="card-body">
                         <p class="text-muted">This will generate a new timetable based on current class-course assignments. Any existing timetable entries will be cleared.</p>
 
-                        <form method="POST">
-                            <input type="hidden" name="action" value="generate_timetable">
-                            <button type="submit" class="btn btn-primary btn-lg" onclick="return confirm('This will clear the existing timetable and generate a new one. Continue?')">
-                                <i class="fas fa-magic me-2"></i>Generate New Timetable
-                            </button>
-                        </form>
+                        <div class="d-flex flex-wrap gap-2">
+                            <form method="POST">
+                                <input type="hidden" name="action" value="generate_lecture_timetable">
+                                <button type="submit" class="btn btn-primary btn-lg" onclick="return confirm('This will clear the existing timetable and generate a new lecture timetable. Continue?')">
+                                    <i class="fas fa-magic me-2"></i>Generate Lecture Timetable
+                                </button>
+                            </form>
+                            <form method="POST">
+                                <input type="hidden" name="action" value="generate_exams_timetable">
+                                <button type="submit" class="btn btn-outline-primary btn-lg">
+                                    <i class="fas fa-file-alt me-2"></i>Generate Exams Timetable
+                                </button>
+                            </form>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -367,36 +388,108 @@ $total_courses = $conn->query("SELECT COUNT(*) as count FROM courses WHERE is_ac
                     </div>
                     <div class="card-body">
                         <div class="row">
-                            <div class="col-md-3">
-                                <div class="card theme-card bg-theme-primary text-white text-center mb-2">
+                            <div class="col-md-3 d-flex">
+                                <div class="card theme-card bg-theme-primary text-white text-center mb-2 w-100 h-100">
                                     <div class="card-body">
                                         <div class="stat-number"><?php echo $total_classes; ?></div>
-                                        <div>Total Classes</div>
+                                        <div>
+                                            Total Classes (Current stream)
+                                            <i class="fas fa-info-circle ms-1" data-bs-toggle="tooltip" title="Number of active classes. Stream-aware when a current stream is selected."></i>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
-                            <div class="col-md-3">
-                                <div class="card theme-card bg-theme-accent text-dark text-center mb-2">
+                            <div class="col-md-3 d-flex">
+                                <div class="card theme-card bg-theme-accent text-dark text-center mb-2 w-100 h-100">
                                     <div class="card-body">
                                         <div class="stat-number"><?php echo $total_courses; ?></div>
-                                        <div>Total Courses</div>
+                                        <div>
+                                            Total Courses (Global)
+                                            <i class="fas fa-info-circle ms-1" data-bs-toggle="tooltip" title="Number of active courses (global, not stream-specific)."></i>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
-                            <div class="col-md-3">
-                                <div class="card theme-card bg-theme-green text-white text-center mb-2">
+                            <div class="col-md-3 d-flex">
+                                <div class="card theme-card bg-theme-green text-white text-center mb-2 w-100 h-100">
                                     <div class="card-body">
                                         <div class="stat-number"><?php echo $total_assignments; ?></div>
-                                        <div>Assignments</div>
+                                        <div>
+                                            Assignments (Current stream)
+                                            <i class="fas fa-info-circle ms-1" data-bs-toggle="tooltip" title="Active class–course pairings; stream-aware when a current stream is selected."></i>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
-                            <div class="col-md-3">
-                                <div class="card theme-card bg-theme-primary text-white text-center mb-2">
+                            <div class="col-md-3 d-flex">
+                                <div class="card theme-card bg-theme-primary text-white text-center mb-2 w-100 h-100">
                                     <div class="card-body">
                                         <div class="stat-number"><?php echo $total_timetable_entries; ?></div>
-                                        <div>Timetable Entries</div>
+                                        <div>
+                                            Timetable Entries (Current stream)
+                                            <i class="fas fa-info-circle ms-1" data-bs-toggle="tooltip" title="Scheduled sessions now in the timetable; stream-aware when a current stream is selected."></i>
+                                        </div>
                                     </div>
+                                </div>
+                            </div>
+                        </div>
+                        <?php
+                        // Scheduling coverage metrics
+                        $scheduled_assignments = 0;
+                        $coverage_percent = 0;
+                        $unscheduled_assignments = 0;
+
+                        // Determine if we can count distinct class_course_id per stream
+                        $has_stream_col_cov = false;
+                        $col_cov = $conn->query("SHOW COLUMNS FROM classes LIKE 'stream_id'");
+                        if ($col_cov && $col_cov->num_rows > 0) { $has_stream_col_cov = true; }
+                        if ($col_cov) $col_cov->close();
+
+                        $has_t_class_course_cov = false;
+                        $tcol_cov = $conn->query("SHOW COLUMNS FROM timetable LIKE 'class_course_id'");
+                        if ($tcol_cov && $tcol_cov->num_rows > 0) { $has_t_class_course_cov = true; }
+                        if ($tcol_cov) $tcol_cov->close();
+
+                        if ($total_assignments > 0) {
+                            if ($has_stream_col_cov && !empty($current_stream_id)) {
+                                if ($has_t_class_course_cov) {
+                                    $sql_cov = "SELECT COUNT(DISTINCT t.class_course_id) AS cnt
+                                                FROM timetable t
+                                                JOIN class_courses cc ON t.class_course_id = cc.id
+                                                JOIN classes c ON cc.class_id = c.id
+                                                WHERE c.stream_id = " . intval($current_stream_id);
+                                    $res_cov = $conn->query($sql_cov);
+                                    $scheduled_assignments = $res_cov ? (int)$res_cov->fetch_assoc()['cnt'] : 0;
+                                } else {
+                                    // Fallback: use timetable entry count within stream
+                                    $scheduled_assignments = min($total_timetable_entries, $total_assignments);
+                                }
+                            } else {
+                                // Global fallback
+                                if ($has_t_class_course_cov) {
+                                    $sql_cov = "SELECT COUNT(DISTINCT class_course_id) AS cnt FROM timetable";
+                                    $res_cov = $conn->query($sql_cov);
+                                    $scheduled_assignments = $res_cov ? (int)$res_cov->fetch_assoc()['cnt'] : 0;
+                                } else {
+                                    $scheduled_assignments = min($total_timetable_entries, $total_assignments);
+                                }
+                            }
+
+                            $unscheduled_assignments = max(0, $total_assignments - $scheduled_assignments);
+                            $coverage_percent = $total_assignments > 0 ? round(($scheduled_assignments / $total_assignments) * 100, 1) : 0;
+                        }
+                        ?>
+                        <div class="mt-3">
+                            <h6 class="mb-2">Scheduling Coverage <i class="fas fa-info-circle ms-1" data-bs-toggle="tooltip" title="Shows how many class–course assignments are currently scheduled in the timetable."></i></h6>
+                            <div class="row text-center">
+                                <div class="col-md-4 mb-2">
+                                    <span class="badge bg-success">Scheduled: <?php echo $scheduled_assignments; ?> of <?php echo $total_assignments; ?></span>
+                                </div>
+                                <div class="col-md-4 mb-2">
+                                    <span class="badge bg-primary">Coverage: <?php echo $coverage_percent; ?>%</span>
+                                </div>
+                                <div class="col-md-4 mb-2">
+                                    <span class="badge bg-secondary">Unscheduled: <?php echo $unscheduled_assignments; ?></span>
                                 </div>
                             </div>
                         </div>
@@ -459,3 +552,16 @@ $total_courses = $conn->query("SELECT COUNT(*) as count FROM courses WHERE is_ac
     </div>
 </div>
 
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    try {
+        var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+        tooltipTriggerList.forEach(function (tooltipTriggerEl) {
+            if (window.bootstrap && bootstrap.Tooltip) {
+                new bootstrap.Tooltip(tooltipTriggerEl);
+            }
+        });
+    } catch (e) { /* ignore */ }
+});
+</script>

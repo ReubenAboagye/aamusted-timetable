@@ -2,6 +2,7 @@
 $pageTitle = 'Manage Streams';
 include 'includes/header.php';
 include 'includes/sidebar.php';
+// Time slots are global; streams select slots via mapping
 
 $success_message = "";
 $error_message = "";
@@ -30,7 +31,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $stmt->bind_param("ssssssssi", $name, $code, $description, $period_start, $period_end, $break_start, $break_end, $active_days, $is_active);
 
         if ($stmt->execute()) {
+            $stream_id = $conn->insert_id;
             $success_message = "✅ Stream added successfully!";
+
+            // Persist selected time slots mapping if provided
+            if (!empty($_POST['time_slots']) && is_array($_POST['time_slots'])) {
+                $ins = $conn->prepare("INSERT IGNORE INTO stream_time_slots (stream_id, time_slot_id, is_active) VALUES (?, ?, 1)");
+                foreach ($_POST['time_slots'] as $slot_id) {
+                    $sid = (int)$slot_id;
+                    $ins->bind_param("ii", $stream_id, $sid);
+                    $ins->execute();
+                }
+                if (isset($ins) && $ins) $ins->close();
+            }
         } else {
             $error_message = "❌ Error adding stream: " . $conn->error;
         }
@@ -60,6 +73,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
         if ($stmt->execute()) {
             $success_message = "✅ Stream updated successfully!";
+
+            // Update selected time slots mapping
+            if (isset($_POST['time_slots']) && is_array($_POST['time_slots'])) {
+                // Clear existing
+                $del = $conn->prepare("DELETE FROM stream_time_slots WHERE stream_id = ?");
+                $del->bind_param("i", $id);
+                $del->execute();
+                $del->close();
+
+                // Insert new selections
+                $ins = $conn->prepare("INSERT IGNORE INTO stream_time_slots (stream_id, time_slot_id, is_active) VALUES (?, ?, 1)");
+                foreach ($_POST['time_slots'] as $slot_id) {
+                    $sid = (int)$slot_id;
+                    $ins->bind_param("ii", $id, $sid);
+                    $ins->execute();
+                }
+                if (isset($ins) && $ins) $ins->close();
+            }
         } else {
             $error_message = "❌ Error updating stream: " . $conn->error;
         }
@@ -81,6 +112,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         }
         $stmt->close();
     }
+
+    // No regenerate action needed with mapping model
 }
 
 // -------------------- FETCH ALL STREAMS --------------------
@@ -141,6 +174,24 @@ $result = $conn->query("SELECT * FROM streams ORDER BY created_at DESC");
             <?php foreach (['Mon','Tue','Wed','Thu','Fri','Sat','Sun'] as $day): ?>
                 <label class="me-2"><input type="checkbox" name="active_days[]" value="<?= $day; ?>"> <?= $day; ?></label>
             <?php endforeach; ?>
+        </div>
+
+        <?php 
+        // Fetch global time slots to allow selection for this stream
+        $global_slots_rs = $conn->query("SELECT id, start_time, end_time FROM time_slots WHERE is_mandatory = 1 ORDER BY start_time");
+        ?>
+        <div class="mb-3">
+            <label class="form-label">Select Time Slots for this Stream</label>
+            <div class="row">
+                <?php while ($gs = $global_slots_rs && $global_slots_rs->fetch_assoc()): ?>
+                    <div class="col-md-3">
+                        <label class="form-check-label">
+                            <input type="checkbox" class="form-check-input" name="time_slots[]" value="<?= $gs['id']; ?>">
+                            <?= htmlspecialchars(substr($gs['start_time'], 0, 5) . ' - ' . substr($gs['end_time'], 0, 5)); ?>
+                        </label>
+                    </div>
+                <?php endwhile; ?>
+            </div>
         </div>
 
         <div class="mb-3 form-check">

@@ -90,9 +90,6 @@
     <a href="streams.php" class="nav-link stream-management-link <?= ($currentPage == 'streams.php') ? 'active' : '' ?>">
       <i class="fas fa-cogs me-2"></i>Stream Management
     </a>
-    <a href="test_stream_filtering.php" class="nav-link stream-management-link <?= ($currentPage == 'test_stream_filtering.php') ? 'active' : '' ?>">
-      <i class="fas fa-test-tube me-2"></i>Test Stream Filtering
-    </a>
   </div>
 </div>
 
