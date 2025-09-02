@@ -449,25 +449,33 @@ $total_courses = $conn->query("SELECT COUNT(*) as count FROM courses WHERE is_ac
                     <div class="card-body">
                         <p class="text-muted">This will generate a new timetable based on current class-course assignments. Any existing timetable entries will be cleared.</p>
 
-                        <div class="d-flex flex-wrap gap-2 align-items-center">
-                            <form method="POST" class="d-flex gap-2 align-items-center">
-                                <input type="hidden" name="action" value="generate_lecture_timetable">
-                                <input type="text" name="academic_year" class="form-control form-control-sm" placeholder="Academic year e.g. 2024/2025" required style="max-width:220px">
+                        <div class="d-flex flex-column gap-3">
+                            <div class="d-flex gap-2 align-items-center">
+                                <input type="text" name="timetable_name" class="form-control form-control-sm" placeholder="Timetable name e.g. 2024/2025 First Semester" required style="max-width:300px">
                                 <select name="semester" class="form-select form-select-sm" required style="max-width:140px">
                                     <option value="">Semester</option>
                                     <option value="first">First</option>
                                     <option value="second">Second</option>
                                 </select>
-                                <button type="submit" class="btn btn-primary btn-lg" onclick="return confirm('This will clear existing timetable for the selected year/semester and generate a new lecture timetable. Continue?')">
-                                    <i class="fas fa-magic me-2"></i>Generate Lecture Timetable
-                                </button>
-                            </form>
-                            <form method="POST">
-                                <input type="hidden" name="action" value="generate_exams_timetable">
-                                <button type="submit" class="btn btn-outline-primary btn-lg">
-                                    <i class="fas fa-file-alt me-2"></i>Generate Exams Timetable
-                                </button>
-                            </form>
+                            </div>
+                            <div class="d-flex gap-2 align-items-center">
+                                <form method="POST" class="d-flex gap-2 align-items-center">
+                                    <input type="hidden" name="action" value="generate_lecture_timetable">
+                                    <input type="hidden" name="academic_year" value="">
+                                    <input type="hidden" name="semester" value="">
+                                    <button type="submit" class="btn btn-primary btn-lg" onclick="return confirm('This will clear existing timetable for the selected year/semester and generate a new lecture timetable. Continue?')">
+                                        <i class="fas fa-magic me-2"></i>Generate Lecture Timetable
+                                    </button>
+                                </form>
+                                <form method="POST" class="d-flex gap-2 align-items-center">
+                                    <input type="hidden" name="action" value="generate_exams_timetable">
+                                    <input type="hidden" name="academic_year" value="">
+                                    <input type="hidden" name="semester" value="">
+                                    <button type="submit" class="btn btn-outline-primary btn-lg">
+                                        <i class="fas fa-file-alt me-2"></i>Generate Exams Timetable
+                                    </button>
+                                </form>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -854,5 +862,20 @@ document.addEventListener('DOMContentLoaded', function () {
             }
         });
     } catch (e) { /* ignore */ }
+    
+    // Handle form submission to populate hidden fields
+    document.querySelectorAll('form[method="POST"]').forEach(function(form) {
+        form.addEventListener('submit', function(e) {
+            var timetableName = document.querySelector('input[name="timetable_name"]').value;
+            var semester = document.querySelector('select[name="semester"]').value;
+            
+            // Populate hidden fields in this form
+            var academicYearField = form.querySelector('input[name="academic_year"]');
+            var semesterField = form.querySelector('input[name="semester"]');
+            
+            if (academicYearField) academicYearField.value = timetableName;
+            if (semesterField) semesterField.value = semester;
+        });
+    });
 });
 </script>
