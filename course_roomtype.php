@@ -4,6 +4,7 @@ include 'connect.php';
 // Page title and layout includes
 $pageTitle = 'Course Room Type Management';
 include 'includes/header.php';
+include 'includes/sidebar.php';
 
 $success_message = '';
 $error_message = '';
@@ -133,152 +134,108 @@ $result = $conn->query($sql);
 $courses_sql = "SELECT id, `code` AS course_code, `name` AS course_name FROM courses WHERE is_active = 1 ORDER BY `code`";
 $courses_result = $conn->query($courses_sql);
 
-// Get room types
+// Get room types from database
 $room_types = [];
-$rt_res = $conn->query("SELECT id, name FROM room_types ORDER BY name");
-if ($rt_res) {
+$rt_res = $conn->query("SELECT id, name FROM room_types WHERE is_active = 1 ORDER BY name");
+if ($rt_res && $rt_res->num_rows > 0) {
     while ($r = $rt_res->fetch_assoc()) {
         $room_types[] = $r;
     }
 } else {
-    // Fallback list
-    $room_types = [['id'=>1,'name'=>'Lecture Hall'], ['id'=>2,'name'=>'Laboratory'], ['id'=>3,'name'=>'Computer Lab']];
+    // Fallback list if no room types exist in database
+    $room_types = [
+        ['id'=>1,'name'=>'Classroom'], 
+        ['id'=>2,'name'=>'Lecture Hall'], 
+        ['id'=>3,'name'=>'Laboratory'], 
+        ['id'=>4,'name'=>'Computer Lab'],
+        ['id'=>5,'name'=>'Seminar Room'],
+        ['id'=>6,'name'=>'Auditorium']
+    ];
 }
 ?>
 
-<!-- Bootstrap CSS and JS are included globally in includes/header.php -->
-<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+<!-- Additional CSS for Select2 and custom styling -->
 <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet">
-    <style>
-        :root {
-            --brand-maroon: #7a0b1c;
-            --brand-maroon-dark: #5a0713;
-            --muted-border: rgba(0,0,0,0.08);
-        }
-        .select2-container {
-            width: 100% !important;
-        }
-        .card {
-            box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
-            border: 1px solid var(--muted-border);
-        }
+<style>
+    .select2-container {
+        width: 100% !important;
+    }
+</style>
 
-        /* Brand header styling to match project theme */
-        .card-header.bg-primary {
-            background: var(--brand-maroon) !important;
-            border-bottom: 1px solid var(--brand-maroon-dark);
-        }
-        .card-header.bg-primary h5, .card-header.bg-primary .btn {
-            color: #fff !important;
-        }
-
-        /* Buttons in header */
-        .card-header .btn-outline-light {
-            color: #fff;
-            border-color: rgba(255,255,255,0.15);
-        }
-        .card-header .btn-light {
-            background: #fff;
-            color: var(--brand-maroon);
-        }
-
-        /* Action icons styling to match brand */
-        .table .btn-danger {
-            border-color: var(--brand-maroon);
-            color: var(--brand-maroon);
-            background: transparent;
-        }
-        .table .btn-danger:hover {
-            background: rgba(122,11,28,0.05);
-        }
-        .table .btn-warning {
-            border-color: var(--brand-maroon);
-            color: var(--brand-maroon);
-            background: transparent;
-        }
-    </style>
-</head>
-<body>
-    <div class="container-fluid mt-4">
-        <div class="row">
-            <div class="col-12">
-                <div class="card">
-                    <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
-                        <h5 class="mb-0">
-                            <i class="fas fa-building me-2"></i>Course Room Type Management
-                        </h5>
-                        <div>
-                            <button class="btn btn-outline-light me-2" data-bs-toggle="modal" data-bs-target="#bulkCourseModal">
-                                <i class="fas fa-layer-group me-1"></i>Bulk Add
-                            </button>
-                            <button class="btn btn-light" data-bs-toggle="modal" data-bs-target="#addCourseModal">
-                                <i class="fas fa-plus me-1"></i>Add Single
-                            </button>
-                        </div>
-                    </div>
-                    <div class="card-body">
-                        <?php if ($success_message): ?>
-                            <div class="alert alert-success alert-dismissible fade show" role="alert">
-                                <i class="fas fa-check-circle me-2"></i><?php echo $success_message; ?>
-                                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                            </div>
-                        <?php endif; ?>
-                        
-                        <?php if ($error_message): ?>
-                            <div class="alert alert-danger alert-dismissible fade show" role="alert">
-                                <i class="fas fa-exclamation-circle me-2"></i><?php echo $error_message; ?>
-                                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                            </div>
-                        <?php endif; ?>
-
-                        <div class="table-responsive">
-                            <table class="table" id="courseRoomTypeTable">
-                                <thead class="table-dark">
-                                    <tr>
-                                        <th>Course Code</th>
-                                        <th>Course Name</th>
-                                        <th>Preferred Room Type</th>
-                                        <th>Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <?php if ($result && $result->num_rows > 0): ?>
-                                        <?php while ($row = $result->fetch_assoc()): ?>
-                                            <tr>
-                                                <td><?php echo htmlspecialchars($row['course_code']); ?></td>
-                                                <td><?php echo htmlspecialchars($row['course_name']); ?></td>
-                                                <td><?php echo htmlspecialchars($row['preferred_room_type']); ?></td>
-                                                <td>
-                                                    <button class="btn btn-warning btn-sm me-1" 
-                                                            onclick="openEditModal('<?php echo $row['course_id']; ?>', '<?php echo htmlspecialchars($row['course_code']); ?>', '<?php echo htmlspecialchars($row['preferred_room_type'] ?? ''); ?>')">
-                                                        <i class="fas fa-edit"></i>
-                                                    </button>
-                                                    <form method="POST" style="display: inline;">
-                                                        <input type="hidden" name="action" value="delete">
-                                                        <input type="hidden" name="course_id" value="<?php echo $row['course_id']; ?>">
-                                                        <button type="submit" class="btn btn-danger btn-sm" 
-                                                                onclick="return confirm('Are you sure you want to delete this room type preference?')">
-                                                            <i class="fas fa-trash"></i>
-                                                        </button>
-                                                    </form>
-                                                </td>
-                                            </tr>
-                                        <?php endwhile; ?>
-                                    <?php else: ?>
-                                        <tr>
-                                            <td colspan="4" class="text-center text-muted">
-                                                <i class="fas fa-info-circle me-2"></i>No course room type preferences found
-                                            </td>
-                                        </tr>
-                                    <?php endif; ?>
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
+<div class="main-content" id="mainContent">
+    <div class="table-container">
+        <div class="table-header d-flex justify-content-between align-items-center">
+            <h4><i class="fas fa-building me-2"></i>Course Room Type Management</h4>
+            <div class="d-flex gap-2">
+                <button class="btn btn-outline-light me-2" data-bs-toggle="modal" data-bs-target="#bulkCourseModal">
+                    <i class="fas fa-layer-group me-1"></i>Bulk Add
+                </button>
+                <button class="btn btn-light" data-bs-toggle="modal" data-bs-target="#addCourseModal">
+                    <i class="fas fa-plus me-1"></i>Add Single
+                </button>
             </div>
         </div>
+        
+        <?php if ($success_message): ?>
+            <div class="alert alert-success alert-dismissible fade show m-3" role="alert">
+                <i class="fas fa-check-circle me-2"></i><?php echo $success_message; ?>
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        <?php endif; ?>
+        
+        <?php if ($error_message): ?>
+            <div class="alert alert-danger alert-dismissible fade show m-3" role="alert">
+                <i class="fas fa-exclamation-circle me-2"></i><?php echo $error_message; ?>
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        <?php endif; ?>
+
+        <div class="table-responsive">
+            <table class="table" id="courseRoomTypeTable">
+                <thead>
+                    <tr>
+                        <th>Course Code</th>
+                        <th>Course Name</th>
+                        <th>Preferred Room Type</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php if ($result && $result->num_rows > 0): ?>
+                        <?php while ($row = $result->fetch_assoc()): ?>
+                            <tr>
+                                <td><?php echo htmlspecialchars($row['course_code']); ?></td>
+                                <td><?php echo htmlspecialchars($row['course_name']); ?></td>
+                                <td><?php echo htmlspecialchars($row['preferred_room_type']); ?></td>
+                                <td>
+                                    <button class="btn btn-warning btn-sm me-1" 
+                                            onclick="openEditModal('<?php echo $row['course_id']; ?>', '<?php echo htmlspecialchars($row['course_code']); ?>', '<?php echo htmlspecialchars($row['preferred_room_type'] ?? ''); ?>')">
+                                        <i class="fas fa-edit"></i>
+                                    </button>
+                                    <form method="POST" style="display: inline;">
+                                        <input type="hidden" name="action" value="delete">
+                                        <input type="hidden" name="course_id" value="<?php echo $row['course_id']; ?>">
+                                        <button type="submit" class="btn btn-danger btn-sm" 
+                                                onclick="return confirm('Are you sure you want to delete this room type preference?')">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </form>
+                                </td>
+                            </tr>
+                        <?php endwhile; ?>
+                    <?php else: ?>
+                        <tr>
+                            <td colspan="4" class="empty-state">
+                                <i class="fas fa-info-circle"></i>
+                                <p>No course room type preferences found</p>
+                            </td>
+                        </tr>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
     </div>
+</div>
 
     <!-- Bulk Add Modal -->
     <div class="modal fade" id="bulkCourseModal" tabindex="-1">
@@ -312,7 +269,7 @@ if ($rt_res) {
                                 <select class="form-select" id="bulk_room_type" name="room_type" required>
                                     <option value="">Select Room Type</option>
                                     <?php foreach ($room_types as $type): ?>
-                                        <option value="<?php echo $type; ?>"><?php echo $type; ?></option>
+                                        <option value="<?php echo $type['id']; ?>"><?php echo htmlspecialchars($type['name']); ?></option>
                                     <?php endforeach; ?>
                                 </select>
                             </div>
@@ -372,7 +329,7 @@ if ($rt_res) {
                             <select class="form-select" id="room_type" name="room_type" required>
                                 <option value="">Select Room Type</option>
                                 <?php foreach ($room_types as $type): ?>
-                                    <option value="<?php echo $type; ?>"><?php echo $type; ?></option>
+                                    <option value="<?php echo $type['id']; ?>"><?php echo htmlspecialchars($type['name']); ?></option>
                                 <?php endforeach; ?>
                             </select>
                         </div>
@@ -411,7 +368,7 @@ if ($rt_res) {
                             <select class="form-select" id="edit_room_type" name="room_type" required>
                                 <option value="">Select Room Type</option>
                                 <?php foreach ($room_types as $type): ?>
-                                    <option value="<?php echo $type; ?>"><?php echo $type; ?></option>
+                                    <option value="<?php echo $type['id']; ?>"><?php echo htmlspecialchars($type['name']); ?></option>
                                 <?php endforeach; ?>
                             </select>
                         </div>
@@ -427,38 +384,27 @@ if ($rt_res) {
         </div>
     </div>
 
-    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
-    <script>
-        $(document).ready(function() {
-            // Initialize Select2 for better dropdown experience
-            $('#bulk_course_ids').select2({
-                placeholder: "Select courses...",
-                allowClear: true
-            });
-            
-            // Initialize DataTable for better table experience
-            $('#courseRoomTypeTable').DataTable({
-                pageLength: 25,
-                order: [[0, 'asc']],
-                language: {
-                    search: "Search preferences:",
-                    lengthMenu: "Show _MENU_ preferences per page",
-                    info: "Showing _START_ to _END_ of _TOTAL_ preferences"
-                }
-            });
+<!-- Select2 JavaScript -->
+<script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+<script>
+    $(document).ready(function() {
+        // Initialize Select2 for better dropdown experience
+        $('#bulk_course_ids').select2({
+            placeholder: "Select courses...",
+            allowClear: true
         });
+    });
+    
+    function openEditModal(courseId, courseCode, roomType) {
+        document.getElementById('edit_course_id').value = courseId;
+        document.getElementById('edit_course_display').value = courseCode;
+        document.getElementById('edit_room_type').value = roomType;
         
-        function openEditModal(courseId, courseCode, roomType) {
-            document.getElementById('edit_course_id').value = courseId;
-            document.getElementById('edit_course_display').value = courseCode;
-            document.getElementById('edit_room_type').value = roomType;
-            
-            var el = document.getElementById('editModal');
-            if (!el) return console.error('editModal element missing');
-            if (typeof bootstrap === 'undefined' || !bootstrap.Modal) return console.error('Bootstrap Modal not available');
-            bootstrap.Modal.getOrCreateInstance(el).show();
-        }
-    </script>
-</body>
-</html>
+        var el = document.getElementById('editModal');
+        if (!el) return console.error('editModal element missing');
+        if (typeof bootstrap === 'undefined' || !bootstrap.Modal) return console.error('Bootstrap Modal not available');
+        bootstrap.Modal.getOrCreateInstance(el).show();
+    }
+</script>
+
+<?php include 'includes/footer.php'; ?>
