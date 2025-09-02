@@ -104,9 +104,9 @@ if ($existing_assignments_result) {
 <div class="main-content" id="mainContent">
     <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet">
     <style>
+        /* Use global theme variables defined in includes/header.php:
+           --primary-color, --hover-color, --brand-blue, --accent-color, --brand-green */
         :root {
-            --brand-maroon: #7a0b1c;
-            --brand-maroon-dark: #5a0713;
             --muted-border: rgba(0,0,0,0.08);
         }
         .select2-container {
@@ -119,8 +119,8 @@ if ($existing_assignments_result) {
 
         /* Brand header styling to match project theme */
         .card-header.bg-primary {
-            background: var(--brand-maroon) !important;
-            border-bottom: 1px solid var(--brand-maroon-dark);
+            background: var(--primary-color) !important;
+            border-bottom: 1px solid var(--hover-color);
         }
         .card-header.bg-primary h5, .card-header.bg-primary .btn {
             color: #fff !important;
@@ -134,6 +134,27 @@ if ($existing_assignments_result) {
         .card-header .btn-light {
             background: #fff;
             color: var(--brand-maroon);
+        }
+
+        /* Project button color overrides to match global theme */
+        .btn-primary {
+            background-color: var(--brand-blue) !important;
+            border-color: var(--brand-blue) !important;
+            color: #fff !important;
+        }
+        .btn-primary:hover {
+            background-color: #0b5ed7 !important;
+            border-color: #0b5ed7 !important;
+        }
+
+        .btn-success {
+            background-color: var(--brand-green) !important;
+            border-color: var(--brand-green) !important;
+            color: #fff !important;
+        }
+        .btn-success:hover {
+            background-color: #157347 !important;
+            border-color: #157347 !important;
         }
 
         /* Smaller buttons used across tables */
@@ -152,8 +173,8 @@ if ($existing_assignments_result) {
             background: rgba(122,11,28,0.05);
         }
         .table .btn-warning {
-            border-color: var(--brand-maroon);
-            color: var(--brand-maroon);
+            border-color: var(--primary-color);
+            color: var(--primary-color);
             background: transparent;
         }
     </style>
@@ -166,10 +187,10 @@ if ($existing_assignments_result) {
                             <i class="fas fa-link me-2"></i>Class Course Management
                         </h5>
                         <div>
-                            <button class="btn btn-outline-light me-2" data-bs-toggle="modal" data-bs-target="#bulkAssignmentModal">
+                            <button class="btn btn-success me-2" data-bs-toggle="modal" data-bs-target="#bulkAssignmentModal">
                                 <i class="fas fa-layer-group me-1"></i>Bulk Assignment
                             </button>
-                            <button class="btn btn-light" data-bs-toggle="modal" data-bs-target="#singleAssignmentModal">
+                            <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#singleAssignmentModal">
                                 <i class="fas fa-plus me-1"></i>Single Assignment
                             </button>
                         </div>
