@@ -644,9 +644,11 @@ document.addEventListener('DOMContentLoaded', function(){
             }
         })();
     <?php endif; ?>
-});
-</script>
-// Import functionality
+ });
+ </script>
+ 
+ <script>
+ // Import functionality
 let importDataPrograms = [];
 
 function parseCSVPrograms(csvText) {
