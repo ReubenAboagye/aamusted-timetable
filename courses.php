@@ -406,7 +406,7 @@ $stats = $stats_result ? $stats_result->fetch_assoc() : ['total_courses' => 0, '
                         <p class="mb-2">Drop CSV file here or <strong>click to browse</strong></p>
                         <small class="text-muted">Supported format: CSV (headers: name,code,department_id,hours_per_week,is_active)</small>
                     </div>
-                    <input type="file" class="form-control d-none" id="csvFile" accept=",.csv">
+                    <input type="file" class="form-control d-none" id="csvFile" accept=".csv,text/csv">
                 </div>
 
                 <div class="mb-3">
@@ -597,8 +597,21 @@ document.addEventListener('DOMContentLoaded', function() {
     uploadArea.addEventListener('click', () => fileInput.click());
     uploadArea.addEventListener('dragover', function(e){ e.preventDefault(); this.style.borderColor='#007bff'; this.style.background='#e3f2fd'; });
     uploadArea.addEventListener('dragleave', function(e){ e.preventDefault(); this.style.borderColor='#ccc'; this.style.background='#f8f9fa'; });
-    uploadArea.addEventListener('drop', function(e){ e.preventDefault(); this.style.borderColor='#ccc'; this.style.background='#f8f9fa'; const files = e.dataTransfer.files; if (files.length) { fileInput.files = files; processCoursesFile(files[0]); } });
-    fileInput.addEventListener('change', function(){ if (this.files.length) processCoursesFile(this.files[0]); });
+    uploadArea.addEventListener('drop', function(e){
+        e.preventDefault();
+        this.style.borderColor='#ccc';
+        this.style.background='#f8f9fa';
+        const files = e.dataTransfer.files;
+        console.log('drop event files:', files);
+        if (files && files.length) {
+            // avoid assigning to fileInput.files (may be read-only in some browsers)
+            processCoursesFile(files[0]);
+        }
+    });
+    fileInput.addEventListener('change', function(){
+        console.log('file input changed, files:', this.files);
+        if (this.files && this.files.length) processCoursesFile(this.files[0]);
+    });
 
     processBtn.addEventListener('click', function(){
         const validData = importDataCourses.filter(r => r.valid);
@@ -606,7 +619,25 @@ document.addEventListener('DOMContentLoaded', function() {
         const form = document.createElement('form'); form.method='POST'; form.style.display='none';
         const actionInput = document.createElement('input'); actionInput.type='hidden'; actionInput.name='action'; actionInput.value='bulk_import';
         const dataInput = document.createElement('input'); dataInput.type='hidden'; dataInput.name='import_data'; dataInput.value = JSON.stringify(validData);
-        form.appendChild(actionInput); form.appendChild(dataInput); document.body.appendChild(form); form.submit();
+
+        // Prefer CSRF token from DOM (if present) to avoid mismatches; fall back to server token
+        let csrfValue = '';
+        try {
+            const domTokenInput = document.querySelector('input[name="csrf_token"]');
+            if (domTokenInput && domTokenInput.value) {
+                csrfValue = domTokenInput.value;
+            } else {
+                csrfValue = '<?php echo isset($_SESSION["csrf_token"]) ? $_SESSION["csrf_token"] : ""; ?>';
+            }
+        } catch (err) {
+            console.warn('Error reading CSRF token from DOM, falling back to server token', err);
+            csrfValue = '<?php echo isset($_SESSION["csrf_token"]) ? $_SESSION["csrf_token"] : ""; ?>';
+        }
+
+        console.log('Import submit - csrf token present:', !!csrfValue, 'length:', csrfValue ? csrfValue.length : 0);
+        const csrfInput = document.createElement('input'); csrfInput.type='hidden'; csrfInput.name='csrf_token'; csrfInput.value = csrfValue;
+        form.appendChild(actionInput); form.appendChild(dataInput); form.appendChild(csrfInput); document.body.appendChild(form);
+        try { form.submit(); } catch (err) { console.error('Form submit failed', err); }
     });
 });
 </script>

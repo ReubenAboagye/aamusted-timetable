@@ -214,9 +214,16 @@ if (!function_exists('getCount')) {
   <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600&display=swap" rel="stylesheet" />
   <style>
     :root {
+      /* Primary brand maroon (header/cards) */
       --primary-color: #800020;
+      /* Slightly darker hover for maroon elements */
       --hover-color: #600010;
+      /* Primary action blue (Add buttons) */
+      --brand-blue: #0d6efd;
+      /* Accent / warning gold used for yellow cards */
       --accent-color: #FFD700;
+      /* Brand success green used on success buttons/cards */
+      --brand-green: #198754;
       --bg-color: #ffffff;
       --sidebar-bg: #f8f8f8;
       --footer-bg: #800020;
@@ -521,9 +528,9 @@ if (!function_exists('getCount')) {
 
     /* Theme-specific card colors matching logo: red, gold, green */
     :root {
-      --theme-red: #800020; /* primary maroon */
-      --theme-gold: #B8860B; /* dark gold accent */
-      --theme-green: #2E7D32; /* deep green */
+      --theme-red: #7a0b1c; /* primary maroon */
+      --theme-gold: #FFC107; /* gold / warning */
+      --theme-green: #198754; /* success green */
     }
 
     .bg-theme-primary { background-color: var(--theme-red) !important; color: #fff !important; }
