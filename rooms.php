@@ -64,6 +64,7 @@ include 'includes/flash.php';
 // Handle form submissions BEFORE any HTML output to avoid header issues
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? null;
+    
     // Add Building
     if ($action === 'add_building') {
         $building_name = trim($conn->real_escape_string($_POST['building_name']));
@@ -105,7 +106,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     // Bulk import handler (expects JSON array in 'import_data')
-    if (isset($_POST['action']) && $_POST['action'] === 'bulk_import') {
+    if ($action === 'bulk_import') {
         $import_json = $_POST['import_data'] ?? '';
         $import_data = json_decode($import_json, true);
 
@@ -124,7 +125,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'Auditorium' => 'auditorium'
         ];
 
-        $insert_sql = "INSERT INTO rooms (name, room_type, capacity, building_id, building, is_active) VALUES (?, ?, ?, ?, ?, ?)";
+        $insert_sql = "INSERT INTO rooms (name, room_type, capacity, building_id, is_active) VALUES (?, ?, ?, ?, ?)";
         $insert_stmt = $conn->prepare($insert_sql);
 
         $check_sql = "SELECT id FROM rooms WHERE name = ? AND building_id = ? LIMIT 1";
@@ -169,24 +170,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
 
-            // Resolve building name for insert (some schemas include 'building' column)
-            $building_name = '';
-            if (!empty($row['building'])) {
-                $building_name = trim($row['building']);
-            } else {
-                $bst2 = $conn->prepare("SELECT name FROM buildings WHERE id = ? LIMIT 1");
-                if ($bst2) {
-                    $bst2->bind_param('i', $building_id);
-                    $bst2->execute();
-                    $bres2 = $bst2->get_result();
-                    if ($bres2 && $bres2->num_rows > 0) {
-                        $brow2 = $bres2->fetch_assoc();
-                        $building_name = $brow2['name'];
-                    }
-                    $bst2->close();
-                }
-            }
-
             // Map room type
             $db_room_type = $room_type_mappings[$room_type_input] ?? strtolower(str_replace(' ', '_', $room_type_input));
 
@@ -202,7 +185,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             if ($insert_stmt) {
-                $insert_stmt->bind_param('ssiisi', $name, $db_room_type, $capacity, $building_id, $building_name, $is_active);
+                $insert_stmt->bind_param('ssiii', $name, $db_room_type, $capacity, $building_id, $is_active);
                 if ($insert_stmt->execute()) {
                     $imported++;
                 } else {
@@ -228,43 +211,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     }
 
-
-}
-$pageTitle = 'Rooms Management';
-include 'includes/header.php';
-include 'includes/sidebar.php';
-
-/**
- * HARDCODED ROOM TYPES (Application-level validation):
- * - classroom
- * - lecture_hall  
- * - laboratory
- * - computer_lab
- * - seminar_room
- * - auditorium
- * 
- * REMINDER: room_type is stored as VARCHAR in database, validation is enforced at application level
- */
-
-// Database connection already included above
-
-// Test room type validation (for debugging)
-if (isset($_GET['test_room_type'])) {
-    $test_type = $_GET['test_room_type'];
-    $valid_types = ['classroom', 'lecture_hall', 'laboratory', 'computer_lab', 'seminar_room', 'auditorium'];
-    echo "Testing room type: '$test_type'<br>";
-    echo "Valid types: " . implode(', ', $valid_types) . "<br>";
-    echo "Is valid: " . (in_array($test_type, $valid_types) ? 'YES' : 'NO') . "<br>";
-    echo "Length: " . strlen($test_type) . "<br>";
-    exit;
-}
-
-// Handle form submissions
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    // Normalize action to avoid undefined index notices
-    $action = $_POST['action'] ?? null;
-    // Debug: Log all POST data
-    error_log("POST action: " . ($action ?? 'NULL'));
     // Handle multi-add (client sets action to 'add_multiple')
     if ($action === 'add_multiple') {
         // Expect building_id, multi_count, multi_start, room_type, capacity, is_active
@@ -342,32 +288,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         else { $_SESSION['success_message'] = $msg; }
         header('Location: rooms.php'); exit;
     }
+    
     // Single add
-    } elseif ($action === 'add') {
-        // Debug: Log all POST data
-        error_log("Single Add - POST data received: " . json_encode($_POST));
-        error_log("Single Add - Raw room_type value: '" . $_POST['room_type'] . "'");
-        error_log("Single Add - Raw room_type length: " . strlen($_POST['room_type']));
-        error_log("Single Add - Raw room_type bytes: " . implode(',', array_map('ord', str_split($_POST['room_type']))));
-        
+    if ($action === 'add') {
         $name = trim($conn->real_escape_string($_POST['name']));
         $building_id = (int)$_POST['building_id'];
         $room_type = trim($conn->real_escape_string($_POST['room_type']));
         $valid_form_room_types = ['Classroom', 'Lecture Hall', 'Laboratory', 'Computer Lab', 'Seminar Room', 'Auditorium'];
 
-        error_log("Single Add - After trim room_type: '$room_type'");
-        error_log("Single Add - After trim room_type length: " . strlen($room_type));
-        error_log("Single Add - After trim room_type bytes: " . implode(',', array_map('ord', str_split($room_type))));
-        error_log("Single Add - Valid form types: " . json_encode($valid_form_room_types));
-
         if (!in_array($room_type, $valid_form_room_types)) {
-            error_log("ERROR: Single Add - Invalid room type: '$room_type'");
-            $error_message = "Invalid room type selected. Please choose a valid room type from the dropdown.";
+            $_SESSION['error_message'] = "Invalid room type selected. Please choose a valid room type from the dropdown.";
+            header('Location: rooms.php'); exit;
         } else {
             $capacity = (int)$_POST['capacity'];
             $is_active = isset($_POST['is_active']) ? 1 : 0;
 
-                        // Convert room type to database format (hardcoded mapping)
+            // Convert room type to database format (hardcoded mapping)
             $room_type_mappings = [
                 'Classroom' => 'classroom',
                 'Lecture Hall' => 'lecture_hall',
@@ -377,26 +313,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'Auditorium' => 'auditorium'
             ];
             $db_room_type = $room_type_mappings[$room_type] ?? 'classroom';
-            error_log("Single Add - Original room_type: '$room_type', Converted to: '$db_room_type'");
-            error_log("Single Add - Room type mapping used: '$room_type' => '$room_type' => '$db_room_type'");
-            error_log("Single Add - Available mappings: " . json_encode($room_type_mappings));
-            
-            // Debug: Check exact string comparison
-            error_log("Single Add - Room type exact match check:");
-            foreach ($room_type_mappings as $form_value => $db_value) {
-                $exact_match = ($form_value === $room_type);
-                $length_match = (strlen($form_value) === strlen($room_type));
-                error_log("  '$form_value' vs '$room_type': exact=$exact_match, length=$length_match");
-            }
             
             // Application-level validation (hardcoded)
             $valid_room_types = ['classroom', 'lecture_hall', 'laboratory', 'computer_lab', 'seminar_room', 'auditorium'];
             if (!in_array($db_room_type, $valid_room_types)) {
-                error_log("ERROR: Single Add - Invalid room type '$db_room_type' from original '$room_type'");
-                $error_message = "Invalid room type selected. Please try again.";
+                $_SESSION['error_message'] = "Invalid room type selected. Please try again.";
+                header('Location: rooms.php'); exit;
             } else {
-                error_log("SUCCESS: Single Add - Valid room type '$db_room_type'");
-
                 // Check for duplicates using building_id (current schema)
                 $check_sql = "SELECT id FROM rooms WHERE name = ? AND building_id = ?";
                 $check_stmt = $conn->prepare($check_sql);
@@ -405,56 +328,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $check_result = $check_stmt->get_result();
 
                 if ($check_result && $check_result->num_rows > 0) {
-                    $error_message = "Room with this name already exists in the selected building.";
+                    $_SESSION['error_message'] = "Room with this name already exists in the selected building.";
                     $check_stmt->close();
+                    header('Location: rooms.php'); exit;
                 } else {
                     $check_stmt->close();
-                    // Final debug before INSERT
-                    error_log("Single Add - Final values before INSERT:");
-                    error_log("  name: '$name'");
-                    error_log("  building: '$building'");
-                    error_log("  room_type: '$db_room_type'");
-                    error_log("  room_type length: " . strlen($db_room_type));
-                    error_log("  room_type bytes: " . implode(',', array_map('ord', str_split($db_room_type))));
-                    error_log("  capacity: $capacity");
-
-
-                    error_log("  is_active: $is_active");
                     
-                    // Final validation - ensure room_type matches database ENUM exactly
-                    $valid_db_room_types = ['classroom', 'lecture_hall', 'laboratory', 'computer_lab', 'seminar_room', 'auditorium'];
-                    if (!in_array($db_room_type, $valid_db_room_types)) {
-                        error_log("ERROR: Single Add - Final validation failed: room_type '$db_room_type' not in valid list: " . json_encode($valid_db_room_types));
-                        $error_message = "Invalid room type value. Please try again.";
-                    } else {
-                        error_log("SUCCESS: Single Add - Final validation passed for room_type: '$db_room_type'");
-                        
-                                                $sql = "INSERT INTO rooms (name, room_type, capacity, building_id, is_active) VALUES (?, ?, ?, ?, ?)";
-                        $stmt = $conn->prepare($sql);
-                        if ($stmt) {
-                            // Use provided building_id from form; do not override with hardcoded default
-                            $stmt->bind_param("ssiii", $name, $db_room_type, $capacity, $building_id, $is_active);
-                            error_log("Single Add - Binding: name='$name', room_type='$db_room_type', capacity=$capacity, building_id=$building_id, is_active=$is_active");
+                    $sql = "INSERT INTO rooms (name, room_type, capacity, building_id, is_active) VALUES (?, ?, ?, ?, ?)";
+                    $stmt = $conn->prepare($sql);
+                    if ($stmt) {
+                        $stmt->bind_param("ssiii", $name, $db_room_type, $capacity, $building_id, $is_active);
 
-                            if ($stmt->execute()) {
-                                $stmt->close();
-                                redirect_with_flash('rooms.php', 'success', 'Room added successfully!');
-                            } else {
-                                error_log("ERROR: Single Add - Insert failed: " . $stmt->error);
-                                error_log("ERROR: Single Add - Failed values: name='$name', room_type='$db_room_type', capacity=$capacity, building_id=$building_id, is_active=$is_active");
-                                $error_message = "Error adding room: " . $stmt->error;
-                            }
+                        if ($stmt->execute()) {
                             $stmt->close();
+                            redirect_with_flash('rooms.php', 'success', 'Room added successfully!');
                         } else {
-                            $error_message = "Error preparing statement: " . $conn->error;
+                            error_log("ERROR: Single Add - Insert failed: " . $stmt->error);
+                            $_SESSION['error_message'] = "Error adding room: " . $stmt->error;
+                            header('Location: rooms.php'); exit;
                         }
+                        $stmt->close();
+                    } else {
+                        $_SESSION['error_message'] = "Error preparing statement: " . $conn->error;
+                        header('Location: rooms.php'); exit;
                     }
                 }
             }
         }
+    }
 
     // Edit
-    } elseif ($action === 'edit' && isset($_POST['id'])) {
+    if ($action === 'edit' && isset($_POST['id'])) {
         $id = (int)$_POST['id'];
         $name = trim($conn->real_escape_string($_POST['name']));
         $building_id = (int)$_POST['building_id'];
@@ -462,16 +366,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $valid_form_room_types = ['Classroom', 'Lecture Hall', 'Laboratory', 'Computer Lab', 'Seminar Room', 'Auditorium'];
 
         if (!in_array($room_type, $valid_form_room_types)) {
-            error_log("ERROR: Edit - Invalid room type: '$room_type'");
-            $error_message = "Invalid room type selected. Please choose a valid room type from the dropdown.";
+            $_SESSION['error_message'] = "Invalid room type selected. Please choose a valid room type from the dropdown.";
+            header('Location: rooms.php'); exit;
         } else {
             $capacity = (int)$_POST['capacity'];
-
             $is_active = isset($_POST['is_active']) ? 1 : 0;
 
-
-
-                        // Convert room type to database format (hardcoded mapping)
+            // Convert room type to database format (hardcoded mapping)
             $room_type_mappings = [
                 'Classroom' => 'classroom',
                 'Lecture Hall' => 'lecture_hall',
@@ -481,16 +382,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'Auditorium' => 'auditorium'
             ];
             $db_room_type = $room_type_mappings[$room_type] ?? 'classroom';
-            error_log("Edit - Original room_type: '$room_type', Converted to: '$db_room_type'");
             
             // Application-level validation (hardcoded)
             $valid_room_types = ['classroom', 'lecture_hall', 'laboratory', 'computer_lab', 'seminar_room', 'auditorium'];
             if (!in_array($db_room_type, $valid_room_types)) {
-                error_log("ERROR: Edit - Invalid room type '$db_room_type' from original '$room_type'");
-                $error_message = "Invalid room type selected. Please try again.";
+                $_SESSION['error_message'] = "Invalid room type selected. Please try again.";
+                header('Location: rooms.php'); exit;
             } else {
-                error_log("SUCCESS: Edit - Valid room type '$db_room_type'");
-
                 // Check for duplicates - use building_id column (current schema) and correct parameter
                 $check_sql = "SELECT id FROM rooms WHERE name = ? AND building_id = ? AND id != ?";
                 $check_stmt = $conn->prepare($check_sql);
@@ -499,38 +397,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $check_result = $check_stmt->get_result();
 
                 if ($check_result && $check_result->num_rows > 0) {
-                    $error_message = "Another room with this name exists in the selected building.";
+                    $_SESSION['error_message'] = "Another room with this name exists in the selected building.";
                     $check_stmt->close();
+                    header('Location: rooms.php'); exit;
                 } else {
                     $check_stmt->close();
                     $sql = "UPDATE rooms SET name = ?, room_type = ?, capacity = ?, building_id = ?, is_active = ? WHERE id = ?";
                     $stmt = $conn->prepare($sql);
                     if ($stmt) {
-                        // Use provided building_id from form; do not override with hardcoded default
                         $stmt->bind_param("ssiiii", $name, $db_room_type, $capacity, $building_id, $is_active, $id);
-                        error_log("Edit - Binding: name='$name', room_type='$db_room_type', capacity=$capacity, building_id=$building_id, is_active=$is_active, id=$id");
 
                         if ($stmt->execute()) {
                             $stmt->close();
                             redirect_with_flash('rooms.php', 'success', 'Room updated successfully!');
                         } else {
                             error_log("ERROR: Edit - Update failed: " . $stmt->error);
-                            error_log("ERROR: Edit - Failed values: name='$name', room_type='$db_room_type', capacity=$capacity, building_id=$building_id, is_active=$is_active, id=$id");
-                            $error_message = "Error updating room: " . $stmt->error;
+                            $_SESSION['error_message'] = "Error updating room: " . $stmt->error;
+                            header('Location: rooms.php'); exit;
                         }
                         $stmt->close();
                     } else {
-                        $error_message = "Error preparing statement: " . $conn->error;
+                        $_SESSION['error_message'] = "Error preparing statement: " . $conn->error;
+                        header('Location: rooms.php'); exit;
                     }
                 }
             }
         }
+    }
 
     // Bulk Edit
-    } elseif ($action === 'bulk_edit' && isset($_POST['room_ids'])) {
+    if ($action === 'bulk_edit' && isset($_POST['room_ids'])) {
         $room_ids = json_decode($_POST['room_ids'], true);
         if (!$room_ids || !is_array($room_ids)) {
-            $error_message = "Invalid room selection.";
+            $_SESSION['error_message'] = "Invalid room selection.";
+            header('Location: rooms.php'); exit;
         } else {
             $success_count = 0;
             $error_count = 0;
@@ -575,8 +475,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
                 
-
-                
                 // Status
                 if (isset($_POST['is_active'])) {
                     $is_active = isset($_POST['is_active']) ? 1 : 0;
@@ -614,13 +512,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($error_count > 0) {
                     $success_message .= " $error_count rooms failed to update.";
                 }
+                $_SESSION['success_message'] = $success_message;
             } else {
-                $error_message = "No rooms were updated. Please check your selection.";
+                $_SESSION['error_message'] = "No rooms were updated. Please check your selection.";
             }
+            header('Location: rooms.php'); exit;
         }
+    }
     
     // Delete (soft delete: set is_active = 0)
-    } elseif ($action === 'delete' && isset($_POST['id'])) {
+    if ($action === 'delete' && isset($_POST['id'])) {
         $id = (int)$_POST['id'];
         $sql = "UPDATE rooms SET is_active = 0 WHERE id = ?";
         $stmt = $conn->prepare($sql);
@@ -630,12 +531,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect_with_flash('rooms.php', 'success', 'Room deleted.');
         } else {
             error_log("ERROR: Delete - Update failed: " . $stmt->error);
-            $error_message = "Error deleting room: " . $conn->error;
+            $_SESSION['error_message'] = "Error deleting room: " . $conn->error;
+            header('Location: rooms.php'); exit;
         }
         $stmt->close();
-    
-
+    }
 }
+
+$pageTitle = 'Rooms Management';
+include 'includes/header.php';
+include 'includes/sidebar.php';
 
 // Fetch rooms with all fields from current schema, joining with buildings table
 $sql = "SELECT r.id, r.name, b.name as building_name, r.room_type, r.capacity, r.is_active, r.created_at, r.updated_at, r.building_id 
