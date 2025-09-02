@@ -135,6 +135,8 @@ if ($existing_assignments_result) {
 <!-- Page-specific styles and assets (loaded in body so header remains authoritative) -->
 <div class="main-content" id="mainContent">
     <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet">
+    <!-- DataTables CSS (Bootstrap 5 integration) -->
+    <link href="https://cdn.datatables.net/1.13.4/css/dataTables.bootstrap5.min.css" rel="stylesheet">
     <style>
         /* Use global theme variables defined in includes/header.php:
            --primary-color, --hover-color, --brand-blue, --accent-color, --brand-green */
@@ -332,6 +334,14 @@ if ($existing_assignments_result) {
                                     <option value="500">500</option>
                                 </select>
                             </div>
+                            <div class="mt-2">
+                                <label class="form-label">Filter by Academic Semester</label>
+                                <select id="filterSemester" class="form-select">
+                                    <option value="">All (1/2)</option>
+                                    <option value="1">Semester 1 </option>
+                                    <option value="2">Semester 2 </option>
+                                </select>
+                            </div>
                         </div>
 
                         <div class="col-md-8">
@@ -361,6 +371,9 @@ if ($existing_assignments_result) {
 
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+    <!-- DataTables JS -->
+    <script src="https://cdn.datatables.net/1.13.4/js/jquery.dataTables.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.4/js/dataTables.bootstrap5.min.js"></script>
     <script>
         $(document).ready(function() {
             // Initialize Select2 for better dropdown experience
@@ -428,6 +441,19 @@ if ($existing_assignments_result) {
                         const deptSel = document.getElementById('filterDept');
                         if (deptSel) deptSel.value = data.data.class_department_id;
                     }
+                    // If API returned class_level_band, preselect level filter and trigger filtering
+                    if (data.data.class_level_band) {
+                        const levelSel = document.getElementById('filterLevel');
+                        if (levelSel) levelSel.value = data.data.class_level_band;
+                    }
+                    // If API returned class_level_band, preselect academic semester (odd->1 / even->2)
+                    if (data.data.class_level_band) {
+                        const semSel = document.getElementById('filterSemester');
+                        if (semSel) {
+                            // Determine default academic semester: for each level we choose semester 1 (odd) by default
+                            semSel.value = '1';
+                        }
+                    }
                     populateCourseLists();
                 } else {
                     throw new Error(data.error || 'Failed to fetch courses');
@@ -446,10 +472,21 @@ if ($existing_assignments_result) {
         availableList.innerHTML = '';
         assignedList.innerHTML = '';
 
+        // Show available courses filtered by current department and level selections
+        const deptVal = document.getElementById('filterDept') ? document.getElementById('filterDept').value : '';
+        const levelVal = document.getElementById('filterLevel') ? document.getElementById('filterLevel').value : '';
+        const semesterVal = document.getElementById('filterSemester') ? document.getElementById('filterSemester').value : '';
         availableCourses.forEach(course => {
+            // department filter
+            if (deptVal && String(course.department_id) !== String(deptVal)) return;
+            // level filter: course.level_band must match levelVal (e.g., 300)
+            if (levelVal && course.level_band && String(course.level_band) !== String(levelVal)) return;
+            // semester filter: academic semester (1 or 2) derived from course code middle digit
+            if (semesterVal && course.academic_semester && String(course.academic_semester) !== String(semesterVal)) return;
+
             const courseDiv = document.createElement('div');
-            courseDiv.className = 'course-item p-2 border-bottom';
-            courseDiv.innerHTML = `<div class="d-flex justify-content-between align-items-center"><span>${course.course_code} - ${course.course_name}</span><button class="btn btn-sm btn-outline-primary" onclick="assignCourse('${course.id}')"><i class="fas fa-plus"></i></button></div>`;
+            courseDiv.className = 'course-item p-2 border-bottom d-flex justify-content-between align-items-center';
+            courseDiv.innerHTML = `<span>${course.course_code} - ${course.course_name}</span><button class="btn btn-sm btn-outline-primary" onclick="assignCourse('${course.id}')"><i class="fas fa-plus"></i></button>`;
             availableList.appendChild(courseDiv);
         });
 
@@ -526,8 +563,10 @@ if ($existing_assignments_result) {
 
         var deptFilter = document.getElementById('filterDept');
         var levelFilter = document.getElementById('filterLevel');
-        if (deptFilter) deptFilter.addEventListener('change', function(){ filterAvailable(search ? search.value.trim().toLowerCase() : ''); });
-        if (levelFilter) levelFilter.addEventListener('change', function(){ filterAvailable(search ? search.value.trim().toLowerCase() : ''); });
+        var semesterFilter = document.getElementById('filterSemester');
+        if (deptFilter) deptFilter.addEventListener('change', function(){ populateCourseLists(); });
+        if (levelFilter) levelFilter.addEventListener('change', function(){ populateCourseLists(); });
+        if (semesterFilter) semesterFilter.addEventListener('change', function(){ populateCourseLists(); });
     });
 
     function filterAvailable(query) {

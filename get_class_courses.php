@@ -38,19 +38,72 @@ if ($res) {
     }
 }
 
-// Try to determine the class' department (via program -> department)
+// Try to determine the class' department and level band (via program -> department and level)
 $class_department_id = null;
-$cstmt = $conn->prepare("SELECT p.department_id FROM classes c LEFT JOIN programs p ON c.program_id = p.id WHERE c.id = ? LIMIT 1");
+$class_level_band = null;
+$cstmt = $conn->prepare("SELECT p.department_id, l.name AS level_name FROM classes c LEFT JOIN programs p ON c.program_id = p.id LEFT JOIN levels l ON c.level_id = l.id WHERE c.id = ? LIMIT 1");
 if ($cstmt) {
     $cstmt->bind_param('i', $class_id);
     $cstmt->execute();
     $cres = $cstmt->get_result();
     if ($cres && $row = $cres->fetch_assoc()) {
         $class_department_id = $row['department_id'] !== null ? (int)$row['department_id'] : null;
+        // derive level band from level_name by extracting first number and mapping to 100s
+        $level_name = $row['level_name'] ?? '';
+        if (preg_match('/(\d{1,3})/', $level_name, $lm)) {
+            $num = (int)$lm[1];
+            if ($num > 0 && $num < 10) $num = $num * 100;
+            $class_level_band = (int)(floor($num / 100) * 100);
+        }
     }
     $cstmt->close();
 }
 
-echo json_encode(['success' => true, 'data' => ['available_courses' => $available, 'assigned_courses' => $assigned, 'class_department_id' => $class_department_id]]);
+// annotate available and assigned courses with their detected level band to help client-side filtering
+foreach ($available as &$ac) {
+    $ac['level_band'] = null;
+    $ac['course_semester'] = null;
+    $code = $ac['course_code'] ?? '';
+    $name = $ac['course_name'] ?? '';
+    if (preg_match('/(\d{3})/', $code, $m) || preg_match('/(\d{3})/', $name, $m)) {
+        $num = (int)$m[1];
+        $ac['level_band'] = (int)(floor($num / 100) * 100);
+        // semester encoded as the middle digit of the 3-digit number, e.g., 356 -> 5
+        $middle = substr($m[1], 1, 1);
+        if (is_numeric($middle)) {
+            $ac['course_semester'] = (int)$middle;
+            // academic semester: odd => 1, even => 2
+            $ac['academic_semester'] = ($ac['course_semester'] % 2 === 1) ? 1 : 2;
+        }
+    } elseif (preg_match('/(\d)/', $code, $m) || preg_match('/(\d)/', $name, $m)) {
+        $num = (int)$m[1];
+        if ($num > 0 && $num < 10) $num = $num * 100;
+        $ac['level_band'] = (int)(floor($num / 100) * 100);
+    }
+}
+unset($ac);
+
+foreach ($assigned as &$ac) {
+    $ac['level_band'] = null;
+    $ac['course_semester'] = null;
+    $code = $ac['course_code'] ?? '';
+    $name = $ac['course_name'] ?? '';
+    if (preg_match('/(\d{3})/', $code, $m) || preg_match('/(\d{3})/', $name, $m)) {
+        $num = (int)$m[1];
+        $ac['level_band'] = (int)(floor($num / 100) * 100);
+        $middle = substr($m[1], 1, 1);
+        if (is_numeric($middle)) {
+            $ac['course_semester'] = (int)$middle;
+            $ac['academic_semester'] = ($ac['course_semester'] % 2 === 1) ? 1 : 2;
+        }
+    } elseif (preg_match('/(\d)/', $code, $m) || preg_match('/(\d)/', $name, $m)) {
+        $num = (int)$m[1];
+        if ($num > 0 && $num < 10) $num = $num * 100;
+        $ac['level_band'] = (int)(floor($num / 100) * 100);
+    }
+}
+unset($ac);
+
+echo json_encode(['success' => true, 'data' => ['available_courses' => $available, 'assigned_courses' => $assigned, 'class_department_id' => $class_department_id, 'class_level_band' => $class_level_band]]);
 
 
