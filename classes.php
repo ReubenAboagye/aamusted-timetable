@@ -28,8 +28,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $stream_id = isset($_POST['stream_id']) ? $conn->real_escape_string($_POST['stream_id']) : 1;
         $is_active = 1;
 
-        // Fetch program and level
-        $prog_stmt = $conn->prepare("SELECT id, name, code FROM programs WHERE id = ?");
+        // Fetch program and its department short code if available
+        $prog_stmt = $conn->prepare("SELECT p.id, p.name, p.code, p.department_id, d.short_name AS dept_short FROM programs p LEFT JOIN departments d ON p.department_id = d.id WHERE p.id = ?");
         $prog_stmt->bind_param("i", $program_id);
         $prog_stmt->execute();
         $prog_res = $prog_stmt->get_result();
@@ -44,42 +44,63 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $lvl_stmt->close();
 
         if ($program && $level) {
-            $num_classes = max(1, ceil($total_capacity / 100));
-            $success_count = 0;
-            $error_count = 0;
+            // Create a single parent class record and store total_capacity and divisions_count
+            $divisions_count = max(1, (int)ceil($total_capacity / 100));
 
             // Extract level numeric part for code (e.g., 'Level 100' -> '100')
             preg_match('/(\d+)/', $level['name'], $m);
             $level_num = $m[1] ?? '1';
             $year_suffix = date('Y');
 
-            for ($i = 0; $i < $num_classes; $i++) {
-                $letter = chr(65 + $i);
-                $class_name = $program['name'] . ' ' . $level['name'] . ($num_classes > 1 ? $letter : '');
-                $class_code = ($program['code'] ?? 'PRG') . '-Y' . $level_num . '-' . $year_suffix . ($num_classes > 1 ? $letter : '');
-                $academic_year = date('Y') . '/' . (date('Y') + 1);
-                $semester = 'first';
+            // Build short class base using department short or program code and level number, e.g. "ITE 100"
+            $dept_short = !empty($program['dept_short']) ? strtoupper(trim($program['dept_short'])) : strtoupper(trim($program['code'] ?? 'PRG'));
+            $class_name = $dept_short . ' ' . $level_num; // e.g. ITE 100
+            $class_code = $dept_short . $level_num; // compact code used for identifiers
 
-                $sql = "INSERT INTO classes (program_id, level_id, name, code, academic_year, semester, stream_id, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
-                $stmt = $conn->prepare($sql);
-                $stmt->bind_param("iissssii", $program_id, $level_id, $class_name, $class_code, $academic_year, $semester, $stream_id, $is_active);
+            // Ensure stream_id is an integer
+            $stream_id = (int)$stream_id;
 
+            $sql = "INSERT INTO classes (program_id, level_id, name, code, stream_id, is_active, total_capacity, divisions_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+            $stmt = $conn->prepare($sql);
+            if ($stmt) {
+                $stmt->bind_param("iissiiii", $program_id, $level_id, $class_name, $class_code, $stream_id, $is_active, $total_capacity, $divisions_count);
                 if ($stmt->execute()) {
-                    $success_count++;
-                } else {
-                    $error_count++;
-                }
-                $stmt->close();
-            }
+                    $insertedId = $stmt->insert_id;
+                    $stmt->close();
+                    // Optionally create persistent division rows if a class_divisions table exists
+                    $createdDivisions = 0;
+                    $checkDivTable = $conn->query("SHOW TABLES LIKE 'class_divisions'");
+                    if ($checkDivTable && $checkDivTable->num_rows > 0) {
+                        $insDiv = $conn->prepare("INSERT INTO class_divisions (class_id, division_label, capacity) VALUES (?, ?, ?)");
+                        if ($insDiv) {
+                            // Distribute capacity evenly (last one gets remainder)
+                            $base = intdiv($total_capacity, $divisions_count);
+                            $remainder = $total_capacity % $divisions_count;
+                            for ($d = 0; $d < $divisions_count; $d++) {
+                                $label = '';
+                                $n = $d;
+                                while (true) {
+                                    $label = chr(65 + ($n % 26)) . $label;
+                                    $n = intdiv($n, 26) - 1;
+                                    if ($n < 0) break;
+                                }
+                                $cap = $base + ($d < $remainder ? 1 : 0);
+                                $insDiv->bind_param("isi", $insertedId, $label, $cap);
+                                if ($insDiv->execute()) $createdDivisions++;
+                            }
+                            $insDiv->close();
+                        }
+                    }
 
-            if ($success_count > 0) {
-                $msg = "Successfully created $success_count classes!";
-                if ($error_count > 0) {
-                    $msg .= " ($error_count classes failed to create)";
+                    $msg = "Successfully created class with {$divisions_count} division(s).";
+                    if ($createdDivisions > 0) $msg .= " Created {$createdDivisions} division records.";
+                    redirect_with_flash('classes.php', 'success', $msg);
+                } else {
+                    $error_message = "Failed to create class: " . $stmt->error;
+                    $stmt->close();
                 }
-                redirect_with_flash('classes.php', 'success', $msg);
             } else {
-                $error_message = "Failed to create any classes. Please check your input.";
+                $error_message = "Failed to prepare class insert: " . $conn->error;
             }
         } else {
             $error_message = "Invalid program or level selected.";
@@ -129,7 +150,13 @@ $from_clause = "FROM classes c ";
 if ($class_has_program) {
     $select_extra[] = "p.name as program_name";
     $select_extra[] = "p.code as program_code";
+    if ($dept_short_exists) {
+        $select_extra[] = "d.short_name as dept_short";
+    } else {
+        $select_extra[] = "SUBSTRING(d.name,1,3) as dept_short";
+    }
     $from_clause .= "LEFT JOIN programs p ON c.program_id = p.id ";
+    $from_clause .= "LEFT JOIN departments d ON p.department_id = d.id ";
 }
 
 // Join levels
@@ -145,13 +172,24 @@ if ($class_has_stream) {
     $from_clause .= "LEFT JOIN streams s ON c.stream_id = s.id ";
 }
 
+// Detect if classes table stores divisions_count (new schema)
+$col = $conn->query("SHOW COLUMNS FROM classes LIKE 'divisions_count'");
+$has_divisions_col = ($col && $col->num_rows > 0);
+if ($col) $col->close();
+
 // Preserve department short selection (only used when programs/departments are linked)
 if ($dept_short_exists && !$class_has_program) {
     // If we don't have program join, but departments are expected elsewhere, include department placeholder
     $select_extra[] = $dept_short_exists ? "d.short_name as department_short" : "SUBSTRING(d.name,1,3) as department_short";
 }
 
-$select_clause = "c.*";
+// Build grouped select to show one row per program+level and count divisions
+$divisions_expr = $has_divisions_col ? "SUM(c.divisions_count) as divisions" : "COUNT(*) as divisions";
+$select_clause = "MIN(c.id) as id, MIN(c.name) as name, " . $divisions_expr . ", c.program_id, c.level_id";
+if ($class_has_stream) {
+    // include stream in select/grouping when classes are stream-scoped
+    $select_clause .= ", c.stream_id";
+}
 if (!empty($select_extra)) {
     $select_clause .= ", " . implode(', ', $select_extra);
 }
@@ -161,7 +199,7 @@ if ($class_has_stream) {
     $where_clause .= " AND c.stream_id = " . $streamManager->getCurrentStreamId();
 }
 
-$sql = "SELECT " . $select_clause . "\n        " . $from_clause . "\n        " . $where_clause . "\n        ORDER BY c.name";
+$sql = "SELECT " . $select_clause . "\n        " . $from_clause . "\n        " . $where_clause . "\n        GROUP BY c.program_id, c.level_id\n        ORDER BY name";
 $result = $conn->query($sql);
 
 $dept_select_cols = $dept_short_exists ? "id, name, short_name" : "id, name";
@@ -226,9 +264,18 @@ $level_result = $conn->query($level_sql);
                                 <td><strong><?php echo htmlspecialchars($row['name']); ?></strong></td>
                                 <td><span class="badge bg-warning"><?php echo htmlspecialchars($row['level'] ?? ($row['level_name'] ?? 'N/A')); ?></span></td>
                                 <td>
-                                    <span class="badge bg-info"><?php echo htmlspecialchars($row['program_name'] ?? 'N/A'); ?></span>
+                                    <?php $deptCode = trim(strtoupper($row['dept_short'] ?? $row['program_code'] ?? ''));
+                                    $levelTextRow = $row['level_name'] ?? $row['level'] ?? '';
+                                    preg_match('/(\d+)/', $levelTextRow, $lm);
+                                    $levelNumRow = $lm[1] ?? '';
+                                    ?>
+                                    <span class="badge bg-info"><?php echo htmlspecialchars(($deptCode ? $deptCode . ' ' : '') . ($row['program_name'] ?? 'N/A')); ?></span>
                                 </td>
                                 <td>
+                                    <span class="badge bg-secondary me-2"><?php echo (int)($row['divisions'] ?? $row['divisions_count'] ?? 1); ?> divisions</span>
+                                    <button class="btn btn-sm btn-outline-secondary me-1" onclick="showDivisions('<?php echo htmlspecialchars(addslashes($deptCode)); ?>', '<?php echo htmlspecialchars(addslashes($levelNumRow)); ?>', <?php echo (int)($row['divisions'] ?? $row['divisions_count'] ?? 1); ?>)">
+                                        <i class="fas fa-list"></i>
+                                    </button>
                                     <button class="btn btn-sm btn-outline-primary me-1" onclick="editClass(<?php echo $row['id']; ?>)">
                                         <i class="fas fa-edit"></i>
                                     </button>
@@ -267,10 +314,11 @@ $level_result = $conn->query($level_sql);
             <form method="POST">
                 <div class="modal-body">
                     <input type="hidden" name="action" value="add">
+                    <input type="hidden" name="divisions_count" id="divisions_count" value="1">
                     
                     <div class="alert alert-info">
                         <i class="fas fa-info-circle me-2"></i>
-                        <strong>Auto-Class Generation:</strong> Select the program, level, and enter the number of students. The system will automatically create multiple classes (max 100 students per class) with proper naming convention.
+                        <strong>Auto-Class Generation:</strong> Select the program, level, and enter the number of students. The system will create a single class record and split it into divisions (max 100 students per division). You can preview the divisions below.
                     </div>
                     
                     <div class="row">
@@ -316,7 +364,7 @@ $level_result = $conn->query($level_sql);
                             <div class="mb-3">
                                 <label for="total_capacity" class="form-label">Number of Students *</label>
                                 <input type="number" class="form-control" id="total_capacity" name="total_capacity" min="1" max="1000" value="100" required>
-                                <small class="text-muted">The system will automatically create multiple classes (max 100 students per class)</small>
+                                <small class="text-muted">The system will create divisions automatically (max 100 students per division)</small>
                             </div>
                         </div>
                     </div>
@@ -334,6 +382,24 @@ $level_result = $conn->query($level_sql);
     </div>
 </div>
 
+<!-- Divisions Modal -->
+<div class="modal fade" id="divisionsModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Class Divisions</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="divisionsList"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <?php 
 $conn->close();
 include 'includes/footer.php'; 
@@ -346,9 +412,12 @@ function editClass(id) {
 }
 
 // Preview class names as user types
-document.getElementById('total_capacity').addEventListener('input', updateClassPreview);
-document.getElementById('program_code').addEventListener('change', updateClassPreview);
-document.getElementById('level_id').addEventListener('change', updateClassPreview);
+const totalCapacityEl = document.getElementById('total_capacity');
+const programCodeEl = document.getElementById('program_code');
+const levelIdEl = document.getElementById('level_id');
+if (totalCapacityEl) totalCapacityEl.addEventListener('input', updateClassPreview);
+if (programCodeEl) programCodeEl.addEventListener('change', updateClassPreview);
+if (levelIdEl) levelIdEl.addEventListener('change', updateClassPreview);
 
 
 function updateClassPreview() {
@@ -367,17 +436,61 @@ function updateClassPreview() {
         const levelNumber = levelText.match(/\d+/)?.[0] || levelText.replace(/\D/g, '');
         
         const numClasses = Math.ceil(capacity / 100);
-        const classes = [];
-        
-        for (let i = 0; i < numClasses; i++) {
-            const letter = String.fromCharCode(65 + i);
-            classes.push(programCode + levelNumber + letter);
-        }
-        
-        previewText.textContent = classes.join(', ');
+        const labels = typeof generateDivisionLabels === 'function' ? generateDivisionLabels(numClasses) : (function(){
+            const out = [];
+            for (let i=0;i<numClasses;i++){ out.push(String.fromCharCode(65 + (i%26))); }
+            return out;
+        })();
+
+        const sample = labels.map(l => programCode + levelNumber + l);
+
+        previewText.textContent = numClasses + ' divisions — Sample: ' + sample.slice(0, 10).join(', ') + (sample.length > 10 ? ', ...' : '');
+        // Update hidden divisions count input
+        var divCountEl = document.getElementById('divisions_count');
+        if (divCountEl) divCountEl.value = numClasses;
         previewDiv.style.display = 'block';
     } else {
         previewDiv.style.display = 'none';
+    }
+}
+</script>
+
+<script>
+// Show divisions modal and generate letter labels A..Z, AA.. for counts > 26
+function generateDivisionLabels(count) {
+    const labels = [];
+    for (let i = 0; i < count; i++) {
+        let n = i;
+        let label = '';
+        while (true) {
+            label = String.fromCharCode(65 + (n % 26)) + label;
+            n = Math.floor(n / 26) - 1;
+            if (n < 0) break;
+        }
+        labels.push(label);
+    }
+    return labels;
+}
+
+function showDivisions(deptCode, levelNum, count) {
+    const labels = generateDivisionLabels(count || 1);
+    const container = document.getElementById('divisionsList');
+    container.innerHTML = '';
+    const ul = document.createElement('ul');
+    ul.className = 'list-group';
+    labels.forEach((lab, idx) => {
+        const li = document.createElement('li');
+        li.className = 'list-group-item';
+        const fullName = (deptCode ? deptCode + ' ' : '') + levelNum + lab; // e.g., ITE 100A
+        li.innerHTML = '<div><strong>' + fullName + '</strong><br/><small>Division ' + (idx+1) + '</small></div>';
+        ul.appendChild(li);
+    });
+    container.appendChild(ul);
+    var el = document.getElementById('divisionsModal');
+    if (typeof bootstrap !== 'undefined' && bootstrap.Modal) {
+        bootstrap.Modal.getOrCreateInstance(el).show();
+    } else {
+        alert('Divisions:\n' + labels.join(', '));
     }
 }
 </script>
