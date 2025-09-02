@@ -105,25 +105,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $edit_entry = null;
 if (isset($_GET['id'])) {
     $id = (int)$_GET['id'];
-    $stmt = $conn->prepare("
-        SELECT t.*, c.name as class_name, co.course_code, co.course_name, d.name as day_name, 
-               ts.start_time, ts.end_time, r.name as room_name, l.name as lecturer_name
-        FROM timetable t
-        JOIN class_courses cc ON t.class_course_id = cc.id
-        JOIN classes c ON cc.class_id = c.id
-        JOIN courses co ON cc.course_id = co.id
-        JOIN days d ON t.day_id = d.id
-        JOIN time_slots ts ON t.time_slot_id = ts.id
-        JOIN rooms r ON t.room_id = r.id
-        LEFT JOIN lecturer_courses lc ON t.lecturer_course_id = lc.id
-        LEFT JOIN lecturers l ON lc.lecturer_id = l.id
-        WHERE t.id = ?
-    ");
+
+    // Detect whether timetable stores class_course_id and lecturer_course_id (newer schema)
+    $tcol_check_class_course = $conn->query("SHOW COLUMNS FROM timetable LIKE 'class_course_id'");
+    $has_t_class_course = ($tcol_check_class_course && $tcol_check_class_course->num_rows > 0);
+    if ($tcol_check_class_course) $tcol_check_class_course->close();
+
+    $tcol_check_lecturer_course = $conn->query("SHOW COLUMNS FROM timetable LIKE 'lecturer_course_id'");
+    $has_t_lecturer_course = ($tcol_check_lecturer_course && $tcol_check_lecturer_course->num_rows > 0);
+    if ($tcol_check_lecturer_course) $tcol_check_lecturer_course->close();
+
+    // Build SELECT depending on detected schema to avoid referencing missing columns in ON clauses
+    $select_fields = "t.*, c.name as class_name, co.code as course_code, co.name as course_name, d.name as day_name, ts.start_time, ts.end_time, r.name as room_name, l.name as lecturer_name";
+    $from_clause = "FROM timetable t";
+
+    if ($has_t_class_course) {
+        $join_clause = "JOIN class_courses cc ON t.class_course_id = cc.id\n        JOIN classes c ON cc.class_id = c.id\n        JOIN courses co ON cc.course_id = co.id";
+    } else {
+        // older schema: timetable stores class_id and course_id directly
+        $join_clause = "JOIN classes c ON t.class_id = c.id\n        JOIN courses co ON t.course_id = co.id";
+    }
+
+    $join_clause .= "\n        JOIN days d ON t.day_id = d.id\n        JOIN time_slots ts ON t.time_slot_id = ts.id\n        JOIN rooms r ON t.room_id = r.id";
+
+    if ($has_t_lecturer_course) {
+        $join_clause .= "\n        LEFT JOIN lecturer_courses lc ON t.lecturer_course_id = lc.id\n        LEFT JOIN lecturers l ON lc.lecturer_id = l.id";
+    } else {
+        $join_clause .= "\n        LEFT JOIN lecturers l ON t.lecturer_id = l.id";
+    }
+
+    $select_sql = "SELECT " . $select_fields . "\n        " . $from_clause . "\n        " . $join_clause . "\n        WHERE t.id = ?";
+
+    $stmt = $conn->prepare($select_sql);
     $stmt->bind_param('i', $id);
     $stmt->execute();
     $result = $stmt->get_result();
     $edit_entry = $result->fetch_assoc();
     $stmt->close();
+
+    // Ensure form compatibility: if older schema, provide null lecturer_course_id
+    if (!$has_t_lecturer_course && $edit_entry) {
+        $edit_entry['lecturer_course_id'] = $edit_entry['lecturer_course_id'] ?? null;
+    }
 }
 
 // Get filter options
@@ -131,20 +154,20 @@ $days_result = $conn->query("SELECT id, name FROM days ORDER BY id");
 $time_slots_result = $conn->query("SELECT id, start_time, end_time FROM time_slots WHERE is_mandatory = 1 ORDER BY start_time");
 $rooms_result = $conn->query("SELECT id, name, capacity FROM rooms WHERE is_active = 1 ORDER BY name");
 $class_courses_result = $conn->query("
-    SELECT cc.id, c.name as class_name, co.course_code, co.course_name
+    SELECT cc.id, c.name as class_name, co.code as course_code, co.name as course_name
     FROM class_courses cc
     JOIN classes c ON cc.class_id = c.id
     JOIN courses co ON cc.course_id = co.id
     WHERE cc.is_active = 1
-    ORDER BY c.name, co.course_code
+    ORDER BY c.name, co.code
 ");
 $lecturer_courses_result = $conn->query("
-    SELECT lc.id, l.name as lecturer_name, co.course_code, co.course_name
+    SELECT lc.id, l.name as lecturer_name, co.code as course_code, co.name as course_name
     FROM lecturer_courses lc
     JOIN lecturers l ON lc.lecturer_id = l.id
     JOIN courses co ON lc.course_id = co.id
     WHERE lc.is_active = 1
-    ORDER BY l.name, co.course_code
+    ORDER BY l.name, co.code
 ");
 ?>
 
