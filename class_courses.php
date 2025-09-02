@@ -68,34 +68,66 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // Close POST request handling
 }
 
-// Get all classes (include human-readable level name)
-$classes_sql = "SELECT c.id, c.name, l.name AS level FROM classes c JOIN levels l ON c.level_id = l.id WHERE c.is_active = 1 ORDER BY c.name";
+// Get filter parameters (improved: allow filtering by program and search)
+$selected_program = isset($_GET['program_id']) ? (int)$_GET['program_id'] : 0;
+$search_name = isset($_GET['search_name']) ? trim($_GET['search_name']) : '';
+
+// Get all classes for selects (include human-readable level and program)
+$classes_sql = "SELECT c.id, c.name, l.name AS level, p.name AS program_name FROM classes c LEFT JOIN levels l ON c.level_id = l.id LEFT JOIN programs p ON c.program_id = p.id WHERE c.is_active = 1 ORDER BY c.name";
 $classes_result = $conn->query($classes_sql);
 
-// Get all courses (DB uses `code` and `name` columns)
+// Get all courses (with basic defensive query)
 $courses_sql = "SELECT id, `code` AS course_code, `name` AS course_name FROM courses WHERE is_active = 1 ORDER BY `code`";
 $courses_result = $conn->query($courses_sql);
 
-// Get existing assignments
-$assignments_sql = "SELECT cc.id, c.name as class_name, lvl.name AS level, co.`code` AS course_code, co.`name` AS course_name
-                    FROM class_courses cc
-                    JOIN classes c ON cc.class_id = c.id
-                    LEFT JOIN levels lvl ON c.level_id = lvl.id
-                    JOIN courses co ON cc.course_id = co.id
-                    WHERE cc.is_active = 1
-                    ORDER BY c.name, co.`code`";
-$assignments_result = $conn->query($assignments_sql);
+// Prepare mappings query similar to lecturer_courses.php: show class -> assigned courses concatenated
+$mappings_query = "SELECT c.id as class_id, c.name as class_name, l.name AS level, p.name AS program_name, GROUP_CONCAT(co.code ORDER BY co.code SEPARATOR ', ') AS course_codes
+                   FROM classes c
+                   LEFT JOIN levels l ON c.level_id = l.id
+                   LEFT JOIN programs p ON c.program_id = p.id
+                   LEFT JOIN class_courses cc ON c.id = cc.class_id AND cc.is_active = 1
+                   LEFT JOIN courses co ON co.id = cc.course_id
+                   WHERE c.is_active = 1";
 
-// Get existing assignments for bulk operations
-$existing_assignments_sql = "SELECT cc.class_id, cc.course_id
-                            FROM class_courses cc
-                            WHERE cc.is_active = 1";
-$existing_assignments_result = $conn->query($existing_assignments_sql);
+$params = [];
+$types = '';
 
+if ($selected_program > 0) {
+    $mappings_query .= " AND c.program_id = ?";
+    $params[] = $selected_program;
+    $types .= 'i';
+}
+if (!empty($search_name)) {
+    $mappings_query .= " AND c.name LIKE ?";
+    $params[] = '%' . $search_name . '%';
+    $types .= 's';
+}
+
+$mappings_query .= " GROUP BY c.id, c.name, l.name, p.name ORDER BY p.name, c.name";
+
+if (!empty($params)) {
+    $stmt = $conn->prepare($mappings_query);
+    if ($stmt) {
+        $stmt->bind_param($types, ...$params);
+        $stmt->execute();
+        $assignments_result = $stmt->get_result();
+        $stmt->close();
+    } else {
+        // fallback and log
+        error_log('class_courses mappings prepare failed: ' . $conn->error);
+        $assignments_result = $conn->query($mappings_query);
+    }
+} else {
+    $assignments_result = $conn->query($mappings_query);
+}
+
+// Build existing assignments array for bulk UI convenience
 $existing_assignments = [];
+$existing_assignments_sql = "SELECT cc.class_id, cc.course_id FROM class_courses cc WHERE cc.is_active = 1";
+$existing_assignments_result = $conn->query($existing_assignments_sql);
 if ($existing_assignments_result) {
-    while ($row = $existing_assignments_result->fetch_assoc()) {
-        $existing_assignments[] = $row['class_id'] . '_' . $row['course_id'];
+    while ($r = $existing_assignments_result->fetch_assoc()) {
+        $existing_assignments[] = $r['class_id'] . '_' . $r['course_id'];
     }
 }
 ?>
@@ -187,11 +219,8 @@ if ($existing_assignments_result) {
                             <i class="fas fa-link me-2"></i>Class Course Management
                         </h5>
                         <div>
-                            <button class="btn btn-success me-2" data-bs-toggle="modal" data-bs-target="#bulkAssignmentModal">
-                                <i class="fas fa-layer-group me-1"></i>Bulk Assignment
-                            </button>
-                            <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#singleAssignmentModal">
-                                <i class="fas fa-plus me-1"></i>Single Assignment
+                            <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#editModal">
+                                <i class="fas fa-plus me-1"></i>Assign Courses
                             </button>
                         </div>
                     </div>
@@ -216,8 +245,8 @@ if ($existing_assignments_result) {
                                     <tr>
                                         <th>Class</th>
                                         <th>Level</th>
-                                        <th>Course Code</th>
-                                        <th>Course Name</th>
+                                        <th>Program</th>
+                                        <th>Courses</th>
                                         <th>Actions</th>
                                     </tr>
                                 </thead>
@@ -227,17 +256,12 @@ if ($existing_assignments_result) {
                                             <tr>
                                                 <td><?php echo htmlspecialchars($row['class_name']); ?></td>
                                                 <td><?php echo htmlspecialchars($row['level']); ?></td>
-                                                <td><?php echo htmlspecialchars($row['course_code']); ?></td>
-                                                <td><?php echo htmlspecialchars($row['course_name']); ?></td>
+                                                <td><?php echo htmlspecialchars($row['program_name'] ?? 'N/A'); ?></td>
+                                                <td><?php echo htmlspecialchars($row['course_codes'] ?? ''); ?></td>
                                                 <td>
-                                                    <form method="POST" style="display: inline;">
-                                                        <input type="hidden" name="action" value="delete">
-                                                        <input type="hidden" name="class_course_id" value="<?php echo $row['id']; ?>">
-                                                        <button type="submit" class="btn btn-danger btn-sm" 
-                                                                onclick="return confirm('Are you sure you want to delete this assignment?')">
-                                                            <i class="fas fa-trash"></i>
-                                                        </button>
-                                                    </form>
+                                                    <button type="button" class="btn btn-sm btn-outline-primary manage-assignments-btn" data-classid="<?php echo (int)$row['class_id']; ?>">
+                                                        <i class="fas fa-edit"></i> Manage
+                                                    </button>
                                                 </td>
                                             </tr>
                                         <?php endwhile; ?>
@@ -257,128 +281,80 @@ if ($existing_assignments_result) {
         </div>
     </div>
 
-    <!-- Bulk Assignment Modal -->
-    <div class="modal fade" id="bulkAssignmentModal" tabindex="-1">
-        <div class="modal-dialog modal-lg">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">
-                        <i class="fas fa-layer-group me-2"></i>Bulk Assignment
-                    </h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <form method="POST">
-                    <div class="modal-body">
-                        <input type="hidden" name="action" value="assign_bulk">
-                        
-                        <div class="row">
-                            <div class="col-md-6">
-                                <label for="bulk_classes" class="form-label">Classes *</label>
-                                <select class="form-select" id="bulk_classes" name="class_ids[]" multiple required>
-                                    <?php if ($classes_result): ?>
-                                        <?php while ($class = $classes_result->fetch_assoc()): ?>
-                                            <option value="<?php echo $class['id']; ?>">
-                                                <?php echo htmlspecialchars($class['name'] . ' (' . $class['level'] . ')'); ?>
-                                            </option>
-                                        <?php endwhile; ?>
-                                    <?php endif; ?>
-                                </select>
-                                <div class="form-text">Hold Ctrl/Cmd to select multiple classes</div>
-                            </div>
-                            
-                            <div class="col-md-6">
-                                <label for="bulk_courses" class="form-label">Courses *</label>
-                                <select class="form-select" id="bulk_courses" name="course_ids[]" multiple required>
-                                    <?php if ($courses_result): ?>
-                                        <?php while ($course = $courses_result->fetch_assoc()): ?>
-                                            <option value="<?php echo $course['id']; ?>">
-                                                <?php echo htmlspecialchars($course['course_code'] . ' - ' . $course['course_name']); ?>
-                                            </option>
-                                        <?php endwhile; ?>
-                                    <?php endif; ?>
-                                </select>
-                                <div class="form-text">Hold Ctrl/Cmd to select multiple courses</div>
-                            </div>
-                        </div>
-                        
-                        <div class="alert alert-info mt-3">
-                            <i class="fas fa-info-circle me-2"></i>
-                            <strong>Note:</strong> This will create assignments for all selected class-course combinations.
-                            Existing assignments will be skipped.
-                        </div>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                        <button type="submit" class="btn btn-success">
-                            <i class="fas fa-save me-1"></i>Create Assignments
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    </div>
+    <!-- Bulk Assignment Modal REMOVED -->
 
-    <!-- Single Assignment Modal -->
-    <div class="modal fade" id="singleAssignmentModal" tabindex="-1">
-        <div class="modal-dialog">
+    <!-- Edit Modal (assign courses to a class) -->
+    <div class="modal fade" id="editModal" tabindex="-1">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">
-                        <i class="fas fa-plus me-2"></i>Single Assignment
+                        <i class="fas fa-edit me-2"></i>Edit Course Assignments
                     </h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
-                <form method="POST">
-                    <div class="modal-body">
-                        <input type="hidden" name="action" value="assign_single">
-                        
-                        <div class="mb-3">
-                            <label for="class_id" class="form-label">Class *</label>
-                            <select class="form-select" id="class_id" name="class_id" required>
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <label class="form-label">Class *</label>
+                            <select id="modal_class_select" class="form-select">
                                 <option value="">Select Class</option>
-                                <?php 
-                                // Reset the classes result set for reuse
-                                if ($classes_result) {
-                                    $classes_result->data_seek(0);
-                                    while ($class = $classes_result->fetch_assoc()): 
-                                ?>
-                                    <option value="<?php echo $class['id']; ?>">
-                                        <?php echo htmlspecialchars($class['name'] . ' (' . $class['level'] . ')'); ?>
-                                    </option>
-                                <?php 
-                                    endwhile;
-                                }
-                                ?>
+                                <?php if ($classes_result) { $classes_result->data_seek(0); while ($class = $classes_result->fetch_assoc()): ?>
+                                    <option value="<?php echo (int)$class['id']; ?>"><?php echo htmlspecialchars($class['name'] . ' (' . $class['level'] . ')'); ?></option>
+                                <?php endwhile; } ?>
                             </select>
+                            <div class="form-text">Choose a class to assign courses to</div>
+                            <div class="mt-3">
+                                <label class="form-label">Filter by Department</label>
+                                <select id="filterDept" class="form-select">
+                                    <option value="">All Departments</option>
+                                    <?php
+                                    // Fetch departments for filter
+                                    $departments_list = [];
+                                    $dept_q = $conn->query("SELECT id, name FROM departments WHERE is_active = 1 ORDER BY name");
+                                    if ($dept_q) {
+                                        while ($d = $dept_q->fetch_assoc()) {
+                                            $departments_list[] = $d;
+                                            echo '<option value="' . (int)$d['id'] . '">' . htmlspecialchars($d['name']) . '</option>';
+                                        }
+                                    }
+                                    ?>
+                                </select>
+                            </div>
+                            <div class="mt-2">
+                                <label class="form-label">Filter by Level</label>
+                                <select id="filterLevel" class="form-select">
+                                    <option value="">All Levels</option>
+                                    <option value="100">100</option>
+                                    <option value="200">200</option>
+                                    <option value="300">300</option>
+                                    <option value="400">400</option>
+                                    <option value="500">500</option>
+                                </select>
+                            </div>
                         </div>
-                        
-                        <div class="mb-3">
-                            <label for="course_id" class="form-label">Course *</label>
-                            <select class="form-select" id="course_id" name="course_id" required>
-                                <option value="">Select Course</option>
-                                <?php 
-                                // Reset the courses result set for reuse
-                                if ($courses_result) {
-                                    $courses_result->data_seek(0);
-                                    while ($course = $courses_result->fetch_assoc()): 
-                                ?>
-                                    <option value="<?php echo $course['id']; ?>">
-                                        <?php echo htmlspecialchars($course['course_code'] . ' - ' . $course['course_name']); ?>
-                                    </option>
-                                <?php 
-                                    endwhile;
-                                }
-                                ?>
-                            </select>
+
+                        <div class="col-md-8">
+                            <div class="row">
+                                <div class="col-12 mb-2">
+                                    <input type="text" id="courseSearch" class="form-control" placeholder="Search courses...">
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Available Courses</label>
+                                    <div id="availableCoursesList" style="max-height:320px; overflow:auto; border:1px solid #e9ecef; border-radius:4px; padding:6px;"></div>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Assigned Courses</label>
+                                    <div id="assignedCoursesList" style="min-height:320px; border:1px solid #e9ecef; border-radius:4px; padding:6px;"></div>
+                                </div>
+                            </div>
                         </div>
                     </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                        <button type="submit" class="btn btn-primary">
-                            <i class="fas fa-save me-1"></i>Create Assignment
-                        </button>
-                    </div>
-                </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary">Save Changes</button>
+                </div>
             </div>
         </div>
     </div>
@@ -404,6 +380,188 @@ if ($existing_assignments_result) {
                 }
             });
         });
+    </script>
+    <script>
+    // Manage assignments for a class (similar to lecturer_courses.editMapping)
+    let currentClassId = null;
+    let availableCourses = [];
+    let assignedCourses = [];
+
+    // Open modal from Manage button
+    document.addEventListener('click', function(e){
+        var btn = e.target.closest('.manage-assignments-btn');
+        if (btn) {
+            var classId = btn.dataset.classid;
+            if (classId) {
+                // Preselect class in modal and open
+                var sel = document.getElementById('modal_class_select');
+                if (sel) sel.value = classId;
+                // Trigger loading
+                loadClassCourses(classId);
+                var el = document.getElementById('editModal');
+                bootstrap.Modal.getOrCreateInstance(el).show();
+            }
+        }
+    });
+
+    function editMappingClass(classId) {
+        currentClassId = classId;
+        loadClassCourses(classId);
+    }
+
+    function loadClassCourses(classId) {
+        currentClassId = classId;
+        const availableList = document.getElementById('availableCoursesList');
+        const assignedList = document.getElementById('assignedCoursesList');
+        if (!availableList || !assignedList) return;
+        availableList.innerHTML = '<div class="text-center p-3"><i class="fas fa-spinner fa-spin"></i> Loading courses...</div>';
+        assignedList.innerHTML = '<div class="text-center p-3"><i class="fas fa-spinner fa-spin"></i> Loading courses...</div>';
+
+        fetch('get_class_courses.php?class_id=' + encodeURIComponent(classId))
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    availableCourses = data.data.available_courses || [];
+                    assignedCourses = data.data.assigned_courses || [];
+                    // If API returned class_department_id, preselect department filter by default
+                    if (data.data.class_department_id) {
+                        const deptSel = document.getElementById('filterDept');
+                        if (deptSel) deptSel.value = data.data.class_department_id;
+                    }
+                    populateCourseLists();
+                } else {
+                    throw new Error(data.error || 'Failed to fetch courses');
+                }
+            })
+            .catch(err => {
+                console.error('Error fetching class courses:', err);
+                availableList.innerHTML = '<div class="text-center p-3 text-danger"><i class="fas fa-exclamation-triangle"></i> Error loading courses</div>';
+                assignedList.innerHTML = '<div class="text-center p-3 text-danger"><i class="fas fa-exclamation-triangle"></i> Error loading courses</div>';
+            });
+    }
+
+    function populateCourseLists() {
+        const availableList = document.getElementById('availableCoursesList');
+        const assignedList = document.getElementById('assignedCoursesList');
+        availableList.innerHTML = '';
+        assignedList.innerHTML = '';
+
+        availableCourses.forEach(course => {
+            const courseDiv = document.createElement('div');
+            courseDiv.className = 'course-item p-2 border-bottom';
+            courseDiv.innerHTML = `<div class="d-flex justify-content-between align-items-center"><span>${course.course_code} - ${course.course_name}</span><button class="btn btn-sm btn-outline-primary" onclick="assignCourse('${course.id}')"><i class="fas fa-plus"></i></button></div>`;
+            availableList.appendChild(courseDiv);
+        });
+
+        assignedCourses.forEach(course => {
+            const courseDiv = document.createElement('div');
+            courseDiv.className = 'course-item p-2 border-bottom';
+            courseDiv.innerHTML = `<div class="d-flex justify-content-between align-items-center"><span>${course.course_code} - ${course.course_name}</span><button class="btn btn-sm btn-outline-danger" onclick="unassignCourse('${course.id}')"><i class="fas fa-minus"></i></button></div>`;
+            assignedList.appendChild(courseDiv);
+        });
+    }
+
+    function assignCourse(courseId) {
+        const idx = availableCourses.findIndex(c => c.id == courseId);
+        if (idx !== -1) {
+            assignedCourses.push(availableCourses[idx]);
+            availableCourses.splice(idx, 1);
+            populateCourseLists();
+        }
+    }
+
+    function unassignCourse(courseId) {
+        const idx = assignedCourses.findIndex(c => c.id == courseId);
+        if (idx !== -1) {
+            availableCourses.push(assignedCourses[idx]);
+            assignedCourses.splice(idx, 1);
+            populateCourseLists();
+        }
+    }
+
+    function saveAssignmentsClass() {
+        const courseIds = assignedCourses.map(c => c.id);
+        const saveButton = document.querySelector('#editModal .btn-primary');
+        const originalText = saveButton.innerHTML;
+        saveButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
+        saveButton.disabled = true;
+
+        fetch('save_class_courses.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ class_id: currentClassId, assigned_course_ids: courseIds })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                var modal = bootstrap.Modal.getInstance(document.getElementById('editModal'));
+                modal.hide();
+                // show success
+                location.reload();
+            } else {
+                throw new Error(data.error || 'Save failed');
+            }
+        })
+        .catch(err => { console.error(err); alert('Error saving assignments: ' + err.message); })
+        .finally(() => { saveButton.innerHTML = originalText; saveButton.disabled = false; });
+    }
+    
+    // Wire up Save button inside editModal and class select/search
+    document.addEventListener('DOMContentLoaded', function(){
+        var btn = document.querySelector('#editModal .btn-primary');
+        if (btn) btn.addEventListener('click', saveAssignmentsClass);
+
+        var sel = document.getElementById('modal_class_select');
+        if (sel) sel.addEventListener('change', function(){
+            var val = this.value;
+            if (val) loadClassCourses(val);
+            else { availableCourses = []; assignedCourses = []; populateCourseLists(); }
+        });
+
+        var search = document.getElementById('courseSearch');
+        if (search) search.addEventListener('input', function(){
+            var q = this.value.trim().toLowerCase();
+            filterAvailable(q);
+        });
+
+        var deptFilter = document.getElementById('filterDept');
+        var levelFilter = document.getElementById('filterLevel');
+        if (deptFilter) deptFilter.addEventListener('change', function(){ filterAvailable(search ? search.value.trim().toLowerCase() : ''); });
+        if (levelFilter) levelFilter.addEventListener('change', function(){ filterAvailable(search ? search.value.trim().toLowerCase() : ''); });
+    });
+
+    function filterAvailable(query) {
+        const list = document.getElementById('availableCoursesList');
+        if (!list) return;
+        list.innerHTML = '';
+        const deptVal = document.getElementById('filterDept') ? document.getElementById('filterDept').value : '';
+        const levelVal = document.getElementById('filterLevel') ? document.getElementById('filterLevel').value : '';
+        availableCourses.forEach(course => {
+            const text = (course.course_code + ' ' + course.course_name).toLowerCase();
+            // department filter
+            if (deptVal && String(course.department_id) !== String(deptVal)) return;
+            // level filter: try to parse numeric part from course code (e.g., BBA 121 -> 100/200 mapping)
+            if (levelVal) {
+                // attempt to find a number in course_code or course_name
+                const m = (course.course_code + ' ' + course.course_name).match(/(\d{3})/);
+                if (m) {
+                    const numeric = parseInt(m[1], 10);
+                    // Map actual numeric (e.g., 121 -> 100 band) by rounding down to nearest hundred
+                    const band = Math.floor(numeric / 100) * 100;
+                    if (String(band) !== String(levelVal)) return;
+                } else {
+                    // if no numeric part found, skip when level filter is active
+                    return;
+                }
+            }
+            if (!query || text.indexOf(query) !== -1) {
+                const courseDiv = document.createElement('div');
+                courseDiv.className = 'course-item p-2 border-bottom d-flex justify-content-between align-items-center';
+                courseDiv.innerHTML = `<span>${course.course_code} - ${course.course_name}</span><button class="btn btn-sm btn-outline-primary" onclick="assignCourse('${course.id}')"><i class="fas fa-plus"></i></button>`;
+                list.appendChild(courseDiv);
+            }
+        });
+    }
     </script>
 </body>
 </html>
