@@ -29,7 +29,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $is_active = 1;
 
         // Fetch program and its department short code if available
-        $prog_stmt = $conn->prepare("SELECT p.id, p.name, p.code, p.department_id, d.short_name AS dept_short FROM programs p LEFT JOIN departments d ON p.department_id = d.id WHERE p.id = ?");
+        if ($dept_short_exists) {
+            $prog_sql = "SELECT p.id, p.name, p.code, p.department_id, d.short_name AS dept_short FROM programs p LEFT JOIN departments d ON p.department_id = d.id WHERE p.id = ?";
+        } else {
+            // departments.short_name not present; fall back to first 3 chars of department name
+            $prog_sql = "SELECT p.id, p.name, p.code, p.department_id, SUBSTRING(d.name,1,3) AS dept_short FROM programs p LEFT JOIN departments d ON p.department_id = d.id WHERE p.id = ?";
+        }
+        $prog_stmt = $conn->prepare($prog_sql);
         $prog_stmt->bind_param("i", $program_id);
         $prog_stmt->execute();
         $prog_res = $prog_stmt->get_result();
@@ -47,9 +53,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Create a single parent class record and store total_capacity and divisions_count
             $divisions_count = max(1, (int)ceil($total_capacity / 100));
 
-            // Extract level numeric part for code (e.g., 'Level 100' -> '100')
+            // Extract level numeric part for code (e.g., 'Level 100' -> '100' or 'Year 1' -> '100')
             preg_match('/(\d+)/', $level['name'], $m);
-            $level_num = $m[1] ?? '1';
+            $raw_level = isset($m[1]) ? (int)$m[1] : 1;
+            // If level is given as small number like 1,2,3 treat as Year (100,200,300)
+            if ($raw_level > 0 && $raw_level < 10) {
+                $level_num = $raw_level * 100;
+            } else {
+                $level_num = $raw_level;
+            }
             $year_suffix = date('Y');
 
             // Build short class base using department short or program code and level number, e.g. "ITE 100"
@@ -92,8 +104,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         }
                     }
 
-                    $msg = "Successfully created class with {$divisions_count} division(s).";
-                    if ($createdDivisions > 0) $msg .= " Created {$createdDivisions} division records.";
+                    $msg = "Successfully created class with {$divisions_count} classes.";
+                    if ($createdDivisions > 0) $msg .= " Created {$createdDivisions} class records.";
                     redirect_with_flash('classes.php', 'success', $msg);
                 } else {
                     $error_message = "Failed to create class: " . $stmt->error;
@@ -118,6 +130,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error_message = "Error deleting class: " . $conn->error;
         }
         $stmt->close();
+    
+    // Edit class (update representative row: name, total_capacity, divisions_count)
+    } elseif ($action === 'edit' && isset($_POST['id'])) {
+        $id = (int)($_POST['id'] ?? 0);
+        $name = isset($_POST['name']) ? $conn->real_escape_string(trim($_POST['name'])) : '';
+        $total_capacity = isset($_POST['total_capacity']) ? (int)$_POST['total_capacity'] : 0;
+        $divisions_count = isset($_POST['divisions_count']) ? max(1, (int)$_POST['divisions_count']) : 1;
+
+        if ($id <= 0) {
+            $error_message = 'Invalid class id.';
+        } else {
+            $update_sql = "UPDATE classes SET name = ?, total_capacity = ?, divisions_count = ? WHERE id = ?";
+            $u_stmt = $conn->prepare($update_sql);
+            if ($u_stmt) {
+                $u_stmt->bind_param('siii', $name, $total_capacity, $divisions_count, $id);
+                if ($u_stmt->execute()) {
+                    $u_stmt->close();
+                    redirect_with_flash('classes.php', 'success', 'Class updated successfully!');
+                } else {
+                    $error_message = 'Error updating class: ' . $u_stmt->error;
+                    $u_stmt->close();
+                }
+            } else {
+                $error_message = 'Error preparing update: ' . $conn->error;
+            }
+        }
     }
 }
 
@@ -177,6 +215,11 @@ $col = $conn->query("SHOW COLUMNS FROM classes LIKE 'divisions_count'");
 $has_divisions_col = ($col && $col->num_rows > 0);
 if ($col) $col->close();
 
+// Detect if classes table stores total_capacity
+$col = $conn->query("SHOW COLUMNS FROM classes LIKE 'total_capacity'");
+$has_total_capacity = ($col && $col->num_rows > 0);
+if ($col) $col->close();
+
 // Preserve department short selection (only used when programs/departments are linked)
 if ($dept_short_exists && !$class_has_program) {
     // If we don't have program join, but departments are expected elsewhere, include department placeholder
@@ -185,7 +228,10 @@ if ($dept_short_exists && !$class_has_program) {
 
 // Build grouped select to show one row per program+level and count divisions
 $divisions_expr = $has_divisions_col ? "SUM(c.divisions_count) as divisions" : "COUNT(*) as divisions";
-$select_clause = "MIN(c.id) as id, MIN(c.name) as name, " . $divisions_expr . ", c.program_id, c.level_id";
+$total_students_expr = $has_total_capacity ? "SUM(c.total_capacity) as total_students" : "0 as total_students";
+// include representative total_capacity for editing the representative class row
+$rep_total_capacity_expr = $has_total_capacity ? "MIN(c.total_capacity) as total_capacity" : "0 as total_capacity";
+$select_clause = "MIN(c.id) as id, MIN(c.name) as name, " . $divisions_expr . ", " . $total_students_expr . ", " . $rep_total_capacity_expr . ", c.program_id, c.level_id";
 if ($class_has_stream) {
     // include stream in select/grouping when classes are stream-scoped
     $select_clause .= ", c.stream_id";
@@ -199,7 +245,9 @@ if ($class_has_stream) {
     $where_clause .= " AND c.stream_id = " . $streamManager->getCurrentStreamId();
 }
 
-$sql = "SELECT " . $select_clause . "\n        " . $from_clause . "\n        " . $where_clause . "\n        GROUP BY c.program_id, c.level_id\n        ORDER BY name";
+$group_by = ["c.program_id", "c.level_id"];
+if ($class_has_stream) $group_by[] = "c.stream_id";
+$sql = "SELECT " . $select_clause . "\n        " . $from_clause . "\n        " . $where_clause . "\n        GROUP BY " . implode(', ', $group_by) . "\n        ORDER BY name";
 $result = $conn->query($sql);
 
 $dept_select_cols = $dept_short_exists ? "id, name, short_name" : "id, name";
@@ -254,6 +302,7 @@ $level_result = $conn->query($level_sql);
                         <th>Class Name</th>
                         <th>Level</th>
                         <th>Program</th>
+                        <th>Total Count</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
@@ -267,16 +316,27 @@ $level_result = $conn->query($level_sql);
                                     <?php $deptCode = trim(strtoupper($row['dept_short'] ?? $row['program_code'] ?? ''));
                                     $levelTextRow = $row['level_name'] ?? $row['level'] ?? '';
                                     preg_match('/(\d+)/', $levelTextRow, $lm);
-                                    $levelNumRow = $lm[1] ?? '';
+                                    $rawLevelRow = isset($lm[1]) ? (int)$lm[1] : 0;
+                                    $levelNumRow = ($rawLevelRow > 0 && $rawLevelRow < 10) ? $rawLevelRow * 100 : $rawLevelRow;
                                     ?>
                                     <span class="badge bg-info"><?php echo htmlspecialchars(($deptCode ? $deptCode . ' ' : '') . ($row['program_name'] ?? 'N/A')); ?></span>
                                 </td>
                                 <td>
-                                    <span class="badge bg-secondary me-2"><?php echo (int)($row['divisions'] ?? $row['divisions_count'] ?? 1); ?> divisions</span>
+                                    <div class="d-flex align-items-center gap-2">
+                                        <span class="badge bg-dark"><?php echo (int)($row['total_students'] ?? $row['total_capacity'] ?? 0); ?> students</span>
+                                        <span class="badge bg-secondary"><?php echo (int)($row['divisions'] ?? $row['divisions_count'] ?? 1); ?> classes</span>
+                                    </div>
+                                </td>
+                                <td>
                                     <button class="btn btn-sm btn-outline-secondary me-1" onclick="showDivisions('<?php echo htmlspecialchars(addslashes($deptCode)); ?>', '<?php echo htmlspecialchars(addslashes($levelNumRow)); ?>', <?php echo (int)($row['divisions'] ?? $row['divisions_count'] ?? 1); ?>)">
                                         <i class="fas fa-list"></i>
                                     </button>
-                                    <button class="btn btn-sm btn-outline-primary me-1" onclick="editClass(<?php echo $row['id']; ?>)">
+                                    <button class="btn btn-sm btn-outline-primary me-1" onclick="editClass(this)" 
+                                            data-id="<?php echo (int)$row['id']; ?>" 
+                                            data-name="<?php echo htmlspecialchars($row['name'] ?? '', ENT_QUOTES); ?>" 
+                                            data-divisions="<?php echo (int)($row['divisions'] ?? $row['divisions_count'] ?? 1); ?>" 
+                                            data-total="<?php echo (int)($row['total_capacity'] ?? 0); ?>" 
+                                            data-stream="<?php echo (int)($row['stream_id'] ?? 0); ?>">
                                         <i class="fas fa-edit"></i>
                                     </button>
                                     <form method="POST" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this class?')">
@@ -291,7 +351,7 @@ $level_result = $conn->query($level_sql);
                         <?php endwhile; ?>
                     <?php else: ?>
                         <tr>
-                            <td colspan="4" class="empty-state">
+                            <td colspan="5" class="empty-state">
                                 <i class="fas fa-users"></i>
                                 <p>No classes found. Add your first classes to get started!</p>
                             </td>
@@ -328,13 +388,17 @@ $level_result = $conn->query($level_sql);
                                 <select class="form-select" id="program_code" name="program_code" required>
                                     <option value="">Select Program</option>
                                     <?php
-                                    // Fetch programs for dropdown
-                                    $programs_sql = "SELECT id, name, code FROM programs WHERE is_active = 1 ORDER BY name";
+                                    // Fetch programs for dropdown (include dept short if available)
+                                    if ($dept_short_exists) {
+                                        $programs_sql = "SELECT p.id, p.name, p.code, d.short_name AS dept_short FROM programs p LEFT JOIN departments d ON p.department_id = d.id WHERE p.is_active = 1 ORDER BY p.name";
+                                    } else {
+                                        $programs_sql = "SELECT p.id, p.name, p.code, SUBSTRING(d.name,1,3) AS dept_short FROM programs p LEFT JOIN departments d ON p.department_id = d.id WHERE p.is_active = 1 ORDER BY p.name";
+                                    }
                                     $programs_result = $conn->query($programs_sql);
                                     if ($programs_result && $programs_result->num_rows > 0):
                                         while ($program = $programs_result->fetch_assoc()):
                                     ?>
-                                        <option value="<?php echo $program['id']; ?>" data-code="<?php echo htmlspecialchars($program['code']); ?>">
+                                        <option value="<?php echo $program['id']; ?>" data-code="<?php echo htmlspecialchars($program['code']); ?>" data-dept="<?php echo htmlspecialchars($program['dept_short'] ?? $program['code']); ?>">
                                             <?php echo htmlspecialchars($program['name']); ?> (<?php echo htmlspecialchars($program['code']); ?>)
                                         </option>
                                     <?php 
@@ -364,7 +428,8 @@ $level_result = $conn->query($level_sql);
                             <div class="mb-3">
                                 <label for="total_capacity" class="form-label">Number of Students *</label>
                                 <input type="number" class="form-control" id="total_capacity" name="total_capacity" min="1" max="1000" value="100" required>
-                                <small class="text-muted">The system will create divisions automatically (max 100 students per division)</small>
+                                <small class="text-muted">The system will create classes automatically (max 100 students per class)</small>
+                                <small class="text-muted">The system will create classes automatically (max 100 students per class)</small>
                             </div>
                         </div>
                     </div>
@@ -382,12 +447,12 @@ $level_result = $conn->query($level_sql);
     </div>
 </div>
 
-<!-- Divisions Modal -->
+<!-- Classes Modal (formerly Divisions) -->
 <div class="modal fade" id="divisionsModal" tabindex="-1">
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title">Class Divisions</h5>
+                <h5 class="modal-title">Class Sections</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
@@ -407,8 +472,72 @@ include 'includes/footer.php';
 
 <script>
 function editClass(id) {
-    // TODO: Implement edit functionality
-    alert('Edit functionality will be implemented here for class ID: ' + id);
+    // Show edit modal using button dataset
+    var btn = id; // may be element
+    if (btn && btn.dataset) {
+        var classId = btn.dataset.id;
+        var name = btn.dataset.name || '';
+        var divisions = btn.dataset.divisions || '1';
+        var total = btn.dataset.total || '0';
+        var stream = btn.dataset.stream || '';
+
+        // Build or reuse modal
+        var modalHtml = `
+        <div class="modal fade" id="editClassModal" tabindex="-1">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Edit Class</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <form method="POST" id="editClassForm">
+                        <div class="modal-body">
+                            <input type="hidden" name="action" value="edit">
+                            <input type="hidden" name="id" id="edit_class_id" value="${classId}">
+                            <div class="mb-3">
+                                <label class="form-label">Class Name</label>
+                                <input type="text" name="name" id="edit_class_name" class="form-control" value="${name}" required>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Total Capacity</label>
+                                <input type="number" name="total_capacity" id="edit_total_capacity" class="form-control" value="${total}" min="1">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Classes</label>
+                                <input type="number" name="divisions_count" id="edit_divisions_count" class="form-control" value="${divisions}" min="1">
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                            <button type="submit" class="btn btn-primary">Save changes</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>`;
+
+        // Remove existing modal if present to avoid duplicates
+        var existing = document.getElementById('editClassModal');
+        if (existing) existing.remove();
+
+        var div = document.createElement('div');
+        div.innerHTML = modalHtml;
+        document.body.appendChild(div.firstElementChild);
+
+        // Handle form submit via AJAX fallback (POST redirect otherwise)
+        var form = document.getElementById('editClassForm');
+        form.addEventListener('submit', function(e){
+            // let normal POST handle it
+        });
+
+        if (typeof bootstrap !== 'undefined' && bootstrap.Modal) {
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('editClassModal')).show();
+        } else {
+            alert('Open edit modal for: ' + name);
+        }
+    } else {
+        alert('Edit functionality will be implemented here for class ID: ' + id);
+    }
 }
 
 // Preview class names as user types
@@ -429,7 +558,8 @@ function updateClassPreview() {
     
     if (capacity > 0 && programSelect.value && levelSelect.value) {
         const selectedOption = programSelect.options[programSelect.selectedIndex];
-        const programCode = selectedOption.dataset.code || selectedOption.text.match(/\(([^)]+)\)/)?.[1] || 'PROG';
+        // Prefer program code (data-code) for naming, fall back to department short (data-dept)
+        const deptShort = selectedOption.dataset.code || selectedOption.dataset.dept || selectedOption.text.match(/\(([^)]+)\)/)?.[1] || 'PROG';
         const levelText = levelSelect.options[levelSelect.selectedIndex].text;
         
         // Extract just the number from level text (e.g., "Level 100" -> "100")
@@ -442,9 +572,10 @@ function updateClassPreview() {
             return out;
         })();
 
-        const sample = labels.map(l => programCode + levelNumber + l);
+        // Format sample as "DEPT LEVELLETTER" e.g. "ITE 100A"
+        const sample = labels.map(l => deptShort + ' ' + levelNumber + l);
 
-        previewText.textContent = numClasses + ' divisions — Sample: ' + sample.slice(0, 10).join(', ') + (sample.length > 10 ? ', ...' : '');
+        previewText.textContent = numClasses + ' classes — Sample: ' + sample.slice(0, 10).join(', ') + (sample.length > 10 ? ', ...' : '');
         // Update hidden divisions count input
         var divCountEl = document.getElementById('divisions_count');
         if (divCountEl) divCountEl.value = numClasses;
@@ -456,7 +587,7 @@ function updateClassPreview() {
 </script>
 
 <script>
-// Show divisions modal and generate letter labels A..Z, AA.. for counts > 26
+// Show class sections modal and generate letter labels A..Z, AA.. for counts > 26
 function generateDivisionLabels(count) {
     const labels = [];
     for (let i = 0; i < count; i++) {
@@ -482,7 +613,7 @@ function showDivisions(deptCode, levelNum, count) {
         const li = document.createElement('li');
         li.className = 'list-group-item';
         const fullName = (deptCode ? deptCode + ' ' : '') + levelNum + lab; // e.g., ITE 100A
-        li.innerHTML = '<div><strong>' + fullName + '</strong><br/><small>Division ' + (idx+1) + '</small></div>';
+        li.innerHTML = '<div><strong>' + fullName + '</strong><br/><small>Section ' + (idx+1) + '</small></div>';
         ul.appendChild(li);
     });
     container.appendChild(ul);
@@ -490,7 +621,7 @@ function showDivisions(deptCode, levelNum, count) {
     if (typeof bootstrap !== 'undefined' && bootstrap.Modal) {
         bootstrap.Modal.getOrCreateInstance(el).show();
     } else {
-        alert('Divisions:\n' + labels.join(', '));
+        alert('Classes:\n' + labels.join(', '));
     }
 }
 </script>
