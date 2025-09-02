@@ -1,6 +1,11 @@
 <?php
 include 'connect.php';
 
+// Start output buffering to allow exporting (headers) even if included files emit output
+if (!ob_get_level()) {
+    ob_start();
+}
+
 // Page title and layout includes
 $pageTitle = 'Export Timetable';
 include 'includes/header.php';
@@ -11,29 +16,44 @@ $day_filter = isset($_GET['day_id']) ? (int)$_GET['day_id'] : 0;
 $room_filter = isset($_GET['room_id']) ? (int)$_GET['room_id'] : 0;
 $format = isset($_GET['format']) ? $_GET['format'] : 'excel';
 
-// Build the main query
-$main_query = "
-    SELECT 
-        c.name as class_name,
-        co.course_code,
-        co.course_name,
-        d.name as day_name,
-        ts.start_time,
-        ts.end_time,
-        r.name as room_name,
-        r.capacity,
-        l.name as lecturer_name
-    FROM timetable t
-    JOIN class_courses cc ON t.class_course_id = cc.id
-    JOIN classes c ON cc.class_id = c.id
-    JOIN courses co ON cc.course_id = co.id
-    JOIN days d ON t.day_id = d.id
-    JOIN time_slots ts ON t.time_slot_id = ts.id
-    JOIN rooms r ON t.room_id = r.id
-    LEFT JOIN lecturer_courses lc ON co.id = lc.course_id
-    LEFT JOIN lecturers l ON lc.lecturer_id = l.id
-    WHERE 1=1
-";
+// Build the main query (support both timetable schema variants)
+$has_class_course = false;
+$has_lecturer_course = false;
+$col = $conn->query("SHOW COLUMNS FROM timetable LIKE 'class_course_id'");
+if ($col && $col->num_rows > 0) { $has_class_course = true; }
+$col = $conn->query("SHOW COLUMNS FROM timetable LIKE 'lecturer_course_id'");
+if ($col && $col->num_rows > 0) { $has_lecturer_course = true; }
+
+$select_parts = [
+    "c.name as class_name",
+    "co.`code` AS course_code",
+    "co.`name` AS course_name",
+    "d.name as day_name",
+    "ts.start_time",
+    "ts.end_time",
+    "r.name as room_name",
+    "r.capacity",
+    "l.name as lecturer_name"
+];
+$join_parts = [];
+
+if ($has_class_course) {
+    $join_parts[] = "JOIN class_courses cc ON t.class_course_id = cc.id";
+    $join_parts[] = "JOIN classes c ON cc.class_id = c.id";
+    $join_parts[] = "JOIN courses co ON cc.course_id = co.id";
+} else {
+    $join_parts[] = "JOIN classes c ON t.class_id = c.id";
+    $join_parts[] = "JOIN courses co ON t.course_id = co.id";
+}
+
+if ($has_lecturer_course) {
+    $join_parts[] = "LEFT JOIN lecturer_courses lc ON t.lecturer_course_id = lc.id";
+    $join_parts[] = "LEFT JOIN lecturers l ON lc.lecturer_id = l.id";
+} else {
+    $join_parts[] = "LEFT JOIN lecturers l ON t.lecturer_id = l.id";
+}
+
+$main_query = "SELECT " . implode(",\n        ", $select_parts) . "\n    FROM timetable t\n        " . implode("\n        ", $join_parts) . "\n        JOIN days d ON t.day_id = d.id\n        JOIN time_slots ts ON t.time_slot_id = ts.id\n        JOIN rooms r ON t.room_id = r.id\n    WHERE 1=1";
 
 $params = [];
 $types = "";
@@ -82,8 +102,12 @@ if (isset($_GET['export']) && $_GET['export'] === '1') {
 }
 
 function exportCSV($result) {
-    header('Content-Type: text/csv');
-    header('Content-Disposition: attachment; filename="timetable_' . date('Y-m-d_H-i-s') . '.csv"');
+    // Clear any prior output and headers
+    if (ob_get_length()) ob_clean();
+    if (!headers_sent()) {
+        header('Content-Type: text/csv');
+        header('Content-Disposition: attachment; filename="timetable_' . date('Y-m-d_H-i-s') . '.csv"');
+    }
     
     $output = fopen('php://output', 'w');
     
@@ -155,17 +179,31 @@ function exportExcel($result) {
     // Create writer and output
     $writer = new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet);
     
-    header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    header('Content-Disposition: attachment; filename="timetable_' . date('Y-m-d_H-i-s') . '.xlsx"');
-    header('Cache-Control: max-age=0');
+    // Clear any prior output and set headers if possible
+    if (ob_get_length()) ob_clean();
+    if (!headers_sent()) {
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="timetable_' . date('Y-m-d_H-i-s') . '.xlsx"');
+        header('Cache-Control: max-age=0');
+    }
     
     $writer->save('php://output');
 }
 
 // Get statistics
 $total_entries = $conn->query("SELECT COUNT(*) as count FROM timetable")->fetch_assoc()['count'];
-$total_classes = $conn->query("SELECT COUNT(DISTINCT c.id) as count FROM timetable t JOIN class_courses cc ON t.class_course_id = cc.id JOIN classes c ON cc.class_id = c.id")->fetch_assoc()['count'];
-$total_courses = $conn->query("SELECT COUNT(DISTINCT co.id) as count FROM timetable t JOIN class_courses cc ON t.class_course_id = cc.id JOIN courses co ON cc.course_id = co.id")->fetch_assoc()['count'];
+
+// Support both timetable schema variants when computing stats
+$col = $conn->query("SHOW COLUMNS FROM timetable LIKE 'class_course_id'");
+$has_t_class_course = ($col && $col->num_rows > 0);
+if ($has_t_class_course) {
+    $total_classes = $conn->query("SELECT COUNT(DISTINCT c.id) as count FROM timetable t JOIN class_courses cc ON t.class_course_id = cc.id JOIN classes c ON cc.class_id = c.id")->fetch_assoc()['count'];
+    $total_courses = $conn->query("SELECT COUNT(DISTINCT co.id) as count FROM timetable t JOIN class_courses cc ON t.class_course_id = cc.id JOIN courses co ON cc.course_id = co.id")->fetch_assoc()['count'];
+} else {
+    $total_classes = $conn->query("SELECT COUNT(DISTINCT c.id) as count FROM timetable t JOIN classes c ON t.class_id = c.id")->fetch_assoc()['count'];
+    $total_courses = $conn->query("SELECT COUNT(DISTINCT co.id) as count FROM timetable t JOIN courses co ON t.course_id = co.id")->fetch_assoc()['count'];
+}
+if ($col) $col->close();
 ?>
 
 <!-- Bootstrap CSS and JS are included globally in includes/header.php -->
@@ -375,7 +413,7 @@ $total_courses = $conn->query("SELECT COUNT(DISTINCT co.id) as count FROM timeta
                                                 // Reset result pointer for preview
                                                 $timetable_result->data_seek(0);
                                                 $preview_count = 0;
-                                                while ($entry = $timetable_result->fetch_assoc() && $preview_count < 10): 
+                                                while (($entry = $timetable_result->fetch_assoc()) && $preview_count < 10): 
                                                     $preview_count++;
                                                 ?>
                                                 <tr>
