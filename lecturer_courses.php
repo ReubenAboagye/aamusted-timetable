@@ -249,26 +249,29 @@ let assignedCourses = [];
 function editMapping(lecturerId) {
     currentLecturerId = lecturerId;
     
-    // Dummy data for testing - remove this when backend is ready
-    availableCourses = [
-        { id: '1', code: 'CS101', name: 'Introduction to Computer Science' },
-        { id: '2', code: 'CS102', name: 'Programming Fundamentals' },
-        { id: '3', code: 'CS201', name: 'Data Structures' },
-        { id: '4', code: 'CS202', name: 'Algorithms' },
-        { id: '5', code: 'CS301', name: 'Database Systems' },
-        { id: '6', code: 'CS302', name: 'Software Engineering' },
-        { id: '7', code: 'MATH101', name: 'Calculus I' },
-        { id: '8', code: 'MATH102', name: 'Calculus II' },
-        { id: '9', code: 'PHYS101', name: 'Physics I' },
-        { id: '10', code: 'PHYS102', name: 'Physics II' }
-    ];
+    // Show loading state
+    const availableList = document.getElementById('availableCoursesList');
+    const assignedList = document.getElementById('assignedCoursesList');
+    availableList.innerHTML = '<div class="text-center p-3"><i class="fas fa-spinner fa-spin"></i> Loading courses...</div>';
+    assignedList.innerHTML = '<div class="text-center p-3"><i class="fas fa-spinner fa-spin"></i> Loading courses...</div>';
     
-    assignedCourses = [
-        { id: '1', code: 'CS101', name: 'Introduction to Computer Science' },
-        { id: '3', code: 'CS201', name: 'Data Structures' }
-    ];
-    
-    populateCourseLists();
+    // Fetch courses from database
+    fetch(`get_lecturer_courses.php?lecturer_id=${lecturerId}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                availableCourses = data.data.available_courses;
+                assignedCourses = data.data.assigned_courses;
+                populateCourseLists();
+            } else {
+                throw new Error(data.error || 'Failed to fetch courses');
+            }
+        })
+        .catch(error => {
+            console.error('Error fetching courses:', error);
+            availableList.innerHTML = '<div class="text-center p-3 text-danger"><i class="fas fa-exclamation-triangle"></i> Error loading courses</div>';
+            assignedList.innerHTML = '<div class="text-center p-3 text-danger"><i class="fas fa-exclamation-triangle"></i> Error loading courses</div>';
+        });
     
     // Use Bootstrap 5 modal methods instead of jQuery
     const el = document.getElementById('editModal');
@@ -336,12 +339,56 @@ function unassignCourse(courseId) {
 function saveAssignments() {
     const courseIds = assignedCourses.map(c => c.id);
     
-    // Dummy save for testing - remove this when backend is ready
-    alert(`Changes saved! Assigned courses: ${assignedCourses.map(c => c.code).join(', ')}`);
+    // Show loading state
+    const saveButton = document.querySelector('#editModal .btn-primary');
+    const originalText = saveButton.innerHTML;
+    saveButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
+    saveButton.disabled = true;
     
-    // Use Bootstrap 5 modal methods instead of jQuery
-    const modal = bootstrap.Modal.getInstance(document.getElementById('editModal'));
-    modal.hide();
+    // Send data to server
+    fetch('save_lecturer_courses.php', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            lecturer_id: currentLecturerId,
+            assigned_course_ids: courseIds
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Show success message
+            const modal = bootstrap.Modal.getInstance(document.getElementById('editModal'));
+            modal.hide();
+            
+            // Show success alert
+            const alertDiv = document.createElement('div');
+            alertDiv.className = 'alert alert-success alert-dismissible fade show m-3';
+            alertDiv.innerHTML = `
+                ${data.message}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            `;
+            document.querySelector('.table-container').insertBefore(alertDiv, document.querySelector('.table-responsive'));
+            
+            // Reload the page after a short delay to show updated data
+            setTimeout(() => {
+                window.location.reload();
+            }, 1500);
+        } else {
+            throw new Error(data.error || 'Failed to save assignments');
+        }
+    })
+    .catch(error => {
+        console.error('Error saving assignments:', error);
+        alert('Error saving assignments: ' + error.message);
+    })
+    .finally(() => {
+        // Restore button state
+        saveButton.innerHTML = originalText;
+        saveButton.disabled = false;
+    });
 }
 
 // Course search functionality
