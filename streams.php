@@ -23,6 +23,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $active_days = isset($_POST['active_days']) ? json_encode(array_values($_POST['active_days'])) : json_encode([]);
         $is_active = isset($_POST['is_active']) ? 1 : 0;
 
+        // If this stream is being set as active, deactivate all other streams first
+        if ($is_active) {
+            $deactivate_sql = "UPDATE streams SET is_active = 0, updated_at = NOW() WHERE is_active = 1";
+            $conn->query($deactivate_sql);
+        }
+
         $sql = "INSERT INTO streams 
                 (name, code, description, period_start, period_end, break_start, break_end, active_days, is_active, created_at, updated_at) 
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
@@ -64,6 +70,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $active_days = isset($_POST['active_days']) ? json_encode(array_values($_POST['active_days'])) : json_encode([]);
         $is_active = isset($_POST['is_active']) ? 1 : 0;
 
+        // If this stream is being set as active, deactivate all other streams first
+        if ($is_active) {
+            $deactivate_sql = "UPDATE streams SET is_active = 0, updated_at = NOW() WHERE is_active = 1 AND id != ?";
+            $deactivate_stmt = $conn->prepare($deactivate_sql);
+            $deactivate_stmt->bind_param("i", $id);
+            $deactivate_stmt->execute();
+            $deactivate_stmt->close();
+        }
+
         $sql = "UPDATE streams 
                 SET name = ?, code = ?, description = ?, period_start = ?, period_end = ?, break_start = ?, break_end = ?, active_days = ?, is_active = ?, updated_at = NOW()
                 WHERE id = ?";
@@ -97,8 +112,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $stmt->close();
     }
 
-    // DELETE STREAM (soft delete → set inactive)
-    elseif ($_POST['action'] === 'delete' && isset($_POST['id'])) {
+    // ACTIVATE STREAM (make this stream active and deactivate all others)
+    elseif ($_POST['action'] === 'activate' && isset($_POST['id'])) {
+        $id = (int) $_POST['id'];
+
+        // Start transaction to ensure data consistency
+        $conn->begin_transaction();
+
+        try {
+            // Deactivate all streams first
+            $deactivate_sql = "UPDATE streams SET is_active = 0, updated_at = NOW() WHERE is_active = 1";
+            $conn->query($deactivate_sql);
+
+            // Activate the selected stream
+            $activate_sql = "UPDATE streams SET is_active = 1, updated_at = NOW() WHERE id = ?";
+            $stmt = $conn->prepare($activate_sql);
+            $stmt->bind_param("i", $id);
+
+            if ($stmt->execute()) {
+                $conn->commit();
+                $success_message = "✅ Stream activated successfully! All other streams have been deactivated.";
+            } else {
+                throw new Exception("Error activating stream: " . $conn->error);
+            }
+            $stmt->close();
+        } catch (Exception $e) {
+            $conn->rollback();
+            $error_message = "❌ " . $e->getMessage();
+        }
+    }
+
+    // DEACTIVATE STREAM (soft delete → set inactive)
+    elseif ($_POST['action'] === 'deactivate' && isset($_POST['id'])) {
         $id = (int) $_POST['id'];
 
         $sql = "UPDATE streams SET is_active = 0, updated_at = NOW() WHERE id = ?";
@@ -106,9 +151,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $stmt->bind_param("i", $id);
 
         if ($stmt->execute()) {
-            $success_message = "✅ Stream deleted successfully!";
+            $success_message = "✅ Stream deactivated successfully!";
         } else {
-            $error_message = "❌ Error deleting stream: " . $conn->error;
+            $error_message = "❌ Error deactivating stream: " . $conn->error;
         }
         $stmt->close();
     }
@@ -196,7 +241,7 @@ $result = $conn->query("SELECT * FROM streams ORDER BY created_at DESC");
 
         <div class="mb-3 form-check">
             <input type="checkbox" name="is_active" class="form-check-input" id="is_active" checked>
-            <label class="form-check-label" for="is_active">Active</label>
+            <label class="form-check-label" for="is_active">Active (will deactivate all other streams)</label>
         </div>
 
         <button type="submit" class="btn btn-primary">Add Stream</button>
@@ -242,12 +287,24 @@ $result = $conn->query("SELECT * FROM streams ORDER BY created_at DESC");
                 <td><?= $row['is_active'] ? '✅ Active' : '❌ Inactive'; ?></td>
                 <td><?= $row['created_at']; ?></td>
                 <td>
-                    <!-- Delete Form -->
-                    <form method="POST" style="display:inline-block;">
-                        <input type="hidden" name="action" value="delete">
-                        <input type="hidden" name="id" value="<?= $row['id']; ?>">
-                        <button type="submit" class="btn btn-danger btn-sm">Delete</button>
-                    </form>
+                    <div class="d-flex flex-column gap-1">
+                        <?php if ($row['is_active']): ?>
+                            <span class="badge bg-success mb-1">Currently Active</span>
+                            <!-- Deactivate Form -->
+                            <form method="POST" class="mb-0">
+                                <input type="hidden" name="action" value="deactivate">
+                                <input type="hidden" name="id" value="<?= $row['id']; ?>">
+                                <button type="submit" class="btn btn-warning btn-sm w-100" onclick="return confirm('Are you sure you want to deactivate this stream?')">Deactivate</button>
+                            </form>
+                        <?php else: ?>
+                            <!-- Activate Form -->
+                            <form method="POST" class="mb-0">
+                                <input type="hidden" name="action" value="activate">
+                                <input type="hidden" name="id" value="<?= $row['id']; ?>">
+                                <button type="submit" class="btn btn-success btn-sm w-100" onclick="return confirm('This will deactivate all other streams. Continue?')">Activate</button>
+                            </form>
+                        <?php endif; ?>
+                    </div>
                 </td>
             </tr>
         <?php endwhile; ?>
