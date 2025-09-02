@@ -56,9 +56,35 @@ $error_message = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? null;
     if ($action === 'generate_lecture_timetable') {
-        // Clear existing timetable
-        $clear_sql = "DELETE FROM timetable";
-        $conn->query($clear_sql);
+        // Read academic year and semester from user input
+        $academic_year = trim($_POST['academic_year'] ?? '');
+        $semester = trim($_POST['semester'] ?? '');
+        if ($academic_year === '' || $semester === '') {
+            $error_message = 'Please specify academic year and semester before generating the timetable.';
+        }
+
+        // Detect if timetable stores academic_year / semester columns so we can clear only that offering
+        $tcol_year = $conn->query("SHOW COLUMNS FROM timetable LIKE 'academic_year'");
+        $tcol_sem = $conn->query("SHOW COLUMNS FROM timetable LIKE 'semester'");
+        $has_t_academic_year = ($tcol_year && $tcol_year->num_rows > 0);
+        $has_t_semester = ($tcol_sem && $tcol_sem->num_rows > 0);
+        if ($tcol_year) $tcol_year->close();
+        if ($tcol_sem) $tcol_sem->close();
+
+        if (empty($error_message)) {
+            // Clear existing timetable entries only for this academic year/semester when supported
+            if ($has_t_academic_year && $has_t_semester) {
+                $del_stmt = $conn->prepare("DELETE FROM timetable WHERE academic_year = ? AND semester = ?");
+                if ($del_stmt) {
+                    $del_stmt->bind_param("ss", $academic_year, $semester);
+                    $del_stmt->execute();
+                    $del_stmt->close();
+                }
+            } else {
+                // Fallback: clear entire timetable
+                $conn->query("DELETE FROM timetable");
+            }
+        }
 
         // Prepare to fetch time slots per stream using mapping
         $time_slots_by_stream = [];
@@ -112,8 +138,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $check_room_sql = "SELECT COUNT(*) as count FROM timetable WHERE day_id = ? AND time_slot_id = ? AND room_id = ?";
             $check_room_stmt = $conn->prepare($check_room_sql);
 
+            // detect if timetable has a division_label column to allow per-division scheduling
+            $div_col_check = $conn->query("SHOW COLUMNS FROM timetable LIKE 'division_label'");
+            $has_division_col = ($div_col_check && $div_col_check->num_rows > 0);
+            if ($div_col_check) $div_col_check->close();
+
+            // check if classes table contains divisions_count
+            $col_div = $conn->query("SHOW COLUMNS FROM classes LIKE 'divisions_count'");
+            $has_classes_divisions = ($col_div && $col_div->num_rows > 0);
+            if ($col_div) $col_div->close();
+
             // check if class (via class_courses->class_id) already has an entry at the same day/time
-            $check_class_sql = "SELECT COUNT(*) as count FROM timetable t JOIN class_courses cc ON t.class_course_id = cc.id WHERE cc.class_id = ? AND t.day_id = ? AND t.time_slot_id = ?";
+            if ($has_division_col) {
+                // check per-division (allow different divisions of same class at same time)
+                $check_class_sql = "SELECT COUNT(*) as count FROM timetable t JOIN class_courses cc ON t.class_course_id = cc.id WHERE cc.class_id = ? AND t.division_label = ? AND t.day_id = ? AND t.time_slot_id = ?";
+            } else {
+                $check_class_sql = "SELECT COUNT(*) as count FROM timetable t JOIN class_courses cc ON t.class_course_id = cc.id WHERE cc.class_id = ? AND t.day_id = ? AND t.time_slot_id = ?";
+            }
             $check_class_stmt = $conn->prepare($check_class_sql);
 
             // check if lecturer_course is already teaching at that time
@@ -197,9 +238,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $room_count = $check_room_stmt->get_result()->fetch_assoc()['count'];
 
                         // class id: need to fetch class_id for this assignment (we have class_id in the assignment row)
-                        $check_class_stmt->bind_param("iii", $assignment['class_id'], $day['id'], $time_slot['id']);
-                        $check_class_stmt->execute();
-                        $class_count = $check_class_stmt->get_result()->fetch_assoc()['count'];
+                        // If timetable supports division_label, we will try to schedule into a specific division label
+                        $class_count = 0;
+                        $division_label_to_use = null;
+                        if ($has_division_col && $has_classes_divisions) {
+                            // Fetch class divisions_count
+                            $cd_stmt = $conn->prepare("SELECT divisions_count, name FROM classes WHERE id = ? LIMIT 1");
+                            if ($cd_stmt) {
+                                $cd_stmt->bind_param("i", $assignment['class_id']);
+                                $cd_stmt->execute();
+                                $cd_res = $cd_stmt->get_result();
+                                $cd_row = $cd_res->fetch_assoc();
+                                $cd_stmt->close();
+                                $div_count = $cd_row ? (int)$cd_row['divisions_count'] : 1;
+                                $class_base_name = $cd_row ? $cd_row['name'] : '';
+                            } else {
+                                $div_count = 1;
+                                $class_base_name = '';
+                            }
+
+                            // attempt to find a free division label slot (A..Z, AA..)
+                            for ($didx = 0; $didx < $div_count; $didx++) {
+                                $n = $didx;
+                                $label = '';
+                                while (true) {
+                                    $label = chr(65 + ($n % 26)) . $label;
+                                    $n = intdiv($n, 26) - 1;
+                                    if ($n < 0) break;
+                                }
+                                // check this specific division hasn't an entry
+                                $check_class_stmt->bind_param("isii", $assignment['class_id'], $label, $day['id'], $time_slot['id']);
+                                $check_class_stmt->execute();
+                                $class_count = $check_class_stmt->get_result()->fetch_assoc()['count'];
+                                if ($class_count == 0) { $division_label_to_use = $label; break; }
+                            }
+                            // if none free, class_count will be >0
+                        } else {
+                            $check_class_stmt->bind_param("iii", $assignment['class_id'], $day['id'], $time_slot['id']);
+                            $check_class_stmt->execute();
+                            $class_count = $check_class_stmt->get_result()->fetch_assoc()['count'];
+                        }
 
                         // we'll lookup lecturer_course later; for now assume lecturer might conflict after we fetch it
                         if ($room_count == 0 && $class_count == 0) {
@@ -222,17 +300,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                     continue;
                                 }
 
-                                // Insert timetable entry with lecturer_course_id
-                                $insert_sql = "INSERT INTO timetable (class_course_id, lecturer_course_id, day_id, time_slot_id, room_id) VALUES (?, ?, ?, ?, ?)";
-                                $insert_stmt = $conn->prepare($insert_sql);
-                                $insert_stmt->bind_param("iiiii", $assignment['id'], $lecturer_course['id'], $day['id'], $time_slot['id'], $room['id']);
+                                // Insert timetable entry with lecturer_course_id (include division_label if supported)
+                                if ($has_division_col && $division_label_to_use !== null) {
+                                    $insert_sql = "INSERT INTO timetable (class_course_id, lecturer_course_id, day_id, time_slot_id, room_id, division_label) VALUES (?, ?, ?, ?, ?, ?)";
+                                    $insert_stmt = $conn->prepare($insert_sql);
+                                    if ($insert_stmt) {
+                                        $insert_stmt->bind_param("iiiiis", $assignment['id'], $lecturer_course['id'], $day['id'], $time_slot['id'], $room['id'], $division_label_to_use);
+                                    }
+                                } else {
+                                    $insert_sql = "INSERT INTO timetable (class_course_id, lecturer_course_id, day_id, time_slot_id, room_id) VALUES (?, ?, ?, ?, ?)";
+                                    $insert_stmt = $conn->prepare($insert_sql);
+                                    if ($insert_stmt) {
+                                        $insert_stmt->bind_param("iiiii", $assignment['id'], $lecturer_course['id'], $day['id'], $time_slot['id'], $room['id']);
+                                    }
+                                }
 
-                                if ($insert_stmt->execute()) {
+                                if (isset($insert_stmt) && $insert_stmt && $insert_stmt->execute()) {
                                     $placed = true;
                                     $insert_stmt->close();
                                     break; // placed successfully
                                 }
-                                $insert_stmt->close();
+                                if (isset($insert_stmt) && $insert_stmt) $insert_stmt->close();
                             } else {
                                 // No lecturer assigned to this course, cannot place
                                 break;
@@ -361,10 +449,16 @@ $total_courses = $conn->query("SELECT COUNT(*) as count FROM courses WHERE is_ac
                     <div class="card-body">
                         <p class="text-muted">This will generate a new timetable based on current class-course assignments. Any existing timetable entries will be cleared.</p>
 
-                        <div class="d-flex flex-wrap gap-2">
-                            <form method="POST">
+                        <div class="d-flex flex-wrap gap-2 align-items-center">
+                            <form method="POST" class="d-flex gap-2 align-items-center">
                                 <input type="hidden" name="action" value="generate_lecture_timetable">
-                                <button type="submit" class="btn btn-primary btn-lg" onclick="return confirm('This will clear the existing timetable and generate a new lecture timetable. Continue?')">
+                                <input type="text" name="academic_year" class="form-control form-control-sm" placeholder="Academic year e.g. 2024/2025" required style="max-width:220px">
+                                <select name="semester" class="form-select form-select-sm" required style="max-width:140px">
+                                    <option value="">Semester</option>
+                                    <option value="first">First</option>
+                                    <option value="second">Second</option>
+                                </select>
+                                <button type="submit" class="btn btn-primary btn-lg" onclick="return confirm('This will clear existing timetable for the selected year/semester and generate a new lecture timetable. Continue?')">
                                     <i class="fas fa-magic me-2"></i>Generate Lecture Timetable
                                 </button>
                             </form>
