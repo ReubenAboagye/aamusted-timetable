@@ -194,14 +194,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 $stream_days_stmt->close();
 
-                // Load time slots for this stream from mapping (fallback to global if none selected)
+                // Load time slots for this stream from mapping (fallback to all time_slots if none selected)
                 $stream_slots = [];
-                $ts_rs = $conn->query("SELECT ts.id, ts.start_time, ts.end_time FROM stream_time_slots sts JOIN time_slots ts ON ts.id = sts.time_slot_id WHERE sts.stream_id = " . intval($stream_id) . " AND sts.is_active = 1 ORDER BY ts.start_time");
-                if ($ts_rs && $ts_rs->num_rows > 0) {
-                    while ($s = $ts_rs->fetch_assoc()) { $stream_slots[] = $s; }
-                } else {
-                    // Fallback: use all mandatory global slots
-                    $ts_rs2 = $conn->query("SELECT id, start_time, end_time FROM time_slots WHERE is_mandatory = 1 ORDER BY start_time");
+                try {
+                    // First try to get stream-specific time slots from stream_time_slots mapping
+                    $ts_rs = $conn->query("SELECT ts.id, ts.start_time, ts.end_time FROM stream_time_slots sts JOIN time_slots ts ON ts.id = sts.time_slot_id WHERE sts.stream_id = " . intval($stream_id) . " AND sts.is_active = 1 ORDER BY ts.start_time");
+                    if ($ts_rs && $ts_rs->num_rows > 0) {
+                        while ($s = $ts_rs->fetch_assoc()) { $stream_slots[] = $s; }
+                    } else {
+                        // Fallback: use all time slots from time_slots table (not just mandatory ones)
+                        $ts_rs2 = $conn->query("SELECT id, start_time, end_time FROM time_slots WHERE is_break = 0 ORDER BY start_time");
+                        while ($s2 = $ts_rs2->fetch_assoc()) { $stream_slots[] = $s2; }
+                    }
+                } catch (Exception $e) {
+                    // If stream_time_slots table doesn't exist, use all time slots
+                    $ts_rs2 = $conn->query("SELECT id, start_time, end_time FROM time_slots WHERE is_break = 0 ORDER BY start_time");
                     while ($s2 = $ts_rs2->fetch_assoc()) { $stream_slots[] = $s2; }
                 }
 
@@ -461,16 +468,16 @@ $total_courses = $conn->query("SELECT COUNT(*) as count FROM courses WHERE is_ac
                             <div class="d-flex gap-2 align-items-center">
                                 <form method="POST" class="d-flex gap-2 align-items-center">
                                     <input type="hidden" name="action" value="generate_lecture_timetable">
-                                    <input type="hidden" name="academic_year" value="">
-                                    <input type="hidden" name="semester" value="">
+                                    <input type="hidden" name="academic_year">
+                                    <input type="hidden" name="semester">
                                     <button type="submit" class="btn btn-primary btn-lg" onclick="return confirm('This will clear existing timetable for the selected year/semester and generate a new lecture timetable. Continue?')">
                                         <i class="fas fa-magic me-2"></i>Generate Lecture Timetable
                                     </button>
                                 </form>
                                 <form method="POST" class="d-flex gap-2 align-items-center">
                                     <input type="hidden" name="action" value="generate_exams_timetable">
-                                    <input type="hidden" name="academic_year" value="">
-                                    <input type="hidden" name="semester" value="">
+                                    <input type="hidden" name="academic_year">
+                                    <input type="hidden" name="semester">
                                     <button type="submit" class="btn btn-outline-primary btn-lg">
                                         <i class="fas fa-file-alt me-2"></i>Generate Exams Timetable
                                     </button>
@@ -532,18 +539,19 @@ $total_courses = $conn->query("SELECT COUNT(*) as count FROM courses WHERE is_ac
         
         try {
             if (!empty($current_stream_id)) {
+                // First try to get stream-specific time slots from stream_time_slots mapping
                 $sts_result = $conn->query("SELECT COUNT(*) as count FROM stream_time_slots WHERE stream_id = " . intval($current_stream_id) . " AND is_active = 1");
                 $stream_time_slots_count = $sts_result ? $sts_result->fetch_assoc()['count'] : 0;
             }
             if ($stream_time_slots_count == 0) {
-                // Fallback to mandatory global slots
-                $stream_time_slots_count = $conn->query("SELECT COUNT(*) as count FROM time_slots WHERE is_mandatory = 1")->fetch_assoc()['count'];
+                // Fallback to all time slots from time_slots table (not just mandatory ones)
+                $stream_time_slots_count = $conn->query("SELECT COUNT(*) as count FROM time_slots WHERE is_break = 0")->fetch_assoc()['count'];
             }
         } catch (Exception $e) {
             $schema_error = "Database schema issue: " . $e->getMessage();
-            // Fallback to basic time slots check
+            // Fallback to all time slots check
             try {
-                $stream_time_slots_count = $conn->query("SELECT COUNT(*) as count FROM time_slots WHERE is_mandatory = 1")->fetch_assoc()['count'];
+                $stream_time_slots_count = $conn->query("SELECT COUNT(*) as count FROM time_slots WHERE is_break = 0")->fetch_assoc()['count'];
             } catch (Exception $e2) {
                 $stream_time_slots_count = 0;
                 $schema_error = "Critical database error: " . $e2->getMessage();
@@ -599,7 +607,7 @@ $total_courses = $conn->query("SELECT COUNT(*) as count FROM courses WHERE is_ac
                                         <div class="stat-number"><?php echo $stream_time_slots_count; ?></div>
                                         <div>
                                             Time Slots
-                                            <i class="fas fa-info-circle ms-1" data-bs-toggle="tooltip" title="Available time periods for current stream"></i>
+                                            <i class="fas fa-info-circle ms-1" data-bs-toggle="tooltip" title="Available time periods (stream-specific or all time slots if none mapped)"></i>
                                         </div>
                                     </div>
                                 </div>
@@ -621,7 +629,7 @@ $total_courses = $conn->query("SELECT COUNT(*) as count FROM courses WHERE is_ac
                                         <div class="stat-number"><?php echo $total_days; ?></div>
                                         <div>
                                             Days
-                                            <i class="fas fa-info-circle ms-1" data-bs-toggle="tooltip" title="Active days for scheduling"></i>
+                                            <i class="fas fa-info-circle ms-1" data-bs-toggle="tooltip" title="Active days for current stream (from stream's active_days setting)"></i>
                                         </div>
                                     </div>
                                 </div>
@@ -875,6 +883,13 @@ document.addEventListener('DOMContentLoaded', function () {
             
             if (academicYearField) academicYearField.value = timetableName;
             if (semesterField) semesterField.value = semester;
+            
+            // Validate required fields
+            if (!timetableName || !semester) {
+                e.preventDefault();
+                alert('Please fill in both Timetable Name and Semester fields.');
+                return false;
+            }
         });
     });
 });
