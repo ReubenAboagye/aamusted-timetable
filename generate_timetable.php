@@ -59,6 +59,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // Read academic year and semester from user input
         $academic_year = trim($_POST['academic_year'] ?? '');
         $semester = trim($_POST['semester'] ?? '');
+
+        // Normalize academic_year to match DB width and expected format (e.g. "2024/2025").
+        // If the user provided a longer descriptive name in the Timetable Name field,
+        // extract a YYYY/YYYY fragment or truncate to the 9-char DB column limit.
+        $normalizeAcademicYear = function($input) {
+            $s = trim((string)$input);
+            if ($s === '') return $s;
+            // Prefer explicit 4-digit/4-digit formats like 2024/2025
+            if (preg_match('/(\d{4}\/\d{4})/', $s, $m)) {
+                return $m[1];
+            }
+            // Accept 4-digit-4-digit variants and normalize to slash
+            if (preg_match('/(\d{4}[-]\d{4})/', $s, $m)) {
+                return str_replace('-', '/', $m[1]);
+            }
+            // Accept shortened second year like 2024/25 -> expand if possible
+            if (preg_match('/(\d{4}\/\d{2})/', $s, $m)) {
+                $parts = explode('/', $m[1]);
+                $start = $parts[0];
+                $end = $parts[1];
+                if (strlen($end) === 2) {
+                    $century = substr($start, 0, 2);
+                    $end = $century . $end;
+                }
+                return $start . '/' . $end;
+            }
+            // Fallback: take the first whitespace-separated token and truncate to 9 chars
+            $parts = preg_split('/\s+/', $s);
+            $tok = $parts[0] ?? $s;
+            if (strlen($tok) > 9) $tok = substr($tok, 0, 9);
+            return $tok;
+        };
+
+        $academic_year = $normalizeAcademicYear($academic_year);
         if ($academic_year === '' || $semester === '') {
             $error_message = 'Please specify academic year and semester before generating the timetable.';
         }
@@ -118,7 +152,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error_count = 0;
 
             // Prepare assignment statement (we will bind stream_id per-iteration)
-            $assignments_sql = "SELECT cc.id, cc.class_id, cc.course_id, c.name as class_name, co.course_code, co.course_name
+            // Note: courses table uses `code` and `name` columns. Alias them to match expected keys.
+            $assignments_sql = "SELECT cc.id, cc.class_id, cc.course_id, c.name as class_name, co.`code` AS course_code, co.`name` AS course_name
                                FROM class_courses cc
                                JOIN classes c ON cc.class_id = c.id
                                JOIN courses co ON cc.course_id = co.id
@@ -149,16 +184,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($col_div) $col_div->close();
 
             // check if class (via class_courses->class_id) already has an entry at the same day/time
-            if ($has_division_col) {
-                // check per-division (allow different divisions of same class at same time)
-                $check_class_sql = "SELECT COUNT(*) as count FROM timetable t JOIN class_courses cc ON t.class_course_id = cc.id WHERE cc.class_id = ? AND t.division_label = ? AND t.day_id = ? AND t.time_slot_id = ?";
+            // Detect whether timetable stores class_course_id (newer schema) or class_id (older schema)
+            $tcol_check_for_class_course = $conn->query("SHOW COLUMNS FROM timetable LIKE 'class_course_id'");
+            $has_t_class_course = ($tcol_check_for_class_course && $tcol_check_for_class_course->num_rows > 0);
+            if ($tcol_check_for_class_course) $tcol_check_for_class_course->close();
+
+            if ($has_t_class_course) {
+                if ($has_division_col) {
+                    // check per-division (allow different divisions of same class at same time)
+                    $check_class_sql = "SELECT COUNT(*) as count FROM timetable t JOIN class_courses cc ON t.class_course_id = cc.id WHERE cc.class_id = ? AND t.division_label = ? AND t.day_id = ? AND t.time_slot_id = ?";
+                } else {
+                    $check_class_sql = "SELECT COUNT(*) as count FROM timetable t JOIN class_courses cc ON t.class_course_id = cc.id WHERE cc.class_id = ? AND t.day_id = ? AND t.time_slot_id = ?";
+                }
             } else {
-                $check_class_sql = "SELECT COUNT(*) as count FROM timetable t JOIN class_courses cc ON t.class_course_id = cc.id WHERE cc.class_id = ? AND t.day_id = ? AND t.time_slot_id = ?";
+                // timetable stores class_id directly
+                if ($has_division_col) {
+                    $check_class_sql = "SELECT COUNT(*) as count FROM timetable t WHERE t.class_id = ? AND t.division_label = ? AND t.day_id = ? AND t.time_slot_id = ?";
+                } else {
+                    $check_class_sql = "SELECT COUNT(*) as count FROM timetable t WHERE t.class_id = ? AND t.day_id = ? AND t.time_slot_id = ?";
+                }
             }
             $check_class_stmt = $conn->prepare($check_class_sql);
 
             // check if lecturer_course is already teaching at that time
-            $check_lecturer_sql = "SELECT COUNT(*) as count FROM timetable WHERE lecturer_course_id = ? AND day_id = ? AND time_slot_id = ?";
+            $tcol_check_for_lecturer_course = $conn->query("SHOW COLUMNS FROM timetable LIKE 'lecturer_course_id'");
+            $has_t_lecturer_course = ($tcol_check_for_lecturer_course && $tcol_check_for_lecturer_course->num_rows > 0);
+            if ($tcol_check_for_lecturer_course) $tcol_check_for_lecturer_course->close();
+
+            if ($has_t_lecturer_course) {
+                $check_lecturer_sql = "SELECT COUNT(*) as count FROM timetable WHERE lecturer_course_id = ? AND day_id = ? AND time_slot_id = ?";
+            } else {
+                $check_lecturer_sql = "SELECT COUNT(*) as count FROM timetable WHERE lecturer_id = ? AND day_id = ? AND time_slot_id = ?";
+            }
             $check_lecturer_stmt = $conn->prepare($check_lecturer_sql);
 
             while ($stream = $streams_result->fetch_assoc()) {
@@ -169,11 +226,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 
                 // Get stream's active days preference
                 $stream_days_sql = "SELECT active_days FROM streams WHERE id = ?";
-                $stream_days_stmt = $conn->prepare($stream_days_sql);
-                $stream_days_stmt->bind_param('i', $stream_id);
-                $stream_days_stmt->execute();
-                $stream_result = $stream_days_stmt->get_result();
-                
+                $stream_active_days_stmt = $conn->prepare($stream_days_sql);
+                $stream_active_days_stmt->bind_param('i', $stream_id);
+                $stream_active_days_stmt->execute();
+                $stream_result = $stream_active_days_stmt->get_result();
+
                 if ($stream_row = $stream_result->fetch_assoc()) {
                     $active_days_json = $stream_row['active_days'];
                     if (!empty($active_days_json)) {
@@ -192,25 +249,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         }
                     }
                 }
-                $stream_days_stmt->close();
+                $stream_active_days_stmt->close();
 
                 // Load time slots for this stream from mapping (fallback to all time_slots if none selected)
                 $stream_slots = [];
-                try {
-                    // First try to get stream-specific time slots from stream_time_slots mapping
+                // Check existence of mapping table first to avoid schema warnings being converted to exceptions
+                $sts_exists = $conn->query("SHOW TABLES LIKE 'stream_time_slots'");
+                if ($sts_exists && $sts_exists->num_rows > 0) {
                     $ts_rs = $conn->query("SELECT ts.id, ts.start_time, ts.end_time FROM stream_time_slots sts JOIN time_slots ts ON ts.id = sts.time_slot_id WHERE sts.stream_id = " . intval($stream_id) . " AND sts.is_active = 1 ORDER BY ts.start_time");
                     if ($ts_rs && $ts_rs->num_rows > 0) {
                         while ($s = $ts_rs->fetch_assoc()) { $stream_slots[] = $s; }
-                    } else {
-                        // Fallback: use all time slots from time_slots table (not just mandatory ones)
-                        $ts_rs2 = $conn->query("SELECT id, start_time, end_time FROM time_slots WHERE is_break = 0 ORDER BY start_time");
-                        while ($s2 = $ts_rs2->fetch_assoc()) { $stream_slots[] = $s2; }
                     }
-                } catch (Exception $e) {
-                    // If stream_time_slots table doesn't exist, use all time slots
+                }
+                // Fallback to global time slots if none found or mapping table missing
+                if (empty($stream_slots)) {
                     $ts_rs2 = $conn->query("SELECT id, start_time, end_time FROM time_slots WHERE is_break = 0 ORDER BY start_time");
                     while ($s2 = $ts_rs2->fetch_assoc()) { $stream_slots[] = $s2; }
                 }
+                if ($sts_exists) $sts_exists->close();
 
                 // Fetch assignments for classes in this stream
                 $assignments_stmt->bind_param('i', $stream_id);
@@ -288,8 +344,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                         // we'll lookup lecturer_course later; for now assume lecturer might conflict after we fetch it
                         if ($room_count == 0 && $class_count == 0) {
-                            // Get a default lecturer_course_id for this course
-                            $lecturer_course_sql = "SELECT lc.id FROM lecturer_courses lc WHERE lc.course_id = ? LIMIT 1";
+                            // Get a default lecturer_course (and lecturer) for this course
+                            $lecturer_course_sql = "SELECT lc.id, lc.lecturer_id FROM lecturer_courses lc WHERE lc.course_id = ? LIMIT 1";
                             $lecturer_course_stmt = $conn->prepare($lecturer_course_sql);
                             $lecturer_course_stmt->bind_param("i", $assignment['course_id']);
                             $lecturer_course_stmt->execute();
@@ -298,8 +354,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $lecturer_course_stmt->close();
 
                             if ($lecturer_course) {
-                                // Ensure lecturer is free at this day/time
-                                $check_lecturer_stmt->bind_param("iii", $lecturer_course['id'], $day['id'], $time_slot['id']);
+                                // Determine which id to use when checking conflicts/insert depending on schema
+                                $lect_param = $has_t_lecturer_course ? $lecturer_course['id'] : $lecturer_course['lecturer_id'];
+
+                                // Ensure lecturer (or lecturer_course) is free at this day/time
+                                $check_lecturer_stmt->bind_param("iii", $lect_param, $day['id'], $time_slot['id']);
                                 $check_lecturer_stmt->execute();
                                 $lect_count = $check_lecturer_stmt->get_result()->fetch_assoc()['count'];
                                 if ($lect_count > 0) {
@@ -307,18 +366,68 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                     continue;
                                 }
 
-                                // Insert timetable entry with lecturer_course_id (include division_label if supported)
-                                if ($has_division_col && $division_label_to_use !== null) {
-                                    $insert_sql = "INSERT INTO timetable (class_course_id, lecturer_course_id, day_id, time_slot_id, room_id, division_label) VALUES (?, ?, ?, ?, ?, ?)";
-                                    $insert_stmt = $conn->prepare($insert_sql);
-                                    if ($insert_stmt) {
-                                        $insert_stmt->bind_param("iiiiis", $assignment['id'], $lecturer_course['id'], $day['id'], $time_slot['id'], $room['id'], $division_label_to_use);
+                                // Insert timetable entry using appropriate columns for current schema
+                                if ($has_t_class_course && $has_t_lecturer_course) {
+                                    // Newer schema: use class_course_id and lecturer_course_id — include semester and academic_year
+                                    if ($has_division_col && $division_label_to_use !== null) {
+                                        $insert_sql = "INSERT INTO timetable (class_course_id, lecturer_course_id, day_id, time_slot_id, room_id, division_label, semester, academic_year) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+                                        $insert_stmt = $conn->prepare($insert_sql);
+                                        if ($insert_stmt) {
+                                            $p_class_course_id = $assignment['id'];
+                                            $p_lecturer_course_id = $lecturer_course['id'];
+                                            $p_day_id = $day['id'];
+                                            $p_time_slot_id = $time_slot['id'];
+                                            $p_room_id = $room['id'];
+                                            $p_div_label = $division_label_to_use;
+                                            $p_semester = $semester;
+                                            $p_academic_year = $academic_year;
+                                            $insert_stmt->bind_param("iiiiisss", $p_class_course_id, $p_lecturer_course_id, $p_day_id, $p_time_slot_id, $p_room_id, $p_div_label, $p_semester, $p_academic_year);
+                                        }
+                                    } else {
+                                        $insert_sql = "INSERT INTO timetable (class_course_id, lecturer_course_id, day_id, time_slot_id, room_id, semester, academic_year) VALUES (?, ?, ?, ?, ?, ?, ?)";
+                                        $insert_stmt = $conn->prepare($insert_sql);
+                                        if ($insert_stmt) {
+                                            $p_class_course_id = $assignment['id'];
+                                            $p_lecturer_course_id = $lecturer_course['id'];
+                                            $p_day_id = $day['id'];
+                                            $p_time_slot_id = $time_slot['id'];
+                                            $p_room_id = $room['id'];
+                                            $p_semester = $semester;
+                                            $p_academic_year = $academic_year;
+                                            $insert_stmt->bind_param("iiiiiss", $p_class_course_id, $p_lecturer_course_id, $p_day_id, $p_time_slot_id, $p_room_id, $p_semester, $p_academic_year);
+                                        }
                                     }
                                 } else {
-                                    $insert_sql = "INSERT INTO timetable (class_course_id, lecturer_course_id, day_id, time_slot_id, room_id) VALUES (?, ?, ?, ?, ?)";
-                                    $insert_stmt = $conn->prepare($insert_sql);
-                                    if ($insert_stmt) {
-                                        $insert_stmt->bind_param("iiiii", $assignment['id'], $lecturer_course['id'], $day['id'], $time_slot['id'], $room['id']);
+                                    // Older schema: use class_id and lecturer_id — ensure we also populate course_id to satisfy NOT NULL constraint
+                                    if ($has_division_col && $division_label_to_use !== null) {
+                                        $insert_sql = "INSERT INTO timetable (class_id, course_id, lecturer_id, day_id, time_slot_id, room_id, division_label, semester, academic_year) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                                        $insert_stmt = $conn->prepare($insert_sql);
+                                        if ($insert_stmt) {
+                                            $p_class_id = $assignment['class_id'];
+                                            $p_course_id = $assignment['course_id'];
+                                            $p_lecturer_id = $lecturer_course['lecturer_id'];
+                                            $p_day_id = $day['id'];
+                                            $p_time_slot_id = $time_slot['id'];
+                                            $p_room_id = $room['id'];
+                                            $p_div_label = $division_label_to_use;
+                                            $p_semester = $semester;
+                                            $p_academic_year = $academic_year;
+                                            $insert_stmt->bind_param("iiiiiisss", $p_class_id, $p_course_id, $p_lecturer_id, $p_day_id, $p_time_slot_id, $p_room_id, $p_div_label, $p_semester, $p_academic_year);
+                                        }
+                                    } else {
+                                        $insert_sql = "INSERT INTO timetable (class_id, course_id, lecturer_id, day_id, time_slot_id, room_id, semester, academic_year) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+                                        $insert_stmt = $conn->prepare($insert_sql);
+                                        if ($insert_stmt) {
+                                            $p_class_id = $assignment['class_id'];
+                                            $p_course_id = $assignment['course_id'];
+                                            $p_lecturer_id = $lecturer_course['lecturer_id'];
+                                            $p_day_id = $day['id'];
+                                            $p_time_slot_id = $time_slot['id'];
+                                            $p_room_id = $room['id'];
+                                            $p_semester = $semester;
+                                            $p_academic_year = $academic_year;
+                                            $insert_stmt->bind_param("iiiiiiss", $p_class_id, $p_course_id, $p_lecturer_id, $p_day_id, $p_time_slot_id, $p_room_id, $p_semester, $p_academic_year);
+                                        }
                                     }
                                 }
 
