@@ -1,14 +1,20 @@
 <?php
 $pageTitle = 'Programs Management';
-include 'includes/header.php';
-include 'includes/sidebar.php';
-include 'includes/flash.php';
 
-// Database connection
-include 'connect.php';
+try {
+    include 'includes/header.php';
+    include 'includes/sidebar.php';
+    include 'includes/flash.php';
+
+    // Database connection
+    include 'connect.php';
+    
+    if (!$conn) {
+        throw new Exception("Database connection failed");
+    }
 
 // Handle bulk import and form submissions
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+if (isset($_SERVER['REQUEST_METHOD']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? null;
     // Bulk import
     if ($action === 'bulk_import') {
@@ -250,9 +256,17 @@ $sql = "SELECT p.*, d.name as department_name
         ORDER BY p.name";
 $result = $conn->query($sql);
 
+if (!$result) {
+    throw new Exception("Error fetching programs: " . $conn->error);
+}
+
 // Fetch departments for dropdown
 $dept_sql = "SELECT id, name FROM departments WHERE is_active = 1 ORDER BY name";
 $dept_result = $conn->query($dept_sql);
+
+if (!$dept_result) {
+    throw new Exception("Error fetching departments: " . $conn->error);
+}
 ?>
 
 <div class="main-content" id="mainContent">
@@ -529,7 +543,22 @@ existingProgramCodes.forEach(function(code){ if (code) existingProgramCodesSet[c
 </script>
 
 <?php 
-$conn->close();
+} catch (Exception $e) {
+    // Log the exception
+    error_log("Exception in programs.php: " . $e->getMessage());
+    
+    // Display user-friendly error message
+    echo '<div class="alert alert-danger" role="alert">';
+    echo '<h4>An error occurred</h4>';
+    echo '<p>Please contact the administrator or try refreshing the page.</p>';
+    echo '<small>Error details have been logged.</small>';
+    echo '</div>';
+} finally {
+    if (isset($conn)) {
+        $conn->close();
+    }
+}
+
 include 'includes/footer.php'; 
 ?>
 
@@ -615,9 +644,11 @@ document.addEventListener('DOMContentLoaded', function(){
             }
         })();
     <?php endif; ?>
-});
-</script>
-// Import functionality
+ });
+ </script>
+ 
+ <script>
+ // Import functionality
 let importDataPrograms = [];
 
 function parseCSVPrograms(csvText) {

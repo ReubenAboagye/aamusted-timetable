@@ -37,10 +37,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
+// Get filter parameters
+$selected_department = isset($_GET['department_id']) ? (int)$_GET['department_id'] : 0;
+$search_name = isset($_GET['search_name']) ? trim($_GET['search_name']) : '';
+
 // Data for UI
 $departments = $conn->query("SELECT id, name FROM departments WHERE is_active = 1 ORDER BY name");
-$selected_department = isset($_GET['department_id']) ? (int)$_GET['department_id'] : 0;
-
 $lecturers = $conn->query("SELECT id, name, department_id FROM lecturers WHERE is_active = 1 ORDER BY name");
 
 // Build courses query defensively: some DB schemas include department_id on courses, others don't
@@ -55,14 +57,51 @@ if ($courses === false) {
     error_log('courses query failed: ' . $conn->error . ' -- Query: ' . $courses_query);
     $courses = $conn->query("SELECT c.id, c.name, c.code, NULL AS department_name FROM courses c WHERE c.is_active = 1 ORDER BY c.name");
 }
-$mappings = $conn->query("SELECT l.id as lecturer_id, l.name AS lecturer_name, 
-                          GROUP_CONCAT(c.code ORDER BY c.code SEPARATOR ', ') AS course_codes
-                          FROM lecturers l
-                          LEFT JOIN lecturer_courses lc ON l.id = lc.lecturer_id
-                          LEFT JOIN courses c ON c.id = lc.course_id
-                          WHERE l.is_active = 1
-                          GROUP BY l.id, l.name
-                          ORDER BY l.name");
+
+// Build mappings query with filters
+$mappings_query = "SELECT l.id as lecturer_id, l.name AS lecturer_name, 
+                   d.name AS department_name,
+                   GROUP_CONCAT(c.code ORDER BY c.code SEPARATOR ', ') AS course_codes
+                   FROM lecturers l
+                   LEFT JOIN departments d ON l.department_id = d.id
+                   LEFT JOIN lecturer_courses lc ON l.id = lc.lecturer_id
+                   LEFT JOIN courses c ON c.id = lc.course_id
+                   WHERE l.is_active = 1";
+
+$params = [];
+$types = '';
+
+// Add department filter
+if ($selected_department > 0) {
+    $mappings_query .= " AND l.department_id = ?";
+    $params[] = $selected_department;
+    $types .= 'i';
+}
+
+// Add name search filter
+if (!empty($search_name)) {
+    $mappings_query .= " AND l.name LIKE ?";
+    $params[] = '%' . $search_name . '%';
+    $types .= 's';
+}
+
+$mappings_query .= " GROUP BY l.id, l.name, d.name ORDER BY l.name";
+
+// Execute the query with parameters if any
+if (!empty($params)) {
+    $stmt = $conn->prepare($mappings_query);
+    if ($stmt) {
+        $stmt->bind_param($types, ...$params);
+        $stmt->execute();
+        $mappings = $stmt->get_result();
+        $stmt->close();
+    } else {
+        $mappings = false;
+        error_log('mappings query prepare failed: ' . $conn->error);
+    }
+} else {
+    $mappings = $conn->query($mappings_query);
+}
 ?>
 
 <div class="main-content" id="mainContent">
@@ -85,11 +124,49 @@ $mappings = $conn->query("SELECT l.id as lecturer_id, l.name AS lecturer_name,
             </div>
         <?php endif; ?>
 
+        <!-- Filter Section -->
+        <div class="card m-3">
+            <div class="card-body">
+                <form method="GET" action="lecturer_courses.php" class="row g-3">
+                    <div class="col-md-4">
+                        <label for="department_id" class="form-label">Filter by Department</label>
+                        <select class="form-select" id="department_id" name="department_id">
+                            <option value="0">All Departments</option>
+                            <?php if ($departments && $departments->num_rows > 0): ?>
+                                <?php while ($dept = $departments->fetch_assoc()): ?>
+                                    <option value="<?php echo $dept['id']; ?>" <?php echo ($selected_department == $dept['id']) ? 'selected' : ''; ?>>
+                                        <?php echo htmlspecialchars($dept['name']); ?>
+                                    </option>
+                                <?php endwhile; ?>
+                            <?php endif; ?>
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label for="search_name" class="form-label">Search by Lecturer Name</label>
+                        <input type="text" class="form-control" id="search_name" name="search_name" 
+                               value="<?php echo htmlspecialchars($search_name); ?>" 
+                               placeholder="Enter lecturer name...">
+                    </div>
+                    <div class="col-md-4 d-flex align-items-end">
+                        <div class="d-flex gap-2">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-search me-1"></i>Filter
+                            </button>
+                            <a href="lecturer_courses.php" class="btn btn-outline-secondary">
+                                <i class="fas fa-times me-1"></i>Clear
+                            </a>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+
         <div class="table-responsive m-3">
             <table class="table">
                 <thead>
                     <tr>
                         <th>Lecturer</th>
+                        <th>Department</th>
                         <th>Course</th>
                         <th>Actions</th>
                     </tr>
@@ -99,6 +176,7 @@ $mappings = $conn->query("SELECT l.id as lecturer_id, l.name AS lecturer_name,
                         <?php while ($m = $mappings->fetch_assoc()): ?>
                             <tr>
                                 <td><?php echo htmlspecialchars($m['lecturer_name'] ?? ''); ?></td>
+                                <td><?php echo htmlspecialchars($m['department_name'] ?? 'N/A'); ?></td>
                                 <td><?php echo htmlspecialchars($m['course_codes'] ?? ''); ?></td>
                                 <td>
                                     <button class="btn btn-sm btn-outline-primary" onclick="editMapping(<?php echo $m['lecturer_id']; ?>)">
@@ -109,9 +187,9 @@ $mappings = $conn->query("SELECT l.id as lecturer_id, l.name AS lecturer_name,
                         <?php endwhile; ?>
                     <?php else: ?>
                         <tr>
-                            <td colspan="3" class="empty-state">
+                            <td colspan="4" class="empty-state">
                                 <i class="fas fa-info-circle"></i>
-                                <p>No mappings yet. Add some above.</p>
+                                <p>No mappings found. <?php if (!empty($search_name) || $selected_department > 0): ?>Try adjusting your filters.<?php else: ?>Add some mappings above.<?php endif; ?></p>
                             </td>
                         </tr>
                     <?php endif; ?>

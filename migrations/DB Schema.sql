@@ -53,7 +53,6 @@ CREATE TABLE `courses` (
   `code` varchar(20) NOT NULL,
   `name` varchar(200) NOT NULL,
   `department_id` int DEFAULT NULL,
-  `credits` int NOT NULL,
   `hours_per_week` int NOT NULL DEFAULT '3',
   `is_active` tinyint(1) DEFAULT '1',
   `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,

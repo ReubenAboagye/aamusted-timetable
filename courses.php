@@ -34,16 +34,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($_POST['action'] === 'add') {
         $course_name = $conn->real_escape_string($_POST['course_name']);
         $course_code = $conn->real_escape_string($_POST['course_code']);
-        $credits = $conn->real_escape_string($_POST['credits']);
-        $hours_per_week = $conn->real_escape_string($_POST['hours_per_week']);
-        $level = $conn->real_escape_string($_POST['level']);
-        $preferred_room_type = $conn->real_escape_string($_POST['preferred_room_type']);
+        $department_id = isset($_POST['department_id']) ? (int)$_POST['department_id'] : null;
+        $hours_per_week = isset($_POST['hours_per_week']) ? (int)$_POST['hours_per_week'] : 3;
         $is_active = isset($_POST['is_active']) ? 1 : 0;
         
-        // Global courses: no stream_id required
-        $sql = "INSERT INTO courses (name, code, credits, hours_per_week, level, preferred_room_type, is_active) VALUES (?, ?, ?, ?, ?, ?, ?)";
+        $sql = "INSERT INTO courses (name, code, department_id, hours_per_week, is_active) VALUES (?, ?, ?, ?, ?)";
         $stmt = $conn->prepare($sql);
-        $stmt->bind_param("ssiiisi", $course_name, $course_code, $credits, $hours_per_week, $level, $preferred_room_type, $is_active);
+        $stmt->bind_param("ssiii", $course_name, $course_code, $department_id, $hours_per_week, $is_active);
         
         if ($stmt->execute()) {
             $stmt->close();
@@ -64,12 +61,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $check_stmt = $conn->prepare($check_sql);
 
             foreach ($import_data as $row) {
-                $course_name = isset($row['course_name']) ? $conn->real_escape_string($row['course_name']) : '';
-                $course_code = isset($row['course_code']) ? $conn->real_escape_string($row['course_code']) : '';
-                $credits = isset($row['credits']) ? (int)$row['credits'] : 3;
+                $course_name = isset($row['name']) ? $conn->real_escape_string($row['name']) : '';
+                $course_code = isset($row['code']) ? $conn->real_escape_string($row['code']) : '';
+                $department_id = isset($row['department_id']) ? (int)$row['department_id'] : null;
                 $hours_per_week = isset($row['hours_per_week']) ? (int)$row['hours_per_week'] : 3;
-                $level = isset($row['level']) ? (int)$row['level'] : 100;
-                $preferred_room_type = isset($row['preferred_room_type']) ? $conn->real_escape_string($row['preferred_room_type']) : 'classroom';
                 $is_active = isset($row['is_active']) ? (int)$row['is_active'] : 1;
 
                 if ($course_name === '' || $course_code === '') {
@@ -88,10 +83,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
 
-                $sql = "INSERT INTO courses (name, code, credits, hours_per_week, level, preferred_room_type, is_active) VALUES (?, ?, ?, ?, ?, ?, ?)";
+                $sql = "INSERT INTO courses (name, code, department_id, hours_per_week, is_active) VALUES (?, ?, ?, ?, ?)";
                 $stmt = $conn->prepare($sql);
                 if (!$stmt) { $error_count++; continue; }
-                $stmt->bind_param("ssiiisi", $course_name, $course_code, $credits, $hours_per_week, $level, $preferred_room_type, $is_active);
+                $stmt->bind_param("ssiii", $course_name, $course_code, $department_id, $hours_per_week, $is_active);
                 if ($stmt->execute()) {
                     $success_count++;
                 } else {
@@ -275,6 +270,7 @@ $stats = $stats_result ? $stats_result->fetch_assoc() : ['total_courses' => 0, '
                                         <span class="badge bg-warning text-dark">Unassigned</span>
                                     <?php endif; ?>
                                 </td>
+
                                 <td><span class="badge bg-info"><?php echo htmlspecialchars($row['hours_per_week'] ?? 'N/A'); ?> hrs/week</span></td>
                                 <td>
                                     <button class="btn btn-sm btn-outline-primary me-1" onclick="editCourse(<?php echo $row['id']; ?>)">
@@ -336,23 +332,22 @@ $stats = $stats_result ? $stats_result->fetch_assoc() : ['total_courses' => 0, '
                     <div class="row">
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <!-- Department field removed: courses are not department-scoped -->
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label for="level" class="form-label">Level *</label>
-                                <select class="form-select" id="level" name="level" required>
-                                    <option value="">Select Level</option>
-                                    <option value="100">100 </option>
-                                    <option value="200">200 </option>
-                                    <option value="300">300 </option>
-                                    <option value="400">400 </option>
-                                    <option value="500">500 </option>
-                                    <option value="600">600 </option>
+                                <label for="department_id" class="form-label">Department (Optional)</label>
+                                <?php if ($dept_result && $dept_result->num_rows > 0): ?>
+                                <select class="form-select" id="department_id" name="department_id">
+                                    <option value="">No Department</option>
+                                    <?php while ($dept = $dept_result->fetch_assoc()): ?>
+                                        <option value="<?php echo $dept['id']; ?>"><?php echo htmlspecialchars($dept['name']); ?></option>
+                                    <?php endwhile; ?>
                                 </select>
+                                <?php else: ?>
+                                <div class="alert alert-warning mb-0">
+                                    No departments found. <a href="department.php" class="btn btn-sm btn-primary ms-2">Create Department</a>
+                                </div>
+                                <?php endif; ?>
                             </div>
                         </div>
+
                     </div>
                     
                     <div class="row">
@@ -370,19 +365,6 @@ $stats = $stats_result ? $stats_result->fetch_assoc() : ['total_courses' => 0, '
                                 </select>
                             </div>
                         </div>
-                    </div>
-                    
-                    <div class="mb-3">
-                        <label for="preferred_room_type" class="form-label">Preferred Room Type *</label>
-                        <select class="form-select" id="preferred_room_type" name="preferred_room_type" required>
-                            <option value="">Select Room Type</option>
-                            <option value="classroom">Classroom</option>
-                            <option value="lecture_hall">Lecture Hall</option>
-                            <option value="laboratory">Laboratory</option>
-                            <option value="computer_lab">Computer Lab</option>
-                            <option value="seminar_room">Seminar Room</option>
-                            <option value="auditorium">Auditorium</option>
-                        </select>
                     </div>
                     
                     <div class="mb-3">
@@ -422,7 +404,7 @@ $stats = $stats_result ? $stats_result->fetch_assoc() : ['total_courses' => 0, '
                     <div class="upload-area" id="uploadArea" style="border: 2px dashed #ccc; border-radius: 8px; padding: 40px; text-align: center; background: #f8f9fa; cursor: pointer;">
                         <i class="fas fa-cloud-upload-alt fa-2x text-muted mb-3"></i>
                         <p class="mb-2">Drop CSV file here or <strong>click to browse</strong></p>
-                        <small class="text-muted">Supported format: CSV (headers: name,code,department_id,hours_per_week )</small>
+                        <small class="text-muted">Supported format: CSV (headers: name,code,department_id,hours_per_week,is_active)</small>
                     </div>
                     <input type="file" class="form-control d-none" id="csvFile" accept=",.csv">
                 </div>
@@ -433,10 +415,11 @@ $stats = $stats_result ? $stats_result->fetch_assoc() : ['total_courses' => 0, '
                         <table class="table table-sm" id="previewTable">
                             <thead>
                                 <tr>
-                                    <th>name</th>
-                                    <th>code</th>
-                                    <th>department_id</th>
-                                    <th>hours_per_week</th>
+                                    <th>Name</th>
+                                    <th>Code</th>
+                                    <th>Department ID</th>
+                                    <th>Hours/Week</th>
+                                    <th>Status</th>
                                 </tr>
                             </thead>
                             <tbody id="previewBody"></tbody>
@@ -518,27 +501,23 @@ function validateCoursesData(data) {
             name: row['name'] || row['Name'] || row.course_name || row.courseName || '',
             code: row['code'] || row['Code'] || row.course_code || row.courseCode || '',
             department_id: row['department_id'] || row['Department_ID'] || row.department || row.Department || '',
-            credits: row.credits || row.Credits || '3',
             hours_per_week: row['hours_per_week'] || row['Hours/Week'] || row.hours_per_week || row.hoursPerWeek || '3',
-            level: row.level || row.Level || '100',
-            preferred_room_type: row.preferred_room_type || row.preferredRoomType || row.preferred_room_type || 'classroom',
             is_active: (row.is_active || row.isActive || '1') === '1' ? '1' : '0'
         };
         validated.valid = true;
         validated.errors = [];
-        // Required fields: name, code, department_id, hours_per_week
-        if (!validated.name.trim()) { validated.valid = false; validated.errors.push('name required'); }
-        if (!validated.code.trim()) { validated.valid = false; validated.errors.push('code required'); }
-        if (!validated.department_id.toString().trim()) { validated.valid = false; validated.errors.push('department_id required'); }
-        if (!validated.hours_per_week.toString().trim()) { validated.valid = false; validated.errors.push('hours_per_week required'); }
+        // Required fields: name, code, hours_per_week
+        if (!validated.name.trim()) { validated.valid = false; validated.errors.push('Name required'); }
+        if (!validated.code.trim()) { validated.valid = false; validated.errors.push('Code required'); }
+        if (!validated.hours_per_week.toString().trim()) { validated.valid = false; validated.errors.push('Hours per week required'); }
 
         // If department_id provided, ensure it matches one of the known departments
         const deptIdKey = validated.department_id.toString().trim();
-        if (deptIdKey) {
+        if (deptIdKey && deptIdKey !== 'null' && deptIdKey !== '') {
             const found = departmentsList.some(function(d){ return d.id.toString() === deptIdKey; });
             if (!found) {
                 validated.valid = false;
-                validated.errors.push('department_id not found');
+                validated.errors.push('Department ID not found');
             }
         }
 
@@ -578,8 +557,9 @@ function showPreviewCourses() {
         tr.innerHTML = `
             <td>${row.name}</td>
             <td>${row.code}</td>
-            <td>${row.department_id || ''}</td>
+            <td>${row.department_id || 'N/A'}</td>
             <td>${row.hours_per_week}</td>
+            <td>${validationHtml}</td>
         `;
         tbody.appendChild(tr);
     });

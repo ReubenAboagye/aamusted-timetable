@@ -116,6 +116,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     continue;
                 }
 
+                // Verify department exists before inserting
+                $dept_check = $conn->prepare("SELECT id FROM departments WHERE id = ?");
+                if ($dept_check) {
+                    $dept_check->bind_param("i", $department_id);
+                    $dept_check->execute();
+                    $dept_res = $dept_check->get_result();
+                    if (!$dept_res || $dept_res->num_rows === 0) {
+                        $error_count++;
+                        $dept_check->close();
+                        continue;
+                    }
+                    $dept_check->close();
+                }
+
                 // Skip if lecturer with same name and department exists
                 if ($check_stmt) {
                     $check_stmt->bind_param("si", $name, $department_id);
