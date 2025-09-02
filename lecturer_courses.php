@@ -127,7 +127,7 @@ if (!empty($params)) {
         <!-- Filter Section -->
         <div class="card m-3">
             <div class="card-body">
-                <form method="GET" action="lecturer_courses.php" class="row g-3">
+                <form method="GET" action="lecturer_courses.php" class="row g-3" id="filterForm">
                     <div class="col-md-4">
                         <label for="department_id" class="form-label">Filter by Department</label>
                         <select class="form-select" id="department_id" name="department_id">
@@ -149,9 +149,6 @@ if (!empty($params)) {
                     </div>
                     <div class="col-md-4 d-flex align-items-end">
                         <div class="d-flex gap-2">
-                            <button type="submit" class="btn btn-primary">
-                                <i class="fas fa-search me-1"></i>Filter
-                            </button>
                             <a href="lecturer_courses.php" class="btn btn-outline-secondary">
                                 <i class="fas fa-times me-1"></i>Clear
                             </a>
@@ -404,6 +401,22 @@ document.getElementById('courseSearch').addEventListener('input', function(e) {
             item.style.display = 'none';
         }
     });
+});
+
+// Auto-filter functionality
+let searchTimeout;
+
+// Department dropdown auto-filter
+document.getElementById('department_id').addEventListener('change', function() {
+    document.getElementById('filterForm').submit();
+});
+
+// Name search auto-filter with debouncing
+document.getElementById('search_name').addEventListener('input', function(e) {
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(() => {
+        document.getElementById('filterForm').submit();
+    }, 500); // Wait 500ms after user stops typing
 });
 </script>
 
