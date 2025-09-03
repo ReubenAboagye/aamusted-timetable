@@ -6,6 +6,10 @@ include 'includes/sidebar.php';
 // Database connection
 include 'connect.php';
 
+// Include stream manager early
+include 'includes/stream_manager.php';
+$streamManager = getStreamManager();
+
 // Check whether the `departments` table has a `short_name` column (some DBs may lack it)
 $dept_short_exists = false;
 $col_check = $conn->query("SHOW COLUMNS FROM departments LIKE 'short_name'");
@@ -17,6 +21,101 @@ if ($col_check && $col_check->num_rows > 0) {
 $streams_sql = "SELECT id, name, code FROM streams WHERE is_active = 1 ORDER BY name";
 $streams_result = $conn->query($streams_sql);
 
+// Check for query errors
+if (!$streams_result) {
+    error_log("Streams query failed: " . $conn->error);
+    // Try without WHERE clause to see if table exists
+    $fallback_sql = "SELECT id, name, code FROM streams ORDER BY name";
+    $streams_result = $conn->query($fallback_sql);
+    if (!$streams_result) {
+        error_log("Fallback streams query also failed: " . $conn->error);
+        $streams_result = null;
+    }
+}
+
+// Debug: Show what streams are being fetched
+if (isset($_GET['debug_streams'])) {
+    echo "<div class='alert alert-info'>";
+    echo "<strong>Streams Debug:</strong><br>";
+    echo "<strong>Query:</strong> " . htmlspecialchars($streams_sql) . "<br>";
+    echo "<strong>Result:</strong> " . ($streams_result ? $streams_result->num_rows : 'Query failed') . "<br>";
+    if ($streams_result && $streams_result->num_rows > 0) {
+        echo "<strong>Available Streams:</strong><br>";
+        $streams_result->data_seek(0);
+        while ($stream = $streams_result->fetch_assoc()) {
+            echo "- ID: " . $stream['id'] . ", Name: " . htmlspecialchars($stream['name']) . ", Code: " . htmlspecialchars($stream['code']) . "<br>";
+        }
+    } else {
+        echo "<strong>No streams found or query failed</strong><br>";
+        // Try to show what's actually in the table
+        $all_streams_debug = $conn->query("SELECT id, name, code, is_active FROM streams ORDER BY id");
+        if ($all_streams_debug && $all_streams_debug->num_rows > 0) {
+            echo "<strong>All streams in table (including inactive):</strong><br>";
+            while ($stream = $all_streams_debug->fetch_assoc()) {
+                $status = $stream['is_active'] ? 'Active' : 'Inactive';
+                echo "- ID: " . $stream['id'] . ", Name: " . htmlspecialchars($stream['name']) . ", Code: " . htmlspecialchars($stream['code']) . ", Status: " . $status . "<br>";
+            }
+        } else {
+            echo "<strong>No streams found in table at all</strong><br>";
+        }
+    }
+    echo "</div>";
+}
+
+// Additional debug info for dropdown streams
+if (isset($_GET['debug_dropdown'])) {
+    $dropdown_test_sql = "SELECT id, name, code FROM streams WHERE is_active = 1 ORDER BY name";
+    $dropdown_test_result = $conn->query($dropdown_test_sql);
+    echo "<div class='alert alert-warning'>";
+    echo "<strong>Dropdown Streams Debug:</strong><br>";
+    echo "<strong>Query:</strong> " . htmlspecialchars($dropdown_test_sql) . "<br>";
+    echo "<strong>Result:</strong> " . ($dropdown_test_result ? $dropdown_test_result->num_rows : 'Query failed') . "<br>";
+    if ($dropdown_test_result && $dropdown_test_result->num_rows > 0) {
+        echo "<strong>Dropdown Streams:</strong><br>";
+        while ($stream = $dropdown_test_result->fetch_assoc()) {
+            echo "- ID: " . $stream['id'] . ", Name: " . htmlspecialchars($stream['name']) . ", Code: " . htmlspecialchars($stream['code']) . "<br>";
+        }
+    }
+    echo "</div>";
+}
+
+// Debug: Check if streams table exists and has data
+if (!$streams_result) {
+    // If streams table doesn't exist, create it with default data
+    $create_streams_sql = "
+    CREATE TABLE IF NOT EXISTS `streams` (
+        `id` int NOT NULL AUTO_INCREMENT,
+        `name` varchar(50) NOT NULL,
+        `code` varchar(20) NOT NULL,
+        `description` text,
+        `active_days` json DEFAULT NULL,
+        `period_start` time DEFAULT NULL,
+        `period_end` time DEFAULT NULL,
+        `break_start` time DEFAULT NULL,
+        `break_end` time DEFAULT NULL,
+        `is_active` tinyint(1) DEFAULT '1',
+        `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+        `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (`id`),
+        UNIQUE KEY `name` (`name`),
+        UNIQUE KEY `code` (`code`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+    ";
+    $conn->query($create_streams_sql);
+    
+    // Insert default streams
+    $insert_streams_sql = "
+    INSERT IGNORE INTO `streams` (`id`, `name`, `code`, `description`, `is_active`) VALUES
+    (1, 'Regular', 'REG', 'Regular weekday classes', 1),
+    (2, 'Weekend', 'WKD', 'Weekend classes', 1),
+    (3, 'Evening', 'EVE', 'Evening classes', 1);
+    ";
+    $conn->query($insert_streams_sql);
+    
+    // Try fetching streams again
+    $streams_result = $conn->query($streams_sql);
+}
+
 // Handle form submission for adding new class
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? null;
@@ -25,7 +124,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $program_id = $conn->real_escape_string($_POST['program_code'] ?? '');
         $level_id = $conn->real_escape_string($_POST['level_id'] ?? '');
         $total_capacity = intval($_POST['total_capacity'] ?? 0);
-        $stream_id = isset($_POST['stream_id']) ? $conn->real_escape_string($_POST['stream_id']) : 1;
+        $stream_id = isset($_POST['stream_id']) ? $conn->real_escape_string($_POST['stream_id']) : $streamManager->getCurrentStreamId();
         $is_active = 1;
 
         // Fetch program and its department short code if available
@@ -49,7 +148,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $level = $lvl_res->fetch_assoc();
         $lvl_stmt->close();
 
-        if ($program && $level) {
+        // Validate stream
+        $stream_stmt = $conn->prepare("SELECT id, name FROM streams WHERE id = ? AND is_active = 1");
+        $stream_stmt->bind_param("i", $stream_id);
+        $stream_stmt->execute();
+        $stream_res = $stream_stmt->get_result();
+        $stream = $stream_res->fetch_assoc();
+        $stream_stmt->close();
+
+        if ($program && $level && $stream) {
             // Create a single parent class record and store total_capacity and divisions_count
             $divisions_count = max(1, (int)ceil($total_capacity / 100));
 
@@ -104,7 +211,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         }
                     }
 
-                    $msg = "Successfully created class with {$divisions_count} classes.";
+                    $msg = "Successfully created class '{$class_name}' in {$stream['name']} stream with {$divisions_count} divisions.";
                     if ($createdDivisions > 0) $msg .= " Created {$createdDivisions} class records.";
                     redirect_with_flash('classes.php', 'success', $msg);
                 } else {
@@ -115,7 +222,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $error_message = "Failed to prepare class insert: " . $conn->error;
             }
         } else {
-            $error_message = "Invalid program or level selected.";
+            $error_message = "Invalid program, level, or stream selected.";
         }
     } elseif ($action === 'delete' && isset($_POST['id'])) {
         $id = $conn->real_escape_string($_POST['id']);
@@ -131,37 +238,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $stmt->close();
     
-    // Edit class (update representative row: name, total_capacity, divisions_count)
+    // Edit class (update representative row: name, total_capacity, divisions_count, stream_id)
     } elseif ($action === 'edit' && isset($_POST['id'])) {
         $id = (int)($_POST['id'] ?? 0);
         $name = isset($_POST['name']) ? $conn->real_escape_string(trim($_POST['name'])) : '';
         $total_capacity = isset($_POST['total_capacity']) ? (int)$_POST['total_capacity'] : 0;
         $divisions_count = isset($_POST['divisions_count']) ? max(1, (int)$_POST['divisions_count']) : 1;
+        $stream_id = isset($_POST['stream_id']) ? (int)$_POST['stream_id'] : $streamManager->getCurrentStreamId();
 
         if ($id <= 0) {
             $error_message = 'Invalid class id.';
         } else {
-            $update_sql = "UPDATE classes SET name = ?, total_capacity = ?, divisions_count = ? WHERE id = ?";
-            $u_stmt = $conn->prepare($update_sql);
-            if ($u_stmt) {
-                $u_stmt->bind_param('siii', $name, $total_capacity, $divisions_count, $id);
-                if ($u_stmt->execute()) {
-                    $u_stmt->close();
-                    redirect_with_flash('classes.php', 'success', 'Class updated successfully!');
-                } else {
-                    $error_message = 'Error updating class: ' . $u_stmt->error;
-                    $u_stmt->close();
-                }
+            // Validate stream exists
+            $stream_check = $conn->prepare("SELECT id FROM streams WHERE id = ? AND is_active = 1");
+            $stream_check->bind_param("i", $stream_id);
+            $stream_check->execute();
+            $stream_result = $stream_check->get_result();
+            
+            if ($stream_result->num_rows === 0) {
+                $error_message = 'Invalid stream selected.';
+                $stream_check->close();
             } else {
-                $error_message = 'Error preparing update: ' . $conn->error;
+                $stream_check->close();
+                $update_sql = "UPDATE classes SET name = ?, total_capacity = ?, divisions_count = ?, stream_id = ? WHERE id = ?";
+                $u_stmt = $conn->prepare($update_sql);
+                if ($u_stmt) {
+                    $u_stmt->bind_param('siiii', $name, $total_capacity, $divisions_count, $stream_id, $id);
+                    if ($u_stmt->execute()) {
+                        $u_stmt->close();
+                        redirect_with_flash('classes.php', 'success', 'Class updated successfully!');
+                    } else {
+                        $error_message = 'Error updating class: ' . $u_stmt->error;
+                        $u_stmt->close();
+                    }
+                } else {
+                    $error_message = 'Error preparing update: ' . $conn->error;
+                }
             }
         }
     }
 }
-
-// Include stream manager
-include 'includes/stream_manager.php';
-$streamManager = getStreamManager();
 
 // Fetch classes with related program, level and stream information
 // Detect commonly used foreign keys on `classes` and join accordingly
@@ -226,14 +342,9 @@ if ($dept_short_exists && !$class_has_program) {
     $select_extra[] = $dept_short_exists ? "d.short_name as department_short" : "SUBSTRING(d.name,1,3) as department_short";
 }
 
-// Build grouped select to show one row per program+level and count divisions
-$divisions_expr = $has_divisions_col ? "SUM(c.divisions_count) as divisions" : "COUNT(*) as divisions";
-$total_students_expr = $has_total_capacity ? "SUM(c.total_capacity) as total_students" : "0 as total_students";
-// include representative total_capacity for editing the representative class row
-$rep_total_capacity_expr = $has_total_capacity ? "MIN(c.total_capacity) as total_capacity" : "0 as total_capacity";
-$select_clause = "MIN(c.id) as id, MIN(c.name) as name, " . $divisions_expr . ", " . $total_students_expr . ", " . $rep_total_capacity_expr . ", c.program_id, c.level_id";
+// Build select to show individual class records
+$select_clause = "c.id, c.name, c.divisions_count, c.total_capacity, c.program_id, c.level_id";
 if ($class_has_stream) {
-    // include stream in select/grouping when classes are stream-scoped
     $select_clause .= ", c.stream_id";
 }
 if (!empty($select_extra)) {
@@ -241,14 +352,37 @@ if (!empty($select_extra)) {
 }
 
 $where_clause = "WHERE c.is_active = 1";
-if ($class_has_stream) {
-    $where_clause .= " AND c.stream_id = " . $streamManager->getCurrentStreamId();
-}
+// Temporarily disable stream filtering to debug
+// if ($class_has_stream) {
+//     $where_clause .= " AND c.stream_id = " . $streamManager->getCurrentStreamId();
+// }
 
-$group_by = ["c.program_id", "c.level_id"];
-if ($class_has_stream) $group_by[] = "c.stream_id";
-$sql = "SELECT " . $select_clause . "\n        " . $from_clause . "\n        " . $where_clause . "\n        GROUP BY " . implode(', ', $group_by) . "\n        ORDER BY name";
+$sql = "SELECT " . $select_clause . "\n        " . $from_clause . "\n        " . $where_clause . "\n        ORDER BY c.name";
 $result = $conn->query($sql);
+
+// Debug: Show the SQL query and result count
+if (isset($_GET['debug'])) {
+    echo "<div class='alert alert-info'>";
+    echo "<strong>Debug SQL:</strong><br>";
+    echo "<pre>" . htmlspecialchars($sql) . "</pre>";
+    echo "<strong>Result count:</strong> " . ($result ? $result->num_rows : 'Query failed');
+    echo "</div>";
+    
+    // Debug streams data
+    echo "<div class='alert alert-warning'>";
+    echo "<strong>Streams Debug:</strong><br>";
+    echo "<strong>Streams Query:</strong> " . htmlspecialchars($streams_sql) . "<br>";
+    echo "<strong>Streams Result:</strong> " . ($streams_result ? $streams_result->num_rows : 'Query failed') . "<br>";
+    echo "<strong>Current Stream ID:</strong> " . $streamManager->getCurrentStreamId() . "<br>";
+    if ($streams_result && $streams_result->num_rows > 0) {
+        echo "<strong>Available Streams:</strong><br>";
+        $streams_result->data_seek(0);
+        while ($stream = $streams_result->fetch_assoc()) {
+            echo "- ID: " . $stream['id'] . ", Name: " . htmlspecialchars($stream['name']) . ", Code: " . htmlspecialchars($stream['code']) . "<br>";
+        }
+    }
+    echo "</div>";
+}
 
 $dept_select_cols = $dept_short_exists ? "id, name, short_name" : "id, name";
 // Departments are global; do not filter by stream here
@@ -323,18 +457,18 @@ $level_result = $conn->query($level_sql);
                                 </td>
                                 <td>
                                     <div class="d-flex align-items-center gap-2">
-                                        <span class="badge bg-dark"><?php echo (int)($row['total_students'] ?? $row['total_capacity'] ?? 0); ?> students</span>
-                                        <span class="badge bg-secondary"><?php echo (int)($row['divisions'] ?? $row['divisions_count'] ?? 1); ?> classes</span>
+                                        <span class="badge bg-dark"><?php echo (int)($row['total_capacity'] ?? 0); ?> students</span>
+                                        <span class="badge bg-secondary"><?php echo (int)($row['divisions_count'] ?? 1); ?> classes</span>
                                     </div>
                                 </td>
                                 <td>
-                                    <button class="btn btn-sm btn-outline-secondary me-1" onclick="showDivisions('<?php echo htmlspecialchars(addslashes($deptCode)); ?>', '<?php echo htmlspecialchars(addslashes($levelNumRow)); ?>', <?php echo (int)($row['divisions'] ?? $row['divisions_count'] ?? 1); ?>)">
+                                    <button class="btn btn-sm btn-outline-secondary me-1" onclick="showDivisions('<?php echo htmlspecialchars(addslashes($deptCode)); ?>', '<?php echo htmlspecialchars(addslashes($levelNumRow)); ?>', <?php echo (int)($row['divisions_count'] ?? 1); ?>)">
                                         <i class="fas fa-list"></i>
                                     </button>
                                     <button class="btn btn-sm btn-outline-primary me-1" onclick="editClass(this)" 
                                             data-id="<?php echo (int)$row['id']; ?>" 
                                             data-name="<?php echo htmlspecialchars($row['name'] ?? '', ENT_QUOTES); ?>" 
-                                            data-divisions="<?php echo (int)($row['divisions'] ?? $row['divisions_count'] ?? 1); ?>" 
+                                            data-divisions="<?php echo (int)($row['divisions_count'] ?? 1); ?>" 
                                             data-total="<?php echo (int)($row['total_capacity'] ?? 0); ?>" 
                                             data-stream="<?php echo (int)($row['stream_id'] ?? 0); ?>">
                                         <i class="fas fa-edit"></i>
@@ -378,11 +512,11 @@ $level_result = $conn->query($level_sql);
                     
                     <div class="alert alert-info">
                         <i class="fas fa-info-circle me-2"></i>
-                        <strong>Auto-Class Generation:</strong> Select the program, level, and enter the number of students. The system will create a single class record and split it into divisions (max 100 students per division). You can preview the divisions below.
+                        <strong>Auto-Class Generation:</strong> Select the program, level, stream, and enter the number of students. The system will create a single class record and split it into divisions (max 100 students per division). You can preview the divisions below.
                     </div>
                     
                     <div class="row">
-                        <div class="col-md-6">
+                        <div class="col-md-4">
                             <div class="mb-3">
                                 <label for="program_code" class="form-label">Program Code *</label>
                                 <select class="form-select" id="program_code" name="program_code" required>
@@ -408,7 +542,7 @@ $level_result = $conn->query($level_sql);
                                 </select>
                             </div>
                         </div>
-                        <div class="col-md-6">
+                        <div class="col-md-4">
                             <div class="mb-3">
                                 <label for="level_id" class="form-label">Level *</label>
                                 <select class="form-select" id="level_id" name="level_id" required>
@@ -419,6 +553,38 @@ $level_result = $conn->query($level_sql);
                                         <?php endwhile; ?>
                                     <?php endif; ?>
                                 </select>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label for="stream_id" class="form-label">Stream *</label>
+                                <select class="form-select" id="stream_id" name="stream_id" required>
+                                    <option value="">Select Stream</option>
+                                    <?php 
+                                    // Fetch streams fresh for the dropdown to ensure we have the data
+                                    // Temporarily show ALL streams (both active and inactive) for debugging
+                                    $dropdown_streams_sql = "SELECT id, name, code, is_active FROM streams ORDER BY name";
+                                    $dropdown_streams_result = $conn->query($dropdown_streams_sql);
+                                    if ($dropdown_streams_result && $dropdown_streams_result->num_rows > 0): ?>
+                                        <?php while ($stream = $dropdown_streams_result->fetch_assoc()): ?>
+                                            <option value="<?php echo $stream['id']; ?>" 
+                                                    <?php echo $stream['id'] == $streamManager->getCurrentStreamId() ? 'selected' : ''; ?>>
+                                                <?php echo htmlspecialchars($stream['name']); ?>
+                                                <?php echo $stream['is_active'] ? ' (Active)' : ' (Inactive)'; ?>
+                                            </option>
+                                        <?php endwhile; ?>
+                                    <?php else: ?>
+                                        <option value="">No streams available</option>
+                                    <?php endif; ?>
+                                </select>
+                                <?php if (isset($_GET['debug_streams'])): ?>
+                                    <small class="text-muted">Debug: Streams result has <?php echo $dropdown_streams_result ? $dropdown_streams_result->num_rows : 0; ?> rows</small>
+                                <?php endif; ?>
+                                <?php if (!$dropdown_streams_result || $dropdown_streams_result->num_rows == 0): ?>
+                                    <small class="text-danger">No streams available. Please create streams first in the Streams Management page.</small>
+                                <?php else: ?>
+                                    <small class="text-info">Showing all streams (active and inactive) for debugging. Inactive streams are marked with "(Inactive)".</small>
+                                <?php endif; ?>
                             </div>
                         </div>
                     </div>
@@ -506,6 +672,24 @@ function editClass(id) {
                                 <label class="form-label">Classes</label>
                                 <input type="number" name="divisions_count" id="edit_divisions_count" class="form-control" value="${divisions}" min="1">
                             </div>
+                            <div class="mb-3">
+                                <label class="form-label">Stream</label>
+                                <select name="stream_id" id="edit_stream_id" class="form-select" required>
+                                    <option value="">Select Stream</option>
+                                    <?php 
+                                    // Fetch streams fresh for the edit dropdown
+                                    $edit_streams_sql = "SELECT id, name, code FROM streams WHERE is_active = 1 ORDER BY name";
+                                    $edit_streams_result = $conn->query($edit_streams_sql);
+                                    if ($edit_streams_result && $edit_streams_result->num_rows > 0): ?>
+                                        <?php while ($stream = $edit_streams_result->fetch_assoc()): ?>
+                                            <option value="<?php echo $stream['id']; ?>" 
+                                                    data-stream-id="<?php echo $stream['id']; ?>">
+                                                <?php echo htmlspecialchars($stream['name']); ?>
+                                            </option>
+                                        <?php endwhile; ?>
+                                    <?php endif; ?>
+                                </select>
+                            </div>
                         </div>
                         <div class="modal-footer">
                             <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
@@ -523,6 +707,12 @@ function editClass(id) {
         var div = document.createElement('div');
         div.innerHTML = modalHtml;
         document.body.appendChild(div.firstElementChild);
+
+        // Set the selected stream in the dropdown
+        var streamSelect = document.getElementById('edit_stream_id');
+        if (streamSelect && stream) {
+            streamSelect.value = stream;
+        }
 
         // Handle form submit via AJAX fallback (POST redirect otherwise)
         var form = document.getElementById('editClassForm');
