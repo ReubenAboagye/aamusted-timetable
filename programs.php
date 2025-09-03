@@ -13,6 +13,211 @@ try {
         throw new Exception("Database connection failed");
     }
 
+    /**
+     * Enhanced bulk import function with comprehensive error handling and conflict resolution
+     */
+    function perform_bulk_import($conn, $import_data) {
+        $result = [
+            'success_count' => 0,
+            'ignored_count' => 0,
+            'error_count' => 0,
+            'errors' => [],
+            'warnings' => [],
+            'details' => []
+        ];
+
+        try {
+            // Start transaction for data integrity
+            $conn->begin_transaction();
+
+            // Prepare all statements for better performance
+            $check_name_dept_stmt = $conn->prepare("SELECT id, name, department_id FROM programs WHERE name = ? AND department_id = ?");
+            $check_code_stmt = $conn->prepare("SELECT id, code FROM programs WHERE code = ?");
+            $check_dept_stmt = $conn->prepare("SELECT id, name FROM departments WHERE id = ? AND is_active = 1");
+            $insert_stmt = $conn->prepare("INSERT INTO programs (name, department_id, code, duration_years, is_active) VALUES (?, ?, ?, ?, ?)");
+
+            if (!$check_name_dept_stmt || !$check_code_stmt || !$check_dept_stmt || !$insert_stmt) {
+                throw new Exception("Failed to prepare database statements");
+            }
+
+            $row_number = 0;
+            foreach ($import_data as $row) {
+                $row_number++;
+                $row_result = process_import_row($conn, $row, $row_number, $check_name_dept_stmt, $check_code_stmt, $check_dept_stmt, $insert_stmt);
+                
+                // Aggregate results
+                $result['success_count'] += $row_result['success'] ? 1 : 0;
+                $result['ignored_count'] += $row_result['ignored'] ? 1 : 0;
+                $result['error_count'] += $row_result['error'] ? 1 : 0;
+                
+                if ($row_result['error']) {
+                    $result['errors'][] = "Row $row_number: " . $row_result['message'];
+                }
+                if ($row_result['warning']) {
+                    $result['warnings'][] = "Row $row_number: " . $row_result['message'];
+                }
+                if ($row_result['success']) {
+                    $result['details'][] = "Row $row_number: Successfully imported '{$row_result['name']}'";
+                }
+            }
+
+            // Commit transaction if everything went well
+            $conn->commit();
+
+        } catch (Exception $e) {
+            // Rollback on any error
+            $conn->rollback();
+            $result['errors'][] = "Import failed: " . $e->getMessage();
+            error_log("Bulk import error: " . $e->getMessage());
+        } finally {
+            // Clean up statements
+            if (isset($check_name_dept_stmt)) $check_name_dept_stmt->close();
+            if (isset($check_code_stmt)) $check_code_stmt->close();
+            if (isset($check_dept_stmt)) $check_dept_stmt->close();
+            if (isset($insert_stmt)) $insert_stmt->close();
+        }
+
+        return $result;
+    }
+
+    /**
+     * Process a single import row with comprehensive validation and conflict resolution
+     */
+    function process_import_row($conn, $row, $row_number, $check_name_dept_stmt, $check_code_stmt, $check_dept_stmt, $insert_stmt) {
+        $result = [
+            'success' => false,
+            'ignored' => false,
+            'error' => false,
+            'warning' => false,
+            'message' => '',
+            'name' => ''
+        ];
+
+        try {
+            // Extract and validate data
+            $name = isset($row['name']) ? trim($row['name']) : '';
+            $department_id = isset($row['department_id']) ? (int)$row['department_id'] : 0;
+            $code = isset($row['code']) ? trim($row['code']) : '';
+            $duration = isset($row['duration']) ? (int)$row['duration'] : 4;
+            $is_active = isset($row['is_active']) ? ((int)$row['is_active'] === 0 ? 0 : 1) : 1;
+            $skip = isset($row['skip']) ? (bool)$row['skip'] : false;
+
+            $result['name'] = $name;
+
+            // Basic validation
+            if (empty($name)) {
+                $result['error'] = true;
+                $result['message'] = 'Program name is required';
+                return $result;
+            }
+
+            if ($department_id <= 0) {
+                $result['error'] = true;
+                $result['message'] = 'Valid department ID is required';
+                return $result;
+            }
+
+            // Skip if client-side validation flagged this as duplicate
+            if ($skip) {
+                $result['ignored'] = true;
+                $result['message'] = 'Duplicate detected by client-side validation';
+                return $result;
+            }
+
+            // Validate department exists
+            $check_dept_stmt->bind_param("i", $department_id);
+            $check_dept_stmt->execute();
+            $dept_result = $check_dept_stmt->get_result();
+            if (!$dept_result || $dept_result->num_rows === 0) {
+                $result['error'] = true;
+                $result['message'] = "Department ID $department_id does not exist";
+                return $result;
+            }
+
+            // Generate code if not provided
+            if (empty($code)) {
+                $code = generate_unique_code($conn, $name, $check_code_stmt);
+                $result['warning'] = true;
+                $result['message'] = "Generated code: $code";
+            }
+
+            // Check for name+department conflicts
+            $check_name_dept_stmt->bind_param("si", $name, $department_id);
+            $check_name_dept_stmt->execute();
+            $name_dept_result = $check_name_dept_stmt->get_result();
+            if ($name_dept_result && $name_dept_result->num_rows > 0) {
+                $result['ignored'] = true;
+                $result['message'] = "Program '$name' already exists in department $department_id";
+                return $result;
+            }
+
+            // Check for code conflicts
+            $check_code_stmt->bind_param("s", $code);
+            $check_code_stmt->execute();
+            $code_result = $check_code_stmt->get_result();
+            if ($code_result && $code_result->num_rows > 0) {
+                $result['ignored'] = true;
+                $result['message'] = "Program code '$code' already exists";
+                return $result;
+            }
+
+            // Validate duration
+            if ($duration < 1 || $duration > 10) {
+                $result['warning'] = true;
+                $result['message'] = "Duration $duration years seems unusual, using default 4 years";
+                $duration = 4;
+            }
+
+            // Insert the program
+            $insert_stmt->bind_param("sisii", $name, $department_id, $code, $duration, $is_active);
+            if ($insert_stmt->execute()) {
+                $result['success'] = true;
+                $result['message'] = "Successfully imported program '$name'";
+                error_log("Successfully imported program: $name (dept: $department_id, code: $code)");
+            } else {
+                $result['error'] = true;
+                $result['message'] = "Database error: " . $conn->error;
+            }
+
+        } catch (Exception $e) {
+            $result['error'] = true;
+            $result['message'] = "Processing error: " . $e->getMessage();
+            error_log("Row $row_number processing error: " . $e->getMessage());
+        }
+
+        return $result;
+    }
+
+    /**
+     * Generate a unique program code based on the program name
+     */
+    function generate_unique_code($conn, $name, $check_code_stmt) {
+        $base_code = strtoupper(substr(preg_replace('/[^a-zA-Z0-9]/', '', $name), 0, 6));
+        if (strlen($base_code) < 3) {
+            $base_code = 'PRG' . $base_code;
+        }
+
+        $code = $base_code;
+        $counter = 1;
+        $max_attempts = 100;
+
+        while ($counter <= $max_attempts) {
+            $check_code_stmt->bind_param("s", $code);
+            $check_code_stmt->execute();
+            $result = $check_code_stmt->get_result();
+            
+            if (!$result || $result->num_rows === 0) {
+                return $code; // Found unique code
+            }
+            
+            $code = $base_code . $counter;
+            $counter++;
+        }
+
+        // If we can't find a unique code, use timestamp
+        return $base_code . '_' . time() % 1000;
+    }
+
 // Handle bulk import and form submissions
 if (isset($_SERVER['REQUEST_METHOD']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? null;
@@ -28,105 +233,29 @@ if (isset($_SERVER['REQUEST_METHOD']) && $_SERVER['REQUEST_METHOD'] === 'POST') 
             } elseif (!is_array($import_data) || empty($import_data)) {
                 $error_message = 'No rows found in import data.';
             } else {
-                $success_count = 0;
-                $ignored_count = 0;
-                $error_count = 0;
-
-                // Prepare check statements to detect existing programs
-                $check_name_dept_sql = "SELECT id FROM programs WHERE name = ? AND department_id = ?";
-                $check_code_sql = "SELECT id FROM programs WHERE code = ?";
-                $check_name_dept_stmt = $conn->prepare($check_name_dept_sql);
-                $check_code_stmt = $conn->prepare($check_code_sql);
-                // Prepared statement to verify department exists
-                $check_dept_stmt = $conn->prepare("SELECT id FROM departments WHERE id = ?");
-
-                foreach ($import_data as $row) {
-                    $name = isset($row['name']) ? $conn->real_escape_string($row['name']) : '';
-                    $department_id = isset($row['department_id']) ? (int)$row['department_id'] : 0;
-                    $code = isset($row['code']) ? $conn->real_escape_string($row['code']) : '';
-                    $duration = isset($row['duration']) ? (int)$row['duration'] : 0;
-                    $is_active = isset($row['is_active']) ? (int)$row['is_active'] : 1;
-
-                    if ($name === '' || $department_id === 0) {
-                        $error_count++;
-                        continue;
+                // Enhanced import with detailed error handling and conflict resolution
+                $import_result = perform_bulk_import($conn, $import_data);
+                
+                if ($import_result['success_count'] > 0) {
+                    $msg = "Successfully imported {$import_result['success_count']} programs!";
+                    if ($import_result['ignored_count'] > 0) {
+                        $msg .= " {$import_result['ignored_count']} duplicates ignored.";
                     }
-
-                    // Verify department exists
-                    if ($check_dept_stmt) {
-                        $check_dept_stmt->bind_param("i", $department_id);
-                        $check_dept_stmt->execute();
-                        $dept_res = $check_dept_stmt->get_result();
-                        if (!$dept_res || $dept_res->num_rows === 0) {
-                            $error_count++;
-                            continue;
-                        }
+                    if ($import_result['error_count'] > 0) {
+                        $msg .= " {$import_result['error_count']} records failed to import.";
                     }
-
-                    // Generate a code if not provided
-                    if (empty($code)) {
-                        $base_code = strtoupper(substr(preg_replace('/[^a-zA-Z0-9]/', '', $name), 0, 6));
-                        if (strlen($base_code) < 3) {
-                            $base_code = 'PRG' . $base_code;
-                        }
-                        $code = $base_code;
-                        $counter = 1;
-                        while (true) {
-                            $check_code_stmt->bind_param("s", $code);
-                            $check_code_stmt->execute();
-                            $existing_code = $check_code_stmt->get_result();
-                            if ($existing_code && $existing_code->num_rows > 0) {
-                                $code = $base_code . $counter;
-                                $counter++;
-                                if ($counter > 999) { $code = $base_code . time() % 1000; break; }
-                            } else { break; }
-                        }
+                    if (!empty($import_result['warnings'])) {
+                        $msg .= " Warnings: " . implode(', ', $import_result['warnings']);
                     }
-
-                    // Skip if program with same name and department exists
-                    if ($check_name_dept_stmt) {
-                        $check_name_dept_stmt->bind_param("si", $name, $department_id);
-                        $check_name_dept_stmt->execute();
-                        $existing_name_dept = $check_name_dept_stmt->get_result();
-                        if ($existing_name_dept && $existing_name_dept->num_rows > 0) {
-                            $ignored_count++;
-                            continue;
-                        }
-                    }
-
-                    // Skip if program with same code exists
-                    if ($check_code_stmt) {
-                        $check_code_stmt->bind_param("s", $code);
-                        $check_code_stmt->execute();
-                        $existing_code = $check_code_stmt->get_result();
-                        if ($existing_code && $existing_code->num_rows > 0) {
-                            $ignored_count++;
-                            continue;
-                        }
-                    }
-
-                    $sql = "INSERT INTO programs (name, department_id, code, duration_years, is_active) VALUES (?, ?, ?, ?, ?)";
-                    $stmt = $conn->prepare($sql);
-                    if (!$stmt) { $error_count++; continue; }
-                    $stmt->bind_param("sisii", $name, $department_id, $code, $duration, $is_active);
-                    if ($stmt->execute()) { $success_count++; } else { $error_count++; }
-                    $stmt->close();
-                }
-
-                if ($check_name_dept_stmt) $check_name_dept_stmt->close();
-                if ($check_code_stmt) $check_code_stmt->close();
-                if ($check_dept_stmt) $check_dept_stmt->close();
-
-                if ($success_count > 0) {
-                    $msg = "Successfully imported $success_count programs!";
-                    if ($ignored_count > 0) $msg .= " $ignored_count duplicates ignored.";
-                    if ($error_count > 0) $msg .= " $error_count records failed to import.";
                     redirect_with_flash('programs.php', 'success', $msg);
                 } else {
-                    if ($ignored_count > 0 && $error_count === 0) {
-                        $success_message = "No new programs imported. $ignored_count duplicates ignored.";
+                    if ($import_result['ignored_count'] > 0 && $import_result['error_count'] === 0) {
+                        $success_message = "No new programs imported. {$import_result['ignored_count']} duplicates ignored.";
                     } else {
                         $error_message = "No programs were imported. Please check your data.";
+                        if (!empty($import_result['errors'])) {
+                            $error_message .= " Errors: " . implode(', ', array_slice($import_result['errors'], 0, 3));
+                        }
                     }
                 }
             }
@@ -511,6 +640,7 @@ if (!$dept_result) {
                             </tbody>
                         </table>
                     </div>
+                    <div id="importSummary"></div>
                 </div>
             </div>
             <div class="modal-footer">
@@ -707,32 +837,54 @@ function parseCSVPrograms(csvText) {
 }
 
 function validateProgramsData(data) {
-    return data.map(row => {
+    return data.map((row, index) => {
         const validated = {
             name: row.name || row.Name || '',
             department_id: row.department_id || row.departmentId || row.department_id || '',
             code: row.code || row.Code || '',
             duration: row.duration || row.duration_years || row.durationYears || '',
-            is_active: (row.is_active || row.isActive || '1') === '1' ? '1' : '0'
+            is_active: (row.is_active || row.isActive || '1').toString().trim() === '0' ? '0' : '1',
+            row_number: index + 1
         };
+        
         validated.valid = true;
         validated.errors = [];
-        if (!validated.name.trim()) { validated.valid = false; validated.errors.push('Name required'); }
-        if (!validated.department_id.toString().trim()) { validated.valid = false; validated.errors.push('Department ID required'); }
-        if (!validated.code.trim()) { validated.valid = false; validated.errors.push('Code required'); }
-        if (!validated.duration.toString().trim()) { validated.valid = false; validated.errors.push('Duration required'); }
+        validated.warnings = [];
+        validated.skip = false;
+
+        // Enhanced validation with detailed error messages
+        if (!validated.name.trim()) { 
+            validated.valid = false; 
+            validated.errors.push('Program name is required'); 
+        }
+
+        if (!validated.department_id.toString().trim() || validated.department_id <= 0) { 
+            validated.valid = false; 
+            validated.errors.push('Valid department ID is required'); 
+        }
+
+        if (!validated.code.trim()) { 
+            validated.warnings.push('Code will be auto-generated'); 
+        }
+
+        if (!validated.duration.toString().trim() || validated.duration < 1 || validated.duration > 10) { 
+            validated.warnings.push('Duration will default to 4 years'); 
+        }
 
         // Check for duplicate name+department
         if (existingProgramNameDeptSet[validated.name.trim().toUpperCase() + '|' + validated.department_id]) {
-            validated.valid = false;
-            validated.errors.push('Program name and department combination already exists.');
+            validated.valid = true; // Mark as valid so it gets sent to server
+            validated.errors.push('Program name and department combination already exists');
+            validated.skip = true; // Flag to skip on server side
         }
 
         // Check for duplicate code
         if (existingProgramCodesSet[validated.code.trim().toUpperCase()]) {
-            validated.valid = false;
-            validated.errors.push('Program code already exists.');
+            validated.valid = true; // Mark as valid so it gets sent to server
+            validated.errors.push('Program code already exists');
+            validated.skip = true; // Flag to skip on server side
         }
+
         return validated;
     });
 }
@@ -756,19 +908,28 @@ function showPreviewPrograms() {
         const tr = document.createElement('tr');
         tr.className = row.valid ? '' : 'table-danger';
 
-        // Determine status badge/text
+        // Determine status badge/text with enhanced feedback
         let validationHtml = '';
-        if (row.valid) {
-            validationHtml = '<span class="text-success">✓ Valid</span>';
-            validCount++;
-        } else {
-            const isExisting = row.errors && row.errors.some(e => e.toLowerCase().includes('already exists'));
-            if (isExisting) {
-                validationHtml = '<span class="badge bg-secondary">Skipped (exists)</span>';
+        let statusClass = '';
+        
+        if (row.valid && !row.skip) {
+            if (row.warnings && row.warnings.length > 0) {
+                validationHtml = '<span class="text-warning">⚠ Valid (with warnings)</span>';
+                statusClass = 'table-warning';
             } else {
-                validationHtml = '<span class="text-danger">✗ ' + (row.errors ? row.errors.join(', ') : 'Invalid') + '</span>';
+                validationHtml = '<span class="text-success">✓ Valid</span>';
+                statusClass = '';
             }
+            validCount++;
+        } else if (row.skip) {
+            validationHtml = '<span class="badge bg-secondary">Skipped (exists)</span>';
+            statusClass = 'table-secondary';
+        } else {
+            validationHtml = '<span class="text-danger">✗ ' + (row.errors ? row.errors.join(', ') : 'Invalid') + '</span>';
+            statusClass = 'table-danger';
         }
+        
+        tr.className = statusClass;
         
         console.log('Creating row', idx, 'with data:', row);
 
@@ -784,15 +945,37 @@ function showPreviewPrograms() {
         tbody.appendChild(tr);
     });
 
-    // Update process button
+    // Update process button and show summary
     if (processBtn) {
-        const validData = importDataPrograms.filter(r => r.valid);
+        const validData = importDataPrograms.filter(r => r.valid && !r.skip);
+        const skippedData = importDataPrograms.filter(r => r.skip);
+        const errorData = importDataPrograms.filter(r => !r.valid && !r.skip);
+        const warningData = importDataPrograms.filter(r => r.valid && !r.skip && r.warnings && r.warnings.length > 0);
+        
         if (validData.length > 0) {
             processBtn.disabled = false;
-            processBtn.textContent = `Process ${validData.length} Records`;
+            let btnText = `Process ${validData.length} Records`;
+            if (warningData.length > 0) {
+                btnText += ` (${warningData.length} with warnings)`;
+            }
+            processBtn.textContent = btnText;
         } else {
             processBtn.disabled = true;
             processBtn.textContent = 'Process File';
+        }
+        
+        // Show summary if there are multiple rows
+        if (importDataPrograms.length > 1) {
+            const summaryDiv = document.getElementById('importSummary');
+            if (summaryDiv) {
+                let summaryHtml = '<div class="alert alert-info mt-2"><strong>Import Summary:</strong> ';
+                summaryHtml += `${validData.length} valid, ${skippedData.length} duplicates, ${errorData.length} errors`;
+                if (warningData.length > 0) {
+                    summaryHtml += `, ${warningData.length} with warnings`;
+                }
+                summaryHtml += '</div>';
+                summaryDiv.innerHTML = summaryHtml;
+            }
         }
     }
 }
@@ -803,6 +986,12 @@ function processProgramsFile(file) {
         const data = parseCSVPrograms(e.target.result);
         importDataPrograms = validateProgramsData(data);
         showPreviewPrograms();
+        
+        // Clear any previous summary
+        const summaryDiv = document.getElementById('importSummary');
+        if (summaryDiv) {
+            summaryDiv.innerHTML = '';
+        }
     };
     reader.readAsText(file);
 }
@@ -861,11 +1050,31 @@ document.addEventListener('DOMContentLoaded', function() {
 
     if (processBtn) {
         processBtn.addEventListener('click', function(){
-            const validData = importDataPrograms.filter(r => r.valid);
+            const validData = importDataPrograms.filter(r => r.valid && !r.skip);
             if (validData.length === 0) { 
                 alert('No valid records to import'); 
                 return; 
             }
+            
+            // Show confirmation with details
+            const skippedData = importDataPrograms.filter(r => r.skip);
+            const warningData = importDataPrograms.filter(r => r.valid && !r.skip && r.warnings && r.warnings.length > 0);
+            
+            let confirmMsg = `Import ${validData.length} programs?`;
+            if (skippedData.length > 0) {
+                confirmMsg += `\n${skippedData.length} duplicates will be skipped.`;
+            }
+            if (warningData.length > 0) {
+                confirmMsg += `\n${warningData.length} programs have warnings (missing codes, unusual durations, etc.).`;
+            }
+            
+            if (!confirm(confirmMsg)) {
+                return;
+            }
+            
+            // Disable button to prevent double submission
+            processBtn.disabled = true;
+            processBtn.textContent = 'Processing...';
             
             const form = document.createElement('form'); 
             form.method='POST'; 
