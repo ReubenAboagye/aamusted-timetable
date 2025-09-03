@@ -476,13 +476,22 @@ if ($existing_assignments_result) {
         const deptVal = document.getElementById('filterDept') ? document.getElementById('filterDept').value : '';
         const levelVal = document.getElementById('filterLevel') ? document.getElementById('filterLevel').value : '';
         const semesterVal = document.getElementById('filterSemester') ? document.getElementById('filterSemester').value : '';
+        
         availableCourses.forEach(course => {
             // department filter
             if (deptVal && String(course.department_id) !== String(deptVal)) return;
-            // level filter: course.level_band must match levelVal (e.g., 300)
-            if (levelVal && course.level_band && String(course.level_band) !== String(levelVal)) return;
-            // semester filter: academic semester (1 or 2) derived from course code middle digit
-            if (semesterVal && course.academic_semester && String(course.academic_semester) !== String(semesterVal)) return;
+            
+            // level filter: extract first digit from 3-digit course code and convert to level band
+            if (levelVal) {
+                const courseLevel = extractLevelFromCourseCode(course.course_code);
+                if (courseLevel !== parseInt(levelVal)) return;
+            }
+            
+            // semester filter: extract second digit from 3-digit course code (odd=1, even=2)
+            if (semesterVal) {
+                const courseSemester = extractSemesterFromCourseCode(course.course_code);
+                if (courseSemester !== parseInt(semesterVal)) return;
+            }
 
             const courseDiv = document.createElement('div');
             courseDiv.className = 'course-item p-2 border-bottom d-flex justify-content-between align-items-center';
@@ -496,6 +505,28 @@ if ($existing_assignments_result) {
             courseDiv.innerHTML = `<div class="d-flex justify-content-between align-items-center"><span>${course.course_code} - ${course.course_name}</span><button class="btn btn-sm btn-outline-danger" onclick="unassignCourse('${course.id}')"><i class="fas fa-minus"></i></button></div>`;
             assignedList.appendChild(courseDiv);
         });
+    }
+
+    // Helper function to extract level from course code (first digit of 3-digit number)
+    function extractLevelFromCourseCode(courseCode) {
+        const match = courseCode.match(/(\d{3})/);
+        if (match) {
+            const threeDigit = match[1];
+            const firstDigit = parseInt(threeDigit.charAt(0));
+            return firstDigit * 100; // Convert to level band (e.g., 3 -> 300)
+        }
+        return null;
+    }
+
+    // Helper function to extract semester from course code (second digit of 3-digit number)
+    function extractSemesterFromCourseCode(courseCode) {
+        const match = courseCode.match(/(\d{3})/);
+        if (match) {
+            const threeDigit = match[1];
+            const secondDigit = parseInt(threeDigit.charAt(1));
+            return secondDigit % 2 === 1 ? 1 : 2; // Odd = semester 1, even = semester 2
+        }
+        return null;
     }
 
     function assignCourse(courseId) {
@@ -575,24 +606,26 @@ if ($existing_assignments_result) {
         list.innerHTML = '';
         const deptVal = document.getElementById('filterDept') ? document.getElementById('filterDept').value : '';
         const levelVal = document.getElementById('filterLevel') ? document.getElementById('filterLevel').value : '';
+        const semesterVal = document.getElementById('filterSemester') ? document.getElementById('filterSemester').value : '';
+        
         availableCourses.forEach(course => {
             const text = (course.course_code + ' ' + course.course_name).toLowerCase();
+            
             // department filter
             if (deptVal && String(course.department_id) !== String(deptVal)) return;
-            // level filter: try to parse numeric part from course code (e.g., BBA 121 -> 100/200 mapping)
+            
+            // level filter: extract first digit from 3-digit course code and convert to level band
             if (levelVal) {
-                // attempt to find a number in course_code or course_name
-                const m = (course.course_code + ' ' + course.course_name).match(/(\d{3})/);
-                if (m) {
-                    const numeric = parseInt(m[1], 10);
-                    // Map actual numeric (e.g., 121 -> 100 band) by rounding down to nearest hundred
-                    const band = Math.floor(numeric / 100) * 100;
-                    if (String(band) !== String(levelVal)) return;
-                } else {
-                    // if no numeric part found, skip when level filter is active
-                    return;
-                }
+                const courseLevel = extractLevelFromCourseCode(course.course_code);
+                if (courseLevel !== parseInt(levelVal)) return;
             }
+            
+            // semester filter: extract second digit from 3-digit course code (odd=1, even=2)
+            if (semesterVal) {
+                const courseSemester = extractSemesterFromCourseCode(course.course_code);
+                if (courseSemester !== parseInt(semesterVal)) return;
+            }
+            
             if (!query || text.indexOf(query) !== -1) {
                 const courseDiv = document.createElement('div');
                 courseDiv.className = 'course-item p-2 border-bottom d-flex justify-content-between align-items-center';
