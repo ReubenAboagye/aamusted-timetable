@@ -49,6 +49,10 @@ register_shutdown_function(function() {
 // Include stream manager so generation respects currently selected stream
 if (file_exists(__DIR__ . '/includes/stream_manager.php')) include_once __DIR__ . '/includes/stream_manager.php';
 $streamManager = getStreamManager();
+
+// Include enhanced conflict detector
+if (file_exists(__DIR__ . '/includes/conflict_detector.php')) include_once __DIR__ . '/includes/conflict_detector.php';
+$conflictDetector = getConflictDetector();
 $current_stream_id = $streamManager->getCurrentStreamId();
 
 $success_message = '';
@@ -412,7 +416,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $class_count = $check_class_stmt->get_result()->fetch_assoc()['count'];
                         }
 
-                        // we'll lookup lecturer_course later; for now assume lecturer might conflict after we fetch it
+                        // Enhanced conflict detection using the new conflict detector
                         if ($room_count == 0 && $class_count == 0) {
                             // Get a default lecturer_course (and lecturer) for this course
                             $lecturer_course_sql = "SELECT lc.id, lc.lecturer_id FROM lecturer_courses lc WHERE lc.course_id = ? LIMIT 1";
@@ -501,12 +505,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                     }
                                 }
 
-                                if (isset($insert_stmt) && $insert_stmt && $insert_stmt->execute()) {
-                                    $placed = true;
-                                    $insert_stmt->close();
-                                    break; // placed successfully
+                                // Enhanced conflict detection before insertion
+                                if (isset($insert_stmt) && $insert_stmt) {
+                                    $conflicts = $conflictDetector->checkConflicts(
+                                        $assignment['id'], 
+                                        $lecturer_course['id'], 
+                                        $day['id'], 
+                                        $time_slot['id'], 
+                                        $room['id'], 
+                                        $division_label_to_use
+                                    );
+                                    
+                                    if (empty($conflicts) && $insert_stmt->execute()) {
+                                        $placed = true;
+                                        $insert_stmt->close();
+                                        break; // placed successfully
+                                    } else {
+                                        // Log conflicts for debugging
+                                        if (!empty($conflicts)) {
+                                            error_log("Timetable conflicts detected: " . $conflictDetector->getConflictReport($conflicts));
+                                        }
+                                        $insert_stmt->close();
+                                    }
+                                } else {
+                                    if (isset($insert_stmt) && $insert_stmt) $insert_stmt->close();
                                 }
-                                if (isset($insert_stmt) && $insert_stmt) $insert_stmt->close();
                             } else {
                                 // No lecturer assigned to this course, cannot place
                                 break;
