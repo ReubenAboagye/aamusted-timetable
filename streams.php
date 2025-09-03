@@ -15,10 +15,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $name = $conn->real_escape_string($_POST['name']);
         $code = $conn->real_escape_string($_POST['code']);
         $description = $conn->real_escape_string($_POST['description']);
-        $period_start = $conn->real_escape_string($_POST['period_start']);
-        $period_end = $conn->real_escape_string($_POST['period_end']);
-        $break_start = $conn->real_escape_string($_POST['break_start']);
-        $break_end = $conn->real_escape_string($_POST['break_end']);
         // Store active days as JSON to match DB JSON column
         $active_days = isset($_POST['active_days']) ? json_encode(array_values($_POST['active_days'])) : json_encode([]);
         $is_active = isset($_POST['is_active']) ? 1 : 0;
@@ -30,11 +26,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         }
 
         $sql = "INSERT INTO streams 
-                (name, code, description, period_start, period_end, break_start, break_end, active_days, is_active, created_at, updated_at) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
+                (name, code, description, active_days, is_active, created_at, updated_at) 
+                VALUES (?, ?, ?, ?, ?, NOW(), NOW())";
 
         $stmt = $conn->prepare($sql);
-        $stmt->bind_param("ssssssssi", $name, $code, $description, $period_start, $period_end, $break_start, $break_end, $active_days, $is_active);
+        $stmt->bind_param("ssssi", $name, $code, $description, $active_days, $is_active);
 
         if ($stmt->execute()) {
             $stream_id = $conn->insert_id;
@@ -72,10 +68,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $name = $conn->real_escape_string($_POST['name']);
         $code = $conn->real_escape_string($_POST['code']);
         $description = $conn->real_escape_string($_POST['description']);
-        $period_start = $conn->real_escape_string($_POST['period_start']);
-        $period_end = $conn->real_escape_string($_POST['period_end']);
-        $break_start = $conn->real_escape_string($_POST['break_start']);
-        $break_end = $conn->real_escape_string($_POST['break_end']);
         // Store active days as JSON to match DB JSON column
         $active_days = isset($_POST['active_days']) ? json_encode(array_values($_POST['active_days'])) : json_encode([]);
         $is_active = isset($_POST['is_active']) ? 1 : 0;
@@ -90,11 +82,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         }
 
         $sql = "UPDATE streams 
-                SET name = ?, code = ?, description = ?, period_start = ?, period_end = ?, break_start = ?, break_end = ?, active_days = ?, is_active = ?, updated_at = NOW()
+                SET name = ?, code = ?, description = ?, active_days = ?, is_active = ?, updated_at = NOW()
                 WHERE id = ?";
 
         $stmt = $conn->prepare($sql);
-        $stmt->bind_param("ssssssssii", $name, $code, $description, $period_start, $period_end, $break_start, $break_end, $active_days, $is_active, $id);
+        $stmt->bind_param("ssssii", $name, $code, $description, $active_days, $is_active, $id);
 
         if ($stmt->execute()) {
             $success_message = "✅ Stream updated successfully!";
@@ -293,25 +285,6 @@ $result = $conn->query("SELECT * FROM streams ORDER BY created_at DESC");
             </div>
         </div>
 
-        <div class="row">
-            <div class="col-md-3 mb-3">
-                <label class="form-label">Period Start</label>
-                <input type="time" name="period_start" class="form-control">
-            </div>
-            <div class="col-md-3 mb-3">
-                <label class="form-label">Period End</label>
-                <input type="time" name="period_end" class="form-control">
-            </div>
-            <div class="col-md-3 mb-3">
-                <label class="form-label">Break Start</label>
-                <input type="time" name="break_start" class="form-control">
-            </div>
-            <div class="col-md-3 mb-3">
-                <label class="form-label">Break End</label>
-                <input type="time" name="break_end" class="form-control">
-            </div>
-        </div>
-
         <div class="mb-3">
             <label class="form-label">Active Days</label><br>
             <?php foreach (['Mon','Tue','Wed','Thu','Fri','Sat','Sun'] as $day): ?>
@@ -352,8 +325,6 @@ $result = $conn->query("SELECT * FROM streams ORDER BY created_at DESC");
                 <th>Name</th>
                 <th>Code</th>
                 <th>Description</th>
-                <th>Periods</th>
-                <th>Break</th>
                 <th>Days</th>
                 <th>Delete</th>
                 <th>Actions</th>
@@ -365,8 +336,6 @@ $result = $conn->query("SELECT * FROM streams ORDER BY created_at DESC");
                 <td><?= htmlspecialchars($row['name']); ?></td>
                 <td><?= htmlspecialchars($row['code']); ?></td>
                 <td><?= htmlspecialchars($row['description']); ?></td>
-                <td><?= $row['period_start'] . " - " . $row['period_end']; ?></td>
-                <td><?= $row['break_start'] . " - " . $row['break_end']; ?></td>
                 <td><?php
                     $days = $row['active_days'];
                     $decoded = [];
@@ -447,24 +416,6 @@ $result = $conn->query("SELECT * FROM streams ORDER BY created_at DESC");
                             <label class="form-label">Description</label>
                             <input type="text" name="description" id="editStreamDescription" class="form-control">
                         </div>
-                        <div class="row">
-                            <div class="col-md-3 mb-3">
-                                <label class="form-label">Period Start</label>
-                                <input type="time" name="period_start" id="editPeriodStart" class="form-control">
-                            </div>
-                            <div class="col-md-3 mb-3">
-                                <label class="form-label">Period End</label>
-                                <input type="time" name="period_end" id="editPeriodEnd" class="form-control">
-                            </div>
-                            <div class="col-md-3 mb-3">
-                                <label class="form-label">Break Start</label>
-                                <input type="time" name="break_start" id="editBreakStart" class="form-control">
-                            </div>
-                            <div class="col-md-3 mb-3">
-                                <label class="form-label">Break End</label>
-                                <input type="time" name="break_end" id="editBreakEnd" class="form-control">
-                            </div>
-                        </div>
                         <div class="mb-3">
                             <label class="form-label">Active Days</label><br>
                             <?php foreach (['Mon','Tue','Wed','Thu','Fri','Sat','Sun'] as $day): ?>
@@ -519,10 +470,6 @@ function editStream(streamId) {
                 document.getElementById('editStreamName').value = stream.name;
                 document.getElementById('editStreamCode').value = stream.code;
                 document.getElementById('editStreamDescription').value = stream.description;
-                document.getElementById('editPeriodStart').value = stream.period_start;
-                document.getElementById('editPeriodEnd').value = stream.period_end;
-                document.getElementById('editBreakStart').value = stream.break_start;
-                document.getElementById('editBreakEnd').value = stream.break_end;
                 document.getElementById('editIsActive').checked = stream.is_active == 1;
                 
                 // Handle active days
