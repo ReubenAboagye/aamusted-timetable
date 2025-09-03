@@ -131,7 +131,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $all_days[] = $day;
         }
 
-        // Get available rooms (rooms are global / not stream-aware)
+        // Get available rooms (rooms are global / not stream-aware) - only active rooms
         $rooms_sql = "SELECT id, name, capacity FROM rooms WHERE is_active = 1 ORDER BY capacity";
         $rooms_result = $conn->query($rooms_sql);
         $rooms = [];
@@ -251,9 +251,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 $stream_active_days_stmt->close();
 
-                // Load time slots for this stream from mapping (fallback to all time_slots if none selected)
+                // Load time slots for this stream - stream-aware periods from database
                 $stream_slots = [];
-                // Check existence of mapping table first to avoid schema warnings being converted to exceptions
+                // First try to get stream-specific time slots from stream_time_slots mapping
                 $sts_exists = $conn->query("SHOW TABLES LIKE 'stream_time_slots'");
                 if ($sts_exists && $sts_exists->num_rows > 0) {
                     $ts_rs = $conn->query("SELECT ts.id, ts.start_time, ts.end_time FROM stream_time_slots sts JOIN time_slots ts ON ts.id = sts.time_slot_id WHERE sts.stream_id = " . intval($stream_id) . " AND sts.is_active = 1 ORDER BY ts.start_time");
@@ -261,12 +261,81 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         while ($s = $ts_rs->fetch_assoc()) { $stream_slots[] = $s; }
                     }
                 }
-                // Fallback to global time slots if none found or mapping table missing
+                if ($sts_exists) $sts_exists->close();
+                
+                // If no mapped time slots found, generate them from stream's period settings
+                if (empty($stream_slots)) {
+                    // Fetch stream's period settings from database
+                    $stream_period_sql = "SELECT period_start, period_end, break_start, break_end FROM streams WHERE id = ? AND is_active = 1";
+                    $stream_period_stmt = $conn->prepare($stream_period_sql);
+                    $stream_period_stmt->bind_param('i', $stream_id);
+                    $stream_period_stmt->execute();
+                    $stream_period_result = $stream_period_stmt->get_result();
+                    
+                    if ($stream_period_row = $stream_period_result->fetch_assoc()) {
+                        $period_start = $stream_period_row['period_start'];
+                        $period_end = $stream_period_row['period_end'];
+                        $break_start = $stream_period_row['break_start'];
+                        $break_end = $stream_period_row['break_end'];
+                        
+                        // Generate time slots based on stream's period settings
+                        if (!empty($period_start) && !empty($period_end)) {
+                            $start_time = new DateTime($period_start);
+                            $end_time = new DateTime($period_end);
+                            $current_time = clone $start_time;
+                            $slot_id = 1;
+                            
+                            while ($current_time < $end_time) {
+                                $slot_start = $current_time->format('H:i');
+                                $current_time->add(new DateInterval('PT1H')); // Add 1 hour
+                                $slot_end = $current_time->format('H:i');
+                                
+                                // Don't create a slot that goes beyond the period end
+                                if ($current_time > $end_time) {
+                                    $slot_end = $end_time->format('H:i');
+                                }
+                                
+                                // Check if this slot overlaps with break time
+                                $is_break = false;
+                                
+                                if (!empty($break_start) && !empty($break_end)) {
+                                    $break_start_time = new DateTime($break_start);
+                                    $break_end_time = new DateTime($break_end);
+                                    $slot_start_time = new DateTime($slot_start);
+                                    $slot_end_time = new DateTime($slot_end);
+                                    
+                                    // Check if slot overlaps with break period
+                                    if (($slot_start_time < $break_end_time) && ($slot_end_time > $break_start_time)) {
+                                        $is_break = true;
+                                    }
+                                }
+                                
+                                // Only add non-break slots for scheduling
+                                if (!$is_break) {
+                                    $stream_slots[] = [
+                                        'id' => $slot_id,
+                                        'start_time' => $slot_start,
+                                        'end_time' => $slot_end
+                                    ];
+                                }
+                                
+                                $slot_id++;
+                                
+                                // Safety check to prevent infinite loops
+                                if ($slot_id > 24) {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    $stream_period_stmt->close();
+                }
+                
+                // Fallback to global time slots if no stream-specific slots or period settings
                 if (empty($stream_slots)) {
                     $ts_rs2 = $conn->query("SELECT id, start_time, end_time FROM time_slots WHERE is_break = 0 ORDER BY start_time");
                     while ($s2 = $ts_rs2->fetch_assoc()) { $stream_slots[] = $s2; }
                 }
-                if ($sts_exists) $sts_exists->close();
 
                 // Fetch assignments for classes in this stream
                 $assignments_stmt->bind_param('i', $stream_id);
@@ -645,8 +714,73 @@ $total_courses = $conn->query("SELECT COUNT(*) as count FROM courses WHERE is_ac
                 $sts_result = $conn->query("SELECT COUNT(*) as count FROM stream_time_slots WHERE stream_id = " . intval($current_stream_id) . " AND is_active = 1");
                 $stream_time_slots_count = $sts_result ? $sts_result->fetch_assoc()['count'] : 0;
             }
+            
+            // If no mapped time slots found, calculate from stream's period settings
+            if ($stream_time_slots_count == 0 && !empty($current_stream_id)) {
+                // Fetch stream's period settings from database
+                $stream_period_sql = "SELECT period_start, period_end, break_start, break_end FROM streams WHERE id = ? AND is_active = 1";
+                $stream_period_stmt = $conn->prepare($stream_period_sql);
+                $stream_period_stmt->bind_param('i', $current_stream_id);
+                $stream_period_stmt->execute();
+                $stream_period_result = $stream_period_stmt->get_result();
+                
+                if ($stream_period_row = $stream_period_result->fetch_assoc()) {
+                    $period_start = $stream_period_row['period_start'];
+                    $period_end = $stream_period_row['period_end'];
+                    $break_start = $stream_period_row['break_start'];
+                    $break_end = $stream_period_row['break_end'];
+                    
+                    // Calculate time slots based on stream's period settings
+                    if (!empty($period_start) && !empty($period_end)) {
+                        $start_time = new DateTime($period_start);
+                        $end_time = new DateTime($period_end);
+                        $current_time = clone $start_time;
+                        $slot_count = 0;
+                        
+                        while ($current_time < $end_time) {
+                            $slot_start = $current_time->format('H:i');
+                            $current_time->add(new DateInterval('PT1H')); // Add 1 hour
+                            $slot_end = $current_time->format('H:i');
+                            
+                            // Don't count a slot that goes beyond the period end
+                            if ($current_time > $end_time) {
+                                $slot_end = $end_time->format('H:i');
+                            }
+                            
+                            // Check if this slot overlaps with break time
+                            $is_break = false;
+                            
+                            if (!empty($break_start) && !empty($break_end)) {
+                                $break_start_time = new DateTime($break_start);
+                                $break_end_time = new DateTime($break_end);
+                                $slot_start_time = new DateTime($slot_start);
+                                $slot_end_time = new DateTime($slot_end);
+                                
+                                // Check if slot overlaps with break period
+                                if (($slot_start_time < $break_end_time) && ($slot_end_time > $break_start_time)) {
+                                    $is_break = true;
+                                }
+                            }
+                            
+                            // Only count non-break slots for scheduling
+                            if (!$is_break) {
+                                $slot_count++;
+                            }
+                            
+                            // Safety check to prevent infinite loops
+                            if ($slot_count > 24) {
+                                break;
+                            }
+                        }
+                        
+                        $stream_time_slots_count = $slot_count;
+                    }
+                }
+                $stream_period_stmt->close();
+            }
+            
+            // Fallback to default period range (07:00 to 20:00) - 13 periods if no stream-specific data
             if ($stream_time_slots_count == 0) {
-                // Fallback to default period range (07:00 to 20:00) - 13 periods
                 $stream_time_slots_count = 13;
             }
         } catch (Exception $e) {
@@ -704,7 +838,7 @@ $total_courses = $conn->query("SELECT COUNT(*) as count FROM courses WHERE is_ac
                                         <div class="stat-number"><?php echo $stream_time_slots_count; ?></div>
                                         <div>
                                             Time Slots
-                                            <i class="fas fa-info-circle ms-1" data-bs-toggle="tooltip" title="Available time periods (stream-specific or all time slots if none mapped)"></i>
+                                            <i class="fas fa-info-circle ms-1" data-bs-toggle="tooltip" title="Available time periods (calculated from stream's period settings in database)"></i>
                                         </div>
                                     </div>
                                 </div>
@@ -820,9 +954,9 @@ $total_courses = $conn->query("SELECT COUNT(*) as count FROM courses WHERE is_ac
             }
         }
         
-        // Get time slots for this stream
+        // Get time slots for this stream - stream-aware periods from database
         if (!empty($current_stream_id)) {
-            // Check existence of mapping table first
+            // First try to get stream-specific time slots from stream_time_slots mapping
             $sts_exists = $conn->query("SHOW TABLES LIKE 'stream_time_slots'");
             if ($sts_exists && $sts_exists->num_rows > 0) {
                 $ts_rs = $conn->query("SELECT ts.id, ts.start_time, ts.end_time FROM stream_time_slots sts JOIN time_slots ts ON ts.id = sts.time_slot_id WHERE sts.stream_id = " . intval($current_stream_id) . " AND sts.is_active = 1 ORDER BY ts.start_time");
@@ -833,9 +967,78 @@ $total_courses = $conn->query("SELECT COUNT(*) as count FROM courses WHERE is_ac
                 }
             }
             if ($sts_exists) $sts_exists->close();
+            
+            // If no mapped time slots found, generate them from stream's period settings
+            if (empty($template_time_slots)) {
+                // Fetch stream's period settings from database
+                $stream_period_sql = "SELECT period_start, period_end, break_start, break_end FROM streams WHERE id = ? AND is_active = 1";
+                $stream_period_stmt = $conn->prepare($stream_period_sql);
+                $stream_period_stmt->bind_param('i', $current_stream_id);
+                $stream_period_stmt->execute();
+                $stream_period_result = $stream_period_stmt->get_result();
+                
+                if ($stream_period_row = $stream_period_result->fetch_assoc()) {
+                    $period_start = $stream_period_row['period_start'];
+                    $period_end = $stream_period_row['period_end'];
+                    $break_start = $stream_period_row['break_start'];
+                    $break_end = $stream_period_row['break_end'];
+                    
+                    // Generate time slots based on stream's period settings
+                    if (!empty($period_start) && !empty($period_end)) {
+                        $start_time = new DateTime($period_start);
+                        $end_time = new DateTime($period_end);
+                        $current_time = clone $start_time;
+                        $slot_id = 1;
+                        
+                        while ($current_time < $end_time) {
+                            $slot_start = $current_time->format('H:i');
+                            $current_time->add(new DateInterval('PT1H')); // Add 1 hour
+                            $slot_end = $current_time->format('H:i');
+                            
+                            // Don't create a slot that goes beyond the period end
+                            if ($current_time > $end_time) {
+                                $slot_end = $end_time->format('H:i');
+                            }
+                            
+                            // Check if this slot overlaps with break time
+                            $is_break = false;
+                            $break_type = '';
+                            
+                            if (!empty($break_start) && !empty($break_end)) {
+                                $break_start_time = new DateTime($break_start);
+                                $break_end_time = new DateTime($break_end);
+                                $slot_start_time = new DateTime($slot_start);
+                                $slot_end_time = new DateTime($slot_end);
+                                
+                                // Check if slot overlaps with break period
+                                if (($slot_start_time < $break_end_time) && ($slot_end_time > $break_start_time)) {
+                                    $is_break = true;
+                                    $break_type = 'break';
+                                }
+                            }
+                            
+                            $template_time_slots[] = [
+                                'id' => $slot_id,
+                                'start_time' => $slot_start,
+                                'end_time' => $slot_end,
+                                'is_break' => $is_break,
+                                'break_type' => $break_type
+                            ];
+                            
+                            $slot_id++;
+                            
+                            // Safety check to prevent infinite loops
+                            if ($slot_id > 24) {
+                                break;
+                            }
+                        }
+                    }
+                }
+                $stream_period_stmt->close();
+            }
         }
         
-        // Fallback to default period range (07:00 to 20:00) if no stream-specific slots
+        // Fallback to default period range (07:00 to 20:00) if no stream-specific slots or period settings
         if (empty($template_time_slots)) {
             // Generate default hourly periods from 07:00 to 20:00 with break periods
             $start_hour = 7;
@@ -1035,7 +1238,38 @@ $total_courses = $conn->query("SELECT COUNT(*) as count FROM courses WHERE is_ac
                             </div>
                             <small class="text-muted">
                                 <i class="fas fa-lightbulb me-1"></i>
-                                Default period range: 07:00 - 20:00 (13 hours). Break periods: 12:00-13:00 and 15:00-16:00. 
+                                <?php 
+                                // Display stream-specific period information
+                                if (!empty($current_stream_id)) {
+                                    $stream_period_info_sql = "SELECT period_start, period_end, break_start, break_end FROM streams WHERE id = ? AND is_active = 1";
+                                    $stream_period_info_stmt = $conn->prepare($stream_period_info_sql);
+                                    $stream_period_info_stmt->bind_param('i', $current_stream_id);
+                                    $stream_period_info_stmt->execute();
+                                    $stream_period_info_result = $stream_period_info_stmt->get_result();
+                                    
+                                    if ($stream_period_info_row = $stream_period_info_result->fetch_assoc()) {
+                                        $period_start = $stream_period_info_row['period_start'];
+                                        $period_end = $stream_period_info_row['period_end'];
+                                        $break_start = $stream_period_info_row['break_start'];
+                                        $break_end = $stream_period_info_row['break_end'];
+                                        
+                                        if (!empty($period_start) && !empty($period_end)) {
+                                            echo "Stream period range: " . htmlspecialchars($period_start) . " - " . htmlspecialchars($period_end);
+                                            if (!empty($break_start) && !empty($break_end)) {
+                                                echo ". Break period: " . htmlspecialchars($break_start) . " - " . htmlspecialchars($break_end);
+                                            }
+                                            echo ". ";
+                                        } else {
+                                            echo "Default period range: 07:00 - 20:00 (13 hours). Break periods: 12:00-13:00 and 15:00-16:00. ";
+                                        }
+                                    } else {
+                                        echo "Default period range: 07:00 - 20:00 (13 hours). Break periods: 12:00-13:00 and 15:00-16:00. ";
+                                    }
+                                    $stream_period_info_stmt->close();
+                                } else {
+                                    echo "Default period range: 07:00 - 20:00 (13 hours). Break periods: 12:00-13:00 and 15:00-16:00. ";
+                                }
+                                ?>
                                 During generation, courses will span multiple periods based on their duration. 
                                 For example, a 3-hour course will occupy 3 consecutive time slots.
                             </small>
@@ -1055,7 +1289,31 @@ $total_courses = $conn->query("SELECT COUNT(*) as count FROM courses WHERE is_ac
                                     <div class="template-stats">
                                         <span class="badge bg-success"><?php echo count($template_time_slots); ?> Time Slots</span>
                                         <small class="d-block text-muted mt-1">
-                                            <?php echo count($template_time_slots); ?> periods available
+                                            <?php 
+                                            if (!empty($current_stream_id)) {
+                                                $stream_period_count_sql = "SELECT period_start, period_end FROM streams WHERE id = ? AND is_active = 1";
+                                                $stream_period_count_stmt = $conn->prepare($stream_period_count_sql);
+                                                $stream_period_count_stmt->bind_param('i', $current_stream_id);
+                                                $stream_period_count_stmt->execute();
+                                                $stream_period_count_result = $stream_period_count_stmt->get_result();
+                                                
+                                                if ($stream_period_count_row = $stream_period_count_result->fetch_assoc()) {
+                                                    $period_start = $stream_period_count_row['period_start'];
+                                                    $period_end = $stream_period_count_row['period_end'];
+                                                    
+                                                    if (!empty($period_start) && !empty($period_end)) {
+                                                        echo "Stream periods: " . htmlspecialchars($period_start) . " - " . htmlspecialchars($period_end);
+                                                    } else {
+                                                        echo count($template_time_slots) . " periods available";
+                                                    }
+                                                } else {
+                                                    echo count($template_time_slots) . " periods available";
+                                                }
+                                                $stream_period_count_stmt->close();
+                                            } else {
+                                                echo count($template_time_slots) . " periods available";
+                                            }
+                                            ?>
                                         </small>
                                     </div>
                                 </div>
