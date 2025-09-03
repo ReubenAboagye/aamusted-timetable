@@ -21,7 +21,7 @@ if ($class_id <= 0) {
 }
 
 // Verify class belongs to current stream
-$class_stream_check = $conn->prepare("SELECT stream_id FROM classes WHERE id = ? AND is_active = 1");
+$class_stream_check = $conn->prepare("SELECT stream_id FROM class_offerings WHERE id = ? AND is_active = 1");
 $class_stream_check->bind_param('i', $class_id);
 $class_stream_check->execute();
 $class_stream_result = $class_stream_check->get_result();
@@ -42,10 +42,9 @@ $assigned = [];
 $stmt = $conn->prepare("SELECT c.id, c.code AS course_code, c.name AS course_name, c.department_id 
                         FROM class_courses cc 
                         JOIN courses c ON cc.course_id = c.id 
-                        JOIN classes cl ON cc.class_id = cl.id
+                        JOIN class_offerings cof ON cc.class_id = cof.id
                         WHERE cc.class_id = ? AND cc.is_active = 1 
-                        AND c.stream_id = cl.stream_id 
-                        AND cl.stream_id = ?
+                        AND cof.stream_id = ?
                         ORDER BY c.code");
 if ($stmt) {
     $stmt->bind_param('ii', $class_id, $current_stream_id);
@@ -61,23 +60,17 @@ if ($stmt) {
 $available = [];
 $sql = "SELECT id, code AS course_code, name AS course_name, department_id 
         FROM courses 
-        WHERE is_active = 1 AND stream_id = ?";
-// Exclude assigned course ids
-if (count($assigned) > 0) {
-    $ids = array_map(function($c){ return (int)$c['id']; }, $assigned);
-    $sql .= " AND id NOT IN (" . implode(',', $ids) . ")";
-}
-$sql .= " ORDER BY code";
-$stmt = $conn->prepare($sql);
-$stmt->bind_param('i', $current_stream_id);
-$stmt->execute();
-$res = $stmt->get_result();
+        WHERE is_active = 1 ORDER BY code";
+$res = $conn->query($sql);
 if ($res) {
     while ($r = $res->fetch_assoc()) {
+        // skip assigned
+        $skip = false;
+        foreach ($assigned as $ar) { if ((int)$ar['id'] === (int)$r['id']) { $skip = true; break; } }
+        if ($skip) continue;
         $available[] = $r;
     }
 }
-$stmt->close();
 
 // Try to determine the class' department and level band (via program -> department and level)
 $class_department_id = null;

@@ -59,11 +59,12 @@ class ConflictDetector {
      * Check if lecturer is already scheduled at this time
      */
     private function checkLecturerConflicts($lecturer_id, $day_id, $time_slot_id) {
-        $sql = "SELECT t.id, cc.class_id, c.name as class_name, co.course_code, co.course_name
+        $sql = "SELECT t.id, cc.class_id, ct.name as class_name, co.course_code, co.name as course_name
                 FROM timetable t 
                 JOIN lecturer_courses lc ON t.lecturer_course_id = lc.id 
                 JOIN class_courses cc ON t.class_course_id = cc.id
-                JOIN classes c ON cc.class_id = c.id
+                JOIN class_offerings cof ON cc.class_id = cof.id
+                JOIN class_templates ct ON cof.template_id = ct.id
                 JOIN courses co ON cc.course_id = co.id
                 WHERE lc.lecturer_id = ? AND t.day_id = ? AND t.time_slot_id = ?";
         
@@ -89,10 +90,11 @@ class ConflictDetector {
      * Check if room is already occupied
      */
     private function checkRoomConflicts($room_id, $day_id, $time_slot_id) {
-        $sql = "SELECT t.id, cc.class_id, c.name as class_name, co.course_code, r.name as room_name
+        $sql = "SELECT t.id, cc.class_id, ct.name as class_name, co.course_code, r.name as room_name
                 FROM timetable t 
                 JOIN class_courses cc ON t.class_course_id = cc.id
-                JOIN classes c ON cc.class_id = c.id
+                JOIN class_offerings cof ON cc.class_id = cof.id
+                JOIN class_templates ct ON cof.template_id = ct.id
                 JOIN courses co ON cc.course_id = co.id
                 JOIN rooms r ON t.room_id = r.id
                 WHERE t.room_id = ? AND t.day_id = ? AND t.time_slot_id = ?";
@@ -119,9 +121,10 @@ class ConflictDetector {
      * Check if class is already scheduled at this time
      */
     private function checkClassConflicts($class_id, $day_id, $time_slot_id, $division_label = null) {
-        $sql = "SELECT t.id, co.course_code, co.course_name, r.name as room_name, t.division_label
+        $sql = "SELECT t.id, co.course_code, co.name as course_name, r.name as room_name, t.division_label
                 FROM timetable t 
                 JOIN class_courses cc ON t.class_course_id = cc.id
+                JOIN class_offerings cof ON cc.class_id = cof.id
                 JOIN courses co ON cc.course_id = co.id
                 JOIN rooms r ON t.room_id = r.id
                 WHERE cc.class_id = ? AND t.day_id = ? AND t.time_slot_id = ?";
@@ -158,12 +161,15 @@ class ConflictDetector {
      * Check if room capacity is sufficient for class enrollment
      */
     private function checkRoomCapacity($room_id, $class_id) {
-        $sql = "SELECT r.capacity, r.name as room_name, c.current_enrollment, c.name as class_name
-                FROM rooms r, classes c
-                WHERE r.id = ? AND c.id = ?";
-        
+        $sql = "SELECT r.capacity, r.name as room_name, cof.current_enrollment, ct.name as class_name
+                FROM rooms r
+                JOIN class_offerings cof ON cof.id = ?
+                JOIN class_templates ct ON cof.template_id = ct.id
+                WHERE r.id = ?";
+
+        // Note: params order matches cof.id then r.id
         $stmt = $this->conn->prepare($sql);
-        $stmt->bind_param('ii', $room_id, $class_id);
+        $stmt->bind_param('ii', $class_id, $room_id);
         $stmt->execute();
         $result = $stmt->get_result();
         
@@ -187,16 +193,17 @@ class ConflictDetector {
      */
     private function checkStreamConsistency($class_course_id, $lecturer_course_id, $room_id) {
         $sql = "SELECT 
-                    c.stream_id as class_stream,
+                    cof.stream_id as class_stream,
                     co.stream_id as course_stream,
                     l.stream_id as lecturer_stream,
                     r.stream_id as room_stream,
-                    c.name as class_name,
-                    co.course_code,
+                    ct.name as class_name,
+                    co.code as course_code,
                     l.name as lecturer_name,
                     r.name as room_name
                 FROM class_courses cc
-                JOIN classes c ON cc.class_id = c.id
+                JOIN class_offerings cof ON cc.class_id = cof.id
+                JOIN class_templates ct ON cof.template_id = ct.id
                 JOIN courses co ON cc.course_id = co.id
                 JOIN lecturer_courses lc ON lc.id = ?
                 JOIN lecturers l ON lc.lecturer_id = l.id

@@ -137,10 +137,10 @@ class StreamManager {
         $alias = $table_alias ? $table_alias . '.' : '';
         $aliasTrim = rtrim($table_alias, '.');
         
-        // ONLY filter classes table - everything else is global and shared across streams
-        $classes_aliases = ['c', 'classes', 'cl', 'class'];
+        // ONLY filter class offerings table - everything else is global and shared across streams
+        $offerings_aliases = ['cof', 'class_offerings', 'offering', 'offerings'];
         
-        if (in_array(strtolower($aliasTrim), $classes_aliases)) {
+        if (in_array(strtolower($aliasTrim), $offerings_aliases)) {
             if (strpos($sql, 'WHERE') !== false) {
                 $sql .= " AND {$alias}stream_id = " . $this->current_stream_id;
             } else {
@@ -156,9 +156,9 @@ class StreamManager {
      */
     public function getStreamFilterCondition($table_alias = '') {
         $aliasTrim = rtrim($table_alias, '.');
-        $classes_aliases = ['c', 'classes', 'cl', 'class'];
+        $offerings_aliases = ['cof', 'class_offerings', 'offering', 'offerings'];
         
-        if (in_array(strtolower($aliasTrim), $classes_aliases)) {
+        if (in_array(strtolower($aliasTrim), $offerings_aliases)) {
             $alias = $table_alias ? $table_alias . '.' : '';
             return "{$alias}stream_id = " . $this->current_stream_id;
         }
@@ -174,9 +174,9 @@ class StreamManager {
      */
     public function validateClassCourseAssignment($class_id, $course_id) {
         $sql = "SELECT 
-                    c.id as class_id,
-                    c.name as class_name,
-                    c.level_id as class_level_id,
+                    cof.id as class_id,
+                    ct.name as class_name,
+                    ct.level_id as class_level_id,
                     p.department_id as class_department_id,
                     d1.name as class_department_name,
                     l1.name as class_level_name,
@@ -188,15 +188,15 @@ class StreamManager {
                     co.course_type,
                     d2.name as course_department_name,
                     l2.name as course_level_name
-                    
-                FROM classes c
-                JOIN programs p ON c.program_id = p.id
+                FROM class_offerings cof
+                JOIN class_templates ct ON cof.template_id = ct.id
+                JOIN programs p ON ct.program_id = p.id
                 JOIN departments d1 ON p.department_id = d1.id
-                JOIN levels l1 ON c.level_id = l1.id
+                JOIN levels l1 ON ct.level_id = l1.id
                 CROSS JOIN courses co
                 JOIN departments d2 ON co.department_id = d2.id
                 JOIN levels l2 ON co.level_id = l2.id
-                WHERE c.id = ? AND co.id = ? AND c.is_active = 1 AND co.is_active = 1";
+                WHERE cof.id = ? AND co.id = ? AND cof.is_active = 1 AND co.is_active = 1";
         
         $stmt = $this->conn->prepare($sql);
         $stmt->bind_param("ii", $class_id, $course_id);
@@ -288,7 +288,9 @@ class StreamManager {
      */
     public function getCurrentStreamClasses($filters = []) {
         $sql = "SELECT 
-                    c.*,
+                    cof.*, 
+                    ct.name as class_name, 
+                    ct.code as class_code, 
                     p.name as program_name,
                     p.code as program_code,
                     d.name as department_name,
@@ -299,15 +301,15 @@ class StreamManager {
                     s.code as stream_code,
                     
                     -- Assignment statistics
-                    (SELECT COUNT(*) FROM class_courses cc WHERE cc.class_id = c.id AND cc.is_active = 1) as assigned_courses_count,
-                    (SELECT COUNT(*) FROM timetable t WHERE t.class_id = c.id) as scheduled_sessions_count
-                    
-                FROM classes c
-                LEFT JOIN programs p ON c.program_id = p.id
+                    (SELECT COUNT(*) FROM class_courses cc WHERE cc.class_id = cof.id AND cc.is_active = 1) as assigned_courses_count,
+                    (SELECT COUNT(*) FROM timetable t WHERE t.class_id = cof.id) as scheduled_sessions_count
+                FROM class_offerings cof
+                LEFT JOIN class_templates ct ON cof.template_id = ct.id
+                LEFT JOIN programs p ON ct.program_id = p.id
                 LEFT JOIN departments d ON p.department_id = d.id
-                LEFT JOIN levels l ON c.level_id = l.id
-                LEFT JOIN streams s ON c.stream_id = s.id
-                WHERE c.stream_id = ? AND c.is_active = 1";
+                LEFT JOIN levels l ON ct.level_id = l.id
+                LEFT JOIN streams s ON cof.stream_id = s.id
+                WHERE cof.stream_id = ? AND cof.is_active = 1";
         
         $params = [$this->current_stream_id];
         $types = 'i';
@@ -360,19 +362,19 @@ class StreamManager {
         if ($class_id) {
             $sql .= ",
                     -- Compatibility with specific class
-                    (SELECT p.department_id FROM classes c JOIN programs p ON c.program_id = p.id WHERE c.id = ?) as class_dept_id,
-                    (SELECT c.level_id FROM classes c WHERE c.id = ?) as class_level_id,
+                    (SELECT p.department_id FROM class_offerings cof JOIN class_templates ct ON cof.template_id = ct.id JOIN programs p ON ct.program_id = p.id WHERE cof.id = ?) as class_dept_id,
+                    (SELECT ct.level_id FROM class_offerings cof JOIN class_templates ct ON cof.template_id = ct.id WHERE cof.id = ?) as class_level_id,
                     
                     -- Professional compatibility score
                     CASE 
-                        WHEN (SELECT p.department_id FROM classes c JOIN programs p ON c.program_id = p.id WHERE c.id = ?) = co.department_id 
-                             AND (SELECT c.level_id FROM classes c WHERE c.id = ?) = co.level_id 
+                        WHEN (SELECT p.department_id FROM class_offerings cof JOIN class_templates ct ON cof.template_id = ct.id JOIN programs p ON ct.program_id = p.id WHERE cof.id = ?) = co.department_id 
+                             AND (SELECT ct.level_id FROM class_offerings cof JOIN class_templates ct ON cof.template_id = ct.id WHERE cof.id = ?) = co.level_id 
                              AND co.course_type = 'core' THEN 50
-                        WHEN (SELECT p.department_id FROM classes c JOIN programs p ON c.program_id = p.id WHERE c.id = ?) = co.department_id 
-                             AND (SELECT c.level_id FROM classes c WHERE c.id = ?) = co.level_id THEN 40
-                        WHEN (SELECT c.level_id FROM classes c WHERE c.id = ?) = co.level_id 
+                        WHEN (SELECT p.department_id FROM class_offerings cof JOIN class_templates ct ON cof.template_id = ct.id JOIN programs p ON ct.program_id = p.id WHERE cof.id = ?) = co.department_id 
+                             AND (SELECT ct.level_id FROM class_offerings cof JOIN class_templates ct ON cof.template_id = ct.id WHERE cof.id = ?) = co.level_id THEN 40
+                        WHEN (SELECT ct.level_id FROM class_offerings cof JOIN class_templates ct ON cof.template_id = ct.id WHERE cof.id = ?) = co.level_id 
                              AND co.course_type IN ('elective', 'practical') THEN 25
-                        WHEN (SELECT c.level_id FROM classes c WHERE c.id = ?) = co.level_id THEN 15
+                        WHEN (SELECT ct.level_id FROM class_offerings cof JOIN class_templates ct ON cof.template_id = ct.id WHERE cof.id = ?) = co.level_id THEN 15
                         ELSE 0
                     END as compatibility_score,
                     

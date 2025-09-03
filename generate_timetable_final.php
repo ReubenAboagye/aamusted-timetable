@@ -42,15 +42,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             
             // STEP 1: Clear existing timetable if requested
             if ($clear_existing) {
+                // Clear timetable entries for current stream by joining offerings
                 $clear_sql = "DELETE t FROM timetable t 
-                             JOIN classes c ON t.class_id = c.id 
-                             WHERE c.stream_id = ? AND t.semester = ? AND t.academic_year = ?";
+                             JOIN class_offerings cof ON t.class_id = cof.id 
+                             WHERE cof.stream_id = ? AND t.semester = ? AND t.academic_year = ?";
                 $clear_stmt = $conn->prepare($clear_sql);
                 $clear_stmt->bind_param('iss', $current_stream_id, $semester, $academic_year);
                 $clear_stmt->execute();
                 $cleared_entries = $clear_stmt->affected_rows;
                 $clear_stmt->close();
-                
+
                 $generation_log[] = "🗑️ Cleared $cleared_entries existing entries";
             }
             
@@ -86,18 +87,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             }
             $generation_log[] = "🏢 Global rooms available: " . count($rooms);
             
-            // STEP 4: Get class-course assignments for CURRENT STREAM only
+            // STEP 4: Get class-course assignments for CURRENT STREAM only (use offerings/templates)
             $assignments_sql = "SELECT 
                                     cc.id as class_course_id,
                                     cc.class_id,
                                     cc.course_id,
                                     cc.lecturer_id,
                                     cc.quality_score,
-                                    c.name as class_name,
-                                    c.code as class_code,
-                                    c.total_capacity,
-                                    c.current_enrollment,
-                                    c.divisions_count,
+                                    ct.name as class_name,
+                                    ct.code as class_code,
+                                    cof.total_capacity,
+                                    cof.current_enrollment,
+                                    cof.divisions_count,
                                     co.code as course_code,
                                     co.name as course_name,
                                     co.hours_per_week,
@@ -108,19 +109,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                                     l.max_hours_per_week as lecturer_max_hours,
                                     d.name as department_name
                                FROM class_courses cc
-                               JOIN classes c ON cc.class_id = c.id
+                               JOIN class_offerings cof ON cc.class_id = cof.id
+                               JOIN class_templates ct ON cof.template_id = ct.id
                                JOIN courses co ON cc.course_id = co.id
                                LEFT JOIN lecturers l ON cc.lecturer_id = l.id
-                               JOIN programs p ON c.program_id = p.id
+                               JOIN programs p ON ct.program_id = p.id
                                JOIN departments d ON p.department_id = d.id
-                               WHERE c.stream_id = ? 
+                               WHERE cof.stream_id = ? 
                                AND cc.semester = ? 
                                AND cc.academic_year = ? 
                                AND cc.is_active = 1 
-                               AND c.is_active = 1 
+                               AND cof.is_active = 1 
                                AND co.is_active = 1
-                               ORDER BY cc.quality_score DESC, d.name, c.level_id, c.name";
-            
+                               ORDER BY cc.quality_score DESC, d.name, ct.level_id, ct.name";
+
             $assignments_stmt = $conn->prepare($assignments_sql);
             $assignments_stmt->bind_param('iss', $current_stream_id, $semester, $academic_year);
             $assignments_stmt->execute();

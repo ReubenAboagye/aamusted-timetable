@@ -140,11 +140,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $class_course_id = (int)$_POST['class_course_id'];
         
         // Verify the assignment belongs to a class in the current stream
-        $verify_sql = "SELECT cc.id, c.name as class_name, co.course_code
+        $verify_sql = "SELECT cc.id, ct.name as class_name, co.code as course_code
                        FROM class_courses cc
-                       JOIN classes c ON cc.class_id = c.id
+                       JOIN class_offerings cof ON cc.class_id = cof.id
+                       JOIN class_templates ct ON cof.template_id = ct.id
                        JOIN courses co ON cc.course_id = co.id
-                       WHERE cc.id = ? AND c.stream_id = ?";
+                       WHERE cc.id = ? AND cof.stream_id = ?";
         $verify_stmt = $conn->prepare($verify_sql);
         $verify_stmt->bind_param('ii', $class_course_id, $streamManager->getCurrentStreamId());
         $verify_stmt->execute();

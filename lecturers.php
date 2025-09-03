@@ -224,7 +224,7 @@ include 'includes/stream_manager.php';
 $streamManager = getStreamManager();
 
 // Fetch lecturers with department names
-$sql = "SELECT l.*, d.name as department_name 
+$sql = "SELECT l.id, l.name, l.department_id, d.name as department_name, l.is_active
         FROM lecturers l 
         LEFT JOIN departments d ON l.department_id = d.id 
         WHERE l.is_active = 1

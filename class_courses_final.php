@@ -163,11 +163,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $class_course_id = (int)$_POST['class_course_id'];
         
         // Verify the assignment belongs to a class in the current stream
-        $verify_sql = "SELECT cc.id, c.name as class_name, co.code as course_code, cc.quality_score
+        $verify_sql = "SELECT cc.id, co.name as class_name, co.code as class_code, cc.quality_score
                        FROM class_courses cc
-                       JOIN classes c ON cc.class_id = c.id
-                       JOIN courses co ON cc.course_id = co.id
-                       WHERE cc.id = ? AND c.stream_id = ?";
+                       JOIN class_offerings co ON cc.class_id = co.id
+                       JOIN class_templates ct ON co.template_id = ct.id
+                       JOIN courses cr ON cc.course_id = cr.id
+                       WHERE cc.id = ? AND co.stream_id = ?";
         $verify_stmt = $conn->prepare($verify_sql);
         $verify_stmt->bind_param('ii', $class_course_id, $streamManager->getCurrentStreamId());
         $verify_stmt->execute();
@@ -238,7 +239,7 @@ $selected_class_id = isset($_GET['class_id']) ? (int)$_GET['class_id'] : 0;
 $courses_result = $streamManager->getCoursesWithCompatibility($selected_class_id);
 
 // Get all lecturers (global)
-$lecturers_sql = "SELECT l.id, l.name, l.title, l.rank, d.name as department_name
+$lecturers_sql = "SELECT l.id, l.name, l.department_id, d.name as department_name
                   FROM lecturers l
                   LEFT JOIN departments d ON l.department_id = d.id
                   WHERE l.is_active = 1
@@ -439,10 +440,7 @@ $assignments_result = $assignments_stmt->get_result();
                                     <option value="">Auto-assign based on lecturer-course mapping</option>
                                     <?php while ($lecturer = $lecturers_result->fetch_assoc()): ?>
                                         <option value="<?php echo $lecturer['id']; ?>">
-                                            <?php echo htmlspecialchars($lecturer['name']); ?>
-                                            <?php if ($lecturer['title']): ?>(<?php echo $lecturer['title']; ?>)<?php endif; ?>
-                                            - <?php echo htmlspecialchars($lecturer['department_name']); ?>
-                                            [<?php echo ucfirst($lecturer['rank']); ?>]
+                                            <?php echo htmlspecialchars($lecturer['name']); ?> - <?php echo htmlspecialchars($lecturer['department_name']); ?>
                                         </option>
                                     <?php endwhile; ?>
                                 </select>

@@ -7,9 +7,10 @@ This restructured schema is based on your original `DB Schema.sql` with professi
 ## 🔧 **KEY PRINCIPLES IMPLEMENTED**
 
 ### **✅ CORRECT STREAM LOGIC:**
-- **ONLY CLASSES** are stream-specific (have `stream_id`)
+- **ONLY `class_offerings`** are stream-specific (have `stream_id` and `academic_year`/`semester`)
+- **`class_templates`** store the static class metadata (global and reusable across years)
 - **ALL OTHER TABLES** are global (courses, lecturers, rooms, departments, programs)
-- **STREAMS** control time periods and which classes are active
+- **STREAMS** control time periods and which offerings are active
 
 ### **✅ PROFESSIONAL ENHANCEMENTS:**
 - **Quality scoring system** (0-50 points) for class-course assignments
@@ -56,11 +57,13 @@ stream_time_slots (id, stream_id, time_slot_id, priority, is_active)
 stream_days (id, stream_id, day_id, is_active)
 ```
 
-#### **2. Classes (ONLY stream-specific table):**
+#### **2. Classes (Templates + Offerings)**
 ```sql
-classes (id, program_id, level_id, name, code, stream_id, academic_year, 
-         semester, total_capacity, current_enrollment, divisions_count,
-         class_coordinator, preferred_start_time, max_daily_courses)
+# Static template describing a class across years
+class_templates (id, program_id, level_id, name, code, default_total_capacity, default_divisions_count, notes)
+
+# Per-session offering used for scheduling (stream-specific)
+class_offerings (id, template_id, stream_id, academic_year, semester, total_capacity, current_enrollment, divisions_count, division_capacity, max_daily_courses)
 ```
 
 ### **📚 ASSIGNMENT & SCHEDULING TABLES**
@@ -111,7 +114,7 @@ PROCEDURE assign_course_professional(class_id, course_id, lecturer_id, ...)
 ### **3. Professional Views:**
 ```sql
 -- Comprehensive class information with stream context
-VIEW classes_comprehensive 
+VIEW class_offerings_comprehensive
 
 -- Assignment quality monitoring with professional metrics
 VIEW assignment_quality_professional

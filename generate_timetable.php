@@ -600,7 +600,7 @@ if ($has_stream_col && !empty($current_stream_id)) {
         $sql = "SELECT COUNT(*) as count FROM timetable t JOIN class_courses cc ON t.class_course_id = cc.id JOIN classes c ON cc.class_id = c.id WHERE c.stream_id = " . intval($current_stream_id);
     } else {
         // Old schema: timetable stores class_id directly
-        $sql = "SELECT COUNT(*) as count FROM timetable t JOIN classes c ON t.class_id = c.id WHERE c.stream_id = " . intval($current_stream_id);
+        $sql = "SELECT COUNT(*) as count FROM timetable t JOIN class_offerings cof ON t.class_id = cof.id WHERE cof.stream_id = " . intval($current_stream_id);
     }
     $res = $conn->query($sql);
     $total_timetable_entries = $res ? $res->fetch_assoc()['count'] : 0;

@@ -106,12 +106,13 @@ $search_name = isset($_GET['search_name']) ? trim($_GET['search_name']) : '';
 
 // Get all classes for selects (include human-readable level and program) - STREAM FILTERED
 $current_stream_id = $streamManager->getCurrentStreamId();
-$classes_sql = "SELECT c.id, c.name, l.name AS level, p.name AS program_name 
-                FROM classes c 
-                LEFT JOIN levels l ON c.level_id = l.id 
-                LEFT JOIN programs p ON c.program_id = p.id 
-                WHERE c.is_active = 1 AND c.stream_id = ? 
-                ORDER BY c.name";
+$classes_sql = "SELECT cof.id, ct.name, l.name AS level, p.name AS program_name 
+                FROM class_offerings cof 
+                LEFT JOIN class_templates ct ON cof.template_id = ct.id 
+                LEFT JOIN levels l ON ct.level_id = l.id 
+                LEFT JOIN programs p ON ct.program_id = p.id 
+                WHERE cof.is_active = 1 AND cof.stream_id = ? 
+                ORDER BY ct.name";
 $classes_stmt = $conn->prepare($classes_sql);
 $classes_stmt->bind_param('i', $current_stream_id);
 $classes_stmt->execute();
