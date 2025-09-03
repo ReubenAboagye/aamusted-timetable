@@ -39,7 +39,7 @@ $timetable_count = getCount($conn, "SELECT COUNT(*) AS c FROM timetable", $activ
 
 // Get streams dynamically
 $streams = [];
-$result = $conn->query("SELECT id, name FROM streams WHERE is_active = 1 ORDER BY id ASC");
+$result = $conn->query("SELECT id, name, is_active FROM streams ORDER BY id ASC");
 while ($row = $result->fetch_assoc()) {
     $streams[] = $row;
 }
@@ -156,15 +156,16 @@ foreach ($streams as $s) {
   <div class="page-header">
     <h2>Dashboard</h2>
     <div class="stream-select">
-      <form method="get" id="streamForm">
+      <form id="streamForm">
         <label for="stream_id"><strong>Switch Stream:</strong></label>
-        <select name="stream_id" id="stream_id" onchange="document.getElementById('streamForm').submit();">
+        <select name="stream_id" id="stream_id">
           <?php foreach ($streams as $s): ?>
             <option value="<?= $s['id'] ?>" <?= ($active_stream == $s['id'] ? 'selected' : '') ?>>
-              <?= htmlspecialchars($s['name']) ?>
+              <?= htmlspecialchars($s['name']) ?><?= isset($s['is_active']) && !$s['is_active'] ? ' (inactive)' : '' ?>
             </option>
           <?php endforeach; ?>
         </select>
+        <button type="button" id="switchStreamBtn" class="btn btn-outline-primary btn-sm ms-2">Switch</button>
       </form>
     </div>
   </div>
@@ -271,6 +272,25 @@ foreach ($streams as $s) {
       const text = button.textContent.toLowerCase();
       button.parentElement.style.display = text.includes(searchValue) ? '' : 'none';
     });
+  });
+
+  // Switch stream button: activates selected stream (server) and reloads
+  document.getElementById('switchStreamBtn').addEventListener('click', function(){
+    const sel = document.getElementById('stream_id');
+    const streamId = sel ? sel.value : null;
+    if (!streamId) return;
+
+    fetch('change_stream.php', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'stream_id=' + encodeURIComponent(streamId)
+    }).then(r => r.json()).then(data => {
+      if (data && data.success) {
+        window.location.reload();
+      } else {
+        alert('Failed to switch stream: ' + (data.message || 'unknown'));
+      }
+    }).catch(() => { alert('Network error while switching stream'); });
   });
 </script>
 </body>
