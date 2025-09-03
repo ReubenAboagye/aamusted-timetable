@@ -2,12 +2,23 @@
 header('Content-Type: application/json');
 include 'connect.php';
 
+// Include stream manager for proper filtering
+if (file_exists(__DIR__ . '/includes/stream_manager.php')) {
+    include_once __DIR__ . '/includes/stream_manager.php';
+    $streamManager = getStreamManager();
+    $current_stream_id = $streamManager->getCurrentStreamId();
+} else {
+    // Fallback if stream manager doesn't exist
+    session_start();
+    $current_stream_id = $_SESSION['current_stream_id'] ?? 1;
+}
+
 $department_id = isset($_GET['department_id']) ? (int)$_GET['department_id'] : 0; // still supported but optional
 $level = isset($_GET['level']) ? (int)$_GET['level'] : 0;
 
-$query = "SELECT id, code, name FROM courses WHERE is_active = 1";
-$params = [];
-$types = '';
+$query = "SELECT id, code, name FROM courses WHERE is_active = 1 AND stream_id = ?";
+$params = [$current_stream_id];
+$types = 'i';
 
 if ($department_id > 0) {
     $query .= " AND department_id = ?";

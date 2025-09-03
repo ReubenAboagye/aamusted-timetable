@@ -1,6 +1,17 @@
 <?php
 require_once 'connect.php';
 
+// Include stream manager for validation
+if (file_exists(__DIR__ . '/includes/stream_manager.php')) {
+    include_once __DIR__ . '/includes/stream_manager.php';
+    $streamManager = getStreamManager();
+    $current_stream_id = $streamManager->getCurrentStreamId();
+} else {
+    // Fallback if stream manager doesn't exist
+    session_start();
+    $current_stream_id = $_SESSION['current_stream_id'] ?? 1;
+}
+
 // Expect JSON body
 $raw = file_get_contents('php://input');
 $data = json_decode($raw, true);
@@ -60,7 +71,29 @@ try {
     }
 
     // Insert or reactivate provided assignments
+    // Validate class belongs to current stream
+    $class_stream_check = $conn->prepare("SELECT stream_id FROM classes WHERE id = ? AND is_active = 1");
+    $class_stream_check->bind_param('i', $class_id);
+    $class_stream_check->execute();
+    $class_stream_result = $class_stream_check->get_result();
+    
+    if ($class_stream_row = $class_stream_result->fetch_assoc()) {
+        if ($class_stream_row['stream_id'] != $current_stream_id) {
+            throw new Exception('Class does not belong to current stream');
+        }
+    } else {
+        throw new Exception('Class not found or inactive');
+    }
+    $class_stream_check->close();
+
     foreach ($assigned_ids as $course_id) {
+        // Validate stream consistency
+        if (isset($streamManager)) {
+            if (!$streamManager->validateClassCourseStreamConsistency($class_id, $course_id)) {
+                throw new Exception("Course $course_id belongs to different stream than class $class_id");
+            }
+        }
+        
         // Try to reactivate existing mapping
         $stmt = $conn->prepare("UPDATE class_courses SET is_active = 1 WHERE class_id = ? AND course_id = ?");
         if ($stmt) {

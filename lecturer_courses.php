@@ -46,8 +46,15 @@ $departments = $conn->query("SELECT id, name FROM departments WHERE is_active = 
 $lecturers = $conn->query("SELECT id, name, department_id FROM lecturers WHERE is_active = 1 ORDER BY name");
 
 // Build courses query defensively: some DB schemas include department_id on courses, others don't
-$courses_query = "SELECT c.id, c.name, c.code FROM courses c WHERE c.is_active = 1 ORDER BY c.name";
-$courses = $conn->query($courses_query);
+// Include stream manager for filtering
+include_once 'includes/stream_manager.php';
+$streamManager = getStreamManager();
+$current_stream_id = $streamManager->getCurrentStreamId();
+
+$courses_stmt = $conn->prepare($courses_query);
+$courses_stmt->bind_param('i', $current_stream_id);
+$courses_stmt->execute();
+$courses = $courses_stmt->get_result();
 if ($courses === false) {
     error_log('courses query failed: ' . $conn->error . ' -- Query: ' . $courses_query);
 }
@@ -55,7 +62,10 @@ if ($courses === false) {
 if ($courses === false) {
     // Log error for debugging (do not expose DB errors to users in production)
     error_log('courses query failed: ' . $conn->error . ' -- Query: ' . $courses_query);
-    $courses = $conn->query("SELECT c.id, c.name, c.code, NULL AS department_name FROM courses c WHERE c.is_active = 1 ORDER BY c.name");
+    $fallback_stmt = $conn->prepare("SELECT c.id, c.name, c.code, NULL AS department_name FROM courses c WHERE c.is_active = 1 AND c.stream_id = ? ORDER BY c.name");
+    $fallback_stmt->bind_param('i', $current_stream_id);
+    $fallback_stmt->execute();
+    $courses = $fallback_stmt->get_result();
 }
 
 // Build mappings query with filters

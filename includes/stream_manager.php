@@ -157,17 +157,25 @@ class StreamManager {
      */
     public function addStreamFilter($sql, $table_alias = '') {
         $alias = $table_alias ? $table_alias . '.' : '';
-        // Only apply stream filter for the classes table (alias 'c' or 'classes').
-        // Other tables are considered global and should not be filtered by stream.
+        
+        // Apply stream filter to ALL stream-aware tables
         $aliasTrim = rtrim($table_alias, '.');
-        if (!in_array(strtolower($aliasTrim), ['c', 'classes'])) {
-            return $sql;
-        }
-
-        if (strpos($sql, 'WHERE') !== false) {
-            $sql .= " AND {$alias}stream_id = " . $this->current_stream_id;
-        } else {
-            $sql .= " WHERE {$alias}stream_id = " . $this->current_stream_id;
+        $stream_aware_tables = [
+            'c', 'classes',           // Classes are stream-specific
+            'co', 'courses',          // Courses are stream-specific
+            'l', 'lecturers',         // Lecturers are stream-specific
+            'r', 'rooms',             // Rooms are stream-specific
+            'd', 'departments',       // Departments are stream-specific
+            'p', 'programs',          // Programs are stream-specific
+            'cc', 'class_courses'     // Class courses inherit stream from classes
+        ];
+        
+        if (in_array(strtolower($aliasTrim), $stream_aware_tables)) {
+            if (strpos($sql, 'WHERE') !== false) {
+                $sql .= " AND {$alias}stream_id = " . $this->current_stream_id;
+            } else {
+                $sql .= " WHERE {$alias}stream_id = " . $this->current_stream_id;
+            }
         }
 
         return $sql;
@@ -177,22 +185,33 @@ class StreamManager {
      * Get stream filter condition for manual queries
      */
     public function getStreamFilterCondition($table_alias = '') {
-        // Only return a condition for the classes table alias; otherwise return empty string
         $aliasTrim = rtrim($table_alias, '.');
-        if (!in_array(strtolower($aliasTrim), ['c', 'classes'])) {
-            return '';
+        $stream_aware_tables = [
+            'c', 'classes',           // Classes are stream-specific
+            'co', 'courses',          // Courses are stream-specific
+            'l', 'lecturers',         // Lecturers are stream-specific
+            'r', 'rooms',             // Rooms are stream-specific
+            'd', 'departments',       // Departments are stream-specific
+            'p', 'programs',          // Programs are stream-specific
+            'cc', 'class_courses'     // Class courses inherit stream from classes
+        ];
+        
+        if (in_array(strtolower($aliasTrim), $stream_aware_tables)) {
+            $alias = $table_alias ? $table_alias . '.' : '';
+            return "{$alias}stream_id = " . $this->current_stream_id;
         }
-        $alias = $table_alias ? $table_alias . '.' : '';
-        return "{$alias}stream_id = " . $this->current_stream_id;
+        return '';
     }
     
     /**
      * Check if a record belongs to current stream
      */
     public function isRecordInCurrentStream($table_name, $record_id) {
-        // Only valid for tables that have a stream_id column (we treat 'classes' as canonical here).
-        if (strtolower($table_name) !== 'classes') {
-            // Non-classes are considered global; return true so checks relying on this don't block.
+        // Check for tables that have stream_id column
+        $stream_aware_tables = ['classes', 'courses', 'lecturers', 'rooms', 'departments', 'programs', 'class_courses'];
+        
+        if (!in_array(strtolower($table_name), $stream_aware_tables)) {
+            // Non-stream-aware tables are considered global
             return true;
         }
 
@@ -210,6 +229,47 @@ class StreamManager {
 
         $stmt->close();
         return false;
+    }
+    
+    /**
+     * Validate that a class and course belong to the same stream
+     */
+    public function validateClassCourseStreamConsistency($class_id, $course_id) {
+        $sql = "SELECT c.stream_id as class_stream, co.stream_id as course_stream 
+                FROM classes c, courses co 
+                WHERE c.id = ? AND co.id = ? AND c.is_active = 1 AND co.is_active = 1";
+        $stmt = $this->conn->prepare($sql);
+        $stmt->bind_param("ii", $class_id, $course_id);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        
+        if ($result->num_rows > 0) {
+            $row = $result->fetch_assoc();
+            $stmt->close();
+            return $row['class_stream'] === $row['course_stream'];
+        }
+        
+        $stmt->close();
+        return false;
+    }
+    
+    /**
+     * Get stream-filtered SQL for common queries
+     */
+    public function getStreamFilteredSQL($base_table, $select_fields = '*', $additional_conditions = '') {
+        $stream_condition = $this->getStreamFilterCondition($base_table);
+        $where_clause = '';
+        
+        if (!empty($stream_condition)) {
+            $where_clause = "WHERE {$stream_condition}";
+            if (!empty($additional_conditions)) {
+                $where_clause .= " AND ({$additional_conditions})";
+            }
+        } else if (!empty($additional_conditions)) {
+            $where_clause = "WHERE {$additional_conditions}";
+        }
+        
+        return "SELECT {$select_fields} FROM {$base_table} {$where_clause}";
     }
     
     /**

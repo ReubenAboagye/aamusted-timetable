@@ -5,6 +5,11 @@ include 'connect.php';
 $pageTitle = 'Assign Courses to Class';
 include 'includes/header.php';
 
+// Include stream manager for validation
+include_once 'includes/stream_manager.php';
+$streamManager = getStreamManager();
+$current_stream_id = $streamManager->getCurrentStreamId();
+
 $success_message = '';
 $error_message = '';
 
@@ -15,27 +20,59 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $course_ids = $_POST['course_ids'] ?? [];
         
         if ($class_id > 0 && !empty($course_ids)) {
-            $stmt = $conn->prepare("INSERT IGNORE INTO class_courses (class_id, course_id) VALUES (?, ?)");
+            $success_count = 0;
+            $error_count = 0;
+            $errors = [];
             
             foreach ($course_ids as $course_id) {
-                $stmt->bind_param('ii', $class_id, $course_id);
-                $stmt->execute();
+                // Validate stream consistency
+                if ($streamManager->validateClassCourseStreamConsistency($class_id, $course_id)) {
+                    try {
+                        $stmt = $conn->prepare("CALL assign_course_to_class(?, ?, 'current', '2024/2025')");
+                        $stmt->bind_param('ii', $class_id, $course_id);
+                        if ($stmt->execute()) {
+                            $success_count++;
+                        } else {
+                            $error_count++;
+                            $errors[] = "Failed to assign course $course_id";
+                        }
+                        $stmt->close();
+                    } catch (Exception $e) {
+                        $error_count++;
+                        $errors[] = "Exception assigning course $course_id: " . $e->getMessage();
+                    }
+                } else {
+                    $error_count++;
+                    $errors[] = "Course $course_id belongs to different stream";
+                }
             }
-            $stmt->close();
-            redirect_with_flash('assign_courses.php', 'success', 'Courses assigned to class successfully!');
+            
+            if ($success_count > 0 && $error_count == 0) {
+                redirect_with_flash('assign_courses.php', 'success', "All courses assigned successfully! $success_count assignments created.");
+            } else if ($success_count > 0) {
+                redirect_with_flash('assign_courses.php', 'warning', "Partial success: $success_count assigned, $error_count failed. " . implode('; ', array_slice($errors, 0, 3)));
+            } else {
+                $error_message = "Assignment failed: " . implode('; ', array_slice($errors, 0, 3));
+            }
         } else {
             $error_message = "Please select both class and courses.";
         }
     }
 }
 
-// Get all classes
-$classes_sql = "SELECT id, name, level FROM classes WHERE is_active = 1 ORDER BY name";
-$classes_result = $conn->query($classes_sql);
+// Get all classes (stream filtered)
+$classes_sql = "SELECT id, name, level FROM classes WHERE is_active = 1 AND stream_id = ? ORDER BY name";
+$classes_stmt = $conn->prepare($classes_sql);
+$classes_stmt->bind_param('i', $current_stream_id);
+$classes_stmt->execute();
+$classes_result = $classes_stmt->get_result();
 
-// Get all courses
-$courses_sql = "SELECT id, course_code, course_name FROM courses WHERE is_active = 1 ORDER BY course_code";
-$courses_result = $conn->query($courses_sql);
+// Get all courses (stream filtered)
+$courses_sql = "SELECT id, course_code, course_name FROM courses WHERE is_active = 1 AND stream_id = ? ORDER BY course_code";
+$courses_stmt = $conn->prepare($courses_sql);
+$courses_stmt->bind_param('i', $current_stream_id);
+$courses_stmt->execute();
+$courses_result = $courses_stmt->get_result();
 
 // Get existing assignments for selected class
 $selected_class_id = isset($_GET['class_id']) ? (int)$_GET['class_id'] : 0;
