@@ -6,8 +6,10 @@ include 'includes/sidebar.php';
 $success_message = '';
 $error_message = '';
 
-// Fetch streams for selector
-$streams_rs = $conn->query("SELECT id, name FROM streams WHERE is_active = 1 ORDER BY name");
+// Determine current stream from stream manager (header/session)
+include_once 'includes/stream_manager.php';
+$streamManager = getStreamManager();
+$current_stream_id = $streamManager->getCurrentStreamId();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 	$action = $_POST['action'];
@@ -57,6 +59,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
 // Fetch time slots
 $ts_rs = $conn->query("SELECT id, start_time, end_time, duration, is_break, is_mandatory FROM time_slots ORDER BY start_time");
+
+// Fetch assigned time slots for current stream so we can mark them server-side
+$assigned_time_slot_ids = [];
+$stmt_ass = $conn->prepare("SELECT time_slot_id FROM stream_time_slots WHERE stream_id = ? AND is_active = 1");
+$stmt_ass->bind_param('i', $current_stream_id);
+$stmt_ass->execute();
+$resass = $stmt_ass->get_result();
+while ($r = $resass->fetch_assoc()) { $assigned_time_slot_ids[] = (int)$r['time_slot_id']; }
+$stmt_ass->close();
+$assigned_map = array_flip($assigned_time_slot_ids);
 ?>
 
 <div class="main-content" id="mainContent">
@@ -64,12 +76,7 @@ $ts_rs = $conn->query("SELECT id, start_time, end_time, duration, is_break, is_m
 		<div class="table-header d-flex justify-content-between align-items-center">
 			<h4><i class="fas fa-clock me-2"></i>Time Slots Management</h4>
 			<div>
-				<select id="streamSelector" class="form-select d-inline-block me-2" style="width:220px;">
-					<option value="0">Select Stream (all slots)</option>
-					<?php while ($s = $streams_rs->fetch_assoc()): ?>
-						<option value="<?php echo $s['id']; ?>"><?php echo htmlspecialchars($s['name']); ?></option>
-					<?php endwhile; ?>
-				</select>
+				<!-- <span class="me-3">Current Stream: <strong><?php echo htmlspecialchars($streamManager->getCurrentStreamName()); ?></strong></span> -->
 				<button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addTimeSlotModal">
 					<i class="fas fa-plus me-2"></i>Add Time Slot
 				</button>
@@ -95,7 +102,7 @@ $ts_rs = $conn->query("SELECT id, start_time, end_time, duration, is_break, is_m
 						<td><?php echo htmlspecialchars($ts['duration']); ?></td>
 						<td><?php echo $ts['is_break'] ? 'Yes' : 'No'; ?></td>
 						<td><?php echo $ts['is_mandatory'] ? 'Yes' : 'No'; ?></td>
-						<td class="assigned-cell">-</td>
+						<td class="assigned-cell"><?php echo isset($assigned_map[$ts['id']]) ? 'Yes' : '-'; ?></td>
 						<td>
 							<button class="btn btn-sm btn-secondary" data-bs-toggle="modal" data-bs-target="#editTimeSlotModal<?php echo $ts['id']; ?>">Edit</button>
 							<form method="post" style="display:inline-block;" onsubmit="return confirm('Delete this time slot?');">
@@ -132,32 +139,6 @@ $ts_rs = $conn->query("SELECT id, start_time, end_time, duration, is_break, is_m
 	</div>
 </div>
 
-<script>
-(function(){
-	const selector = document.getElementById('streamSelector');
-	selector.addEventListener('change', function(){
-		const streamId = selector.value;
-		// reset assigned cells
-		document.querySelectorAll('#timeslotTable tbody tr').forEach(r => {
-			r.querySelector('.assigned-cell').textContent = '-';
-			r.classList.remove('assigned');
-		});
-		if (streamId && streamId !== '0') {
-			fetch('get_stream_time_slots.php?stream_id=' + encodeURIComponent(streamId))
-				.then(r => r.json())
-				.then(ids => {
-					ids.forEach(id => {
-						const row = document.querySelector('#timeslotTable tbody tr[data-timeslot-id="' + id + '"]');
-						if (row) {
-							row.querySelector('.assigned-cell').textContent = 'Yes';
-							row.classList.add('assigned');
-						}
-					});
-				})
-				.catch(() => {});
-		}
-	});
-})();
-</script>
+<!-- Assigned slots are rendered server-side based on the current stream in the header/session -->
 
 <?php include 'includes/footer.php'; ?>
