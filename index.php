@@ -179,22 +179,22 @@ foreach ($streams as $s) {
 
   <!-- Grid Buttons -->
   <div class="row g-3 mb-3" id="dashboardGrid">
-    <div class="col-md-3">
-      <?php if ($timetable_count > 0): ?>
-        <a href="view_timetable.php" class="grid-button">
-          <i class="fas fa-table"></i>
-          <div>View Timetable</div>
-          <span class="count-circle"><?= $timetable_count ?></span>
-        </a>
-      <?php else: ?>
-        <a href="generate_timetable.php" class="grid-button">
-          <i class="fas fa-calendar-plus"></i>
-          <div>Generate Timetable</div>
-          <span class="count-circle">0</span>
-        </a>
-      <?php endif; ?>
-    </div>
-    
+         <div class="col-md-3">
+       <a href="generate_timetable.php" class="grid-button">
+         <i class="fas fa-calendar-plus"></i>
+         <div>Generate Timetable</div>
+         <span class="count-circle"><?= $timetable_count ?></span>
+       </a>
+     </div>
+     
+     <div class="col-md-3">
+       <a href="saved_timetable.php" class="grid-button">
+         <i class="fas fa-save"></i>
+         <div>Saved Timetables</div>
+         <span class="count-circle"><?= $timetable_count > 0 ? $timetable_count : 0 ?></span>
+       </a>
+     </div>
+
     <div class="col-md-3">
       <a href="adddepartmentform.php" class="grid-button">
         <i class="fas fa-building"></i>

@@ -35,8 +35,23 @@ class StreamManager {
             $this->current_stream_id = $_SESSION['stream_id'];
             $_SESSION['current_stream_id'] = $this->current_stream_id;
         } else {
-            // Set default stream (Regular)
-            $this->current_stream_id = 1;
+            // Get the currently active stream from database instead of hardcoding
+            $active_stream_sql = "SELECT id FROM streams WHERE is_active = 1 LIMIT 1";
+            $active_result = $this->conn->query($active_stream_sql);
+            if ($active_result && $active_result->num_rows > 0) {
+                $active_row = $active_result->fetch_assoc();
+                $this->current_stream_id = $active_row['id'];
+            } else {
+                // Fallback to first stream if no active stream found
+                $fallback_sql = "SELECT id FROM streams ORDER BY id LIMIT 1";
+                $fallback_result = $this->conn->query($fallback_sql);
+                if ($fallback_result && $fallback_result->num_rows > 0) {
+                    $fallback_row = $fallback_result->fetch_assoc();
+                    $this->current_stream_id = $fallback_row['id'];
+                } else {
+                    $this->current_stream_id = 1; // Ultimate fallback
+                }
+            }
             $_SESSION['current_stream_id'] = $this->current_stream_id;
         }
         
@@ -48,7 +63,7 @@ class StreamManager {
      * Load the current stream name
      */
     private function loadStreamName() {
-        $sql = "SELECT name FROM streams WHERE id = ? AND is_active = 1";
+        $sql = "SELECT name FROM streams WHERE id = ?";
         $stmt = $this->conn->prepare($sql);
         $stmt->bind_param("i", $this->current_stream_id);
         $stmt->execute();
@@ -58,7 +73,15 @@ class StreamManager {
             $row = $result->fetch_assoc();
             $this->current_stream_name = $row['name'];
         } else {
-            $this->current_stream_name = "Regular";
+            // Try to get the active stream name as fallback
+            $fallback_sql = "SELECT name FROM streams WHERE is_active = 1 LIMIT 1";
+            $fallback_result = $this->conn->query($fallback_sql);
+            if ($fallback_result && $fallback_result->num_rows > 0) {
+                $fallback_row = $fallback_result->fetch_assoc();
+                $this->current_stream_name = $fallback_row['name'];
+            } else {
+                $this->current_stream_name = "Regular";
+            }
         }
         $stmt->close();
     }
@@ -89,6 +112,25 @@ class StreamManager {
             $_SESSION['stream_id'] = $stream_id;
             $this->loadStreamName();
             return true;
+        }
+        return false;
+    }
+    
+    /**
+     * Sync session with currently active stream from database
+     */
+    public function syncWithActiveStream() {
+        $active_stream_sql = "SELECT id FROM streams WHERE is_active = 1 LIMIT 1";
+        $active_result = $this->conn->query($active_stream_sql);
+        if ($active_result && $active_result->num_rows > 0) {
+            $active_row = $active_result->fetch_assoc();
+            $active_stream_id = $active_row['id'];
+            
+            // Update session if different from current
+            if ($active_stream_id != $this->current_stream_id) {
+                $this->setCurrentStream($active_stream_id);
+                return true;
+            }
         }
         return false;
     }
@@ -232,6 +274,16 @@ if (!function_exists('getStreamFilterCondition')) {
 function getStreamFilterCondition($table_alias = '') {
     $streamManager = getStreamManager();
     return $streamManager->getStreamFilterCondition($table_alias);
+}
+}
+
+/**
+ * Helper function to sync with active stream
+ */
+if (!function_exists('syncWithActiveStream')) {
+function syncWithActiveStream() {
+    $streamManager = getStreamManager();
+    return $streamManager->syncWithActiveStream();
 }
 }
 ?>

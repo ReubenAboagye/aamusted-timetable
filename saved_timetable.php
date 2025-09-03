@@ -171,9 +171,6 @@ $error_message = $_GET['error'] ?? '';
                 <a class="btn btn-primary" href="generate_timetable.php">
                     <i class="fas fa-cogs me-2"></i>Generate New Timetable
                 </a>
-                <a class="btn btn-success" href="view_timetable.php">
-                    <i class="fas fa-eye me-2"></i>View Timetable
-                </a>
                 <button class="btn btn-warning" data-bs-toggle="modal" data-bs-target="#editSessionModal">
                     <i class="fas fa-edit me-2"></i>Edit Stream
                 </button>
@@ -299,9 +296,6 @@ $error_message = $_GET['error'] ?? '';
                                         <td>
                                             <div class="btn-group btn-group-sm" role="group">
                                                 <div class="btn-group" role="group" aria-label="Actions">
-                                                    <a href="view_timetable.php?stream_id=<?php echo $timetable['stream_id']; ?>" class="btn btn-sm btn-primary" title="View Timetable">
-                                                        <i class="fas fa-eye"></i>
-                                                    </a>
                                                     <a href="export_timetable.php?stream_id=<?php echo $timetable['stream_id']; ?>" class="btn btn-sm btn-outline-success" title="Export" target="_blank">
                                                         <i class="fas fa-download"></i>
                                                     </a>

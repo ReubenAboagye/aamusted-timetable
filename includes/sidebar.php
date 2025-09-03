@@ -48,15 +48,12 @@
       </div>
               <div class="collapse" id="timetableManagementCollapse">
           <div class="dropdown-menu-items">
-            <a href="generate_timetable.php" class="nav-link <?= ($currentPage == 'generate_timetable.php') ? 'active' : '' ?>">
-              <i class="fas fa-calendar-plus me-2"></i>Generate Timetable
-            </a>
-            <a href="view_timetable.php" class="nav-link <?= ($currentPage == 'view_timetable.php') ? 'active' : '' ?>">
-              <i class="fas fa-calendar-check me-2"></i>View Timetable
-            </a>
-            <a href="saved_timetable.php" class="nav-link <?= ($currentPage == 'saved_timetable.php') ? 'active' : '' ?>">
-              <i class="fas fa-save me-2"></i>Saved Timetable
-            </a>
+                         <a href="generate_timetable.php" class="nav-link <?= ($currentPage == 'generate_timetable.php') ? 'active' : '' ?>">
+               <i class="fas fa-calendar-plus me-2"></i>Generate Timetable
+             </a>
+             <a href="saved_timetable.php" class="nav-link <?= ($currentPage == 'saved_timetable.php') ? 'active' : '' ?>">
+               <i class="fas fa-save me-2"></i>Saved Timetable
+             </a>
           </div>
         </div>
     </div>

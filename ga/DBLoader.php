@@ -53,7 +53,7 @@ class DBLoader {
     }
 
     private function loadTimeSlots() {
-        return $this->fetchAll("SELECT id, start_time, end_time FROM time_slots WHERE is_break = 0 ORDER BY start_time");
+        return $this->fetchAll("SELECT id, start_time, end_time FROM time_slots WHERE is_mandatory = 1 ORDER BY start_time");
     }
 
     private function loadDays() {

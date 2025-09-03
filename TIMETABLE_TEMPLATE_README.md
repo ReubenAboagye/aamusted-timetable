@@ -1,6 +1,6 @@
-# Timetable Template
+# Option 2 Timetable Implementation
 
-A modern, interactive timetable management interface inspired by React-based designs, adapted for PHP and the existing AAMUSTED Timetable System.
+A modern, interactive timetable generation and editing workflow implemented in the existing `generate_timetable.php` page, providing a seamless experience where generated timetables can be viewed, edited, and saved on the same page.
 
 ## Features
 
@@ -16,6 +16,14 @@ A modern, interactive timetable management interface inspired by React-based des
 - **Time Exclusions**: Reserve time slots for special courses (African Studies, Liberal Courses, etc.)
 - **Real-time Updates**: AJAX-powered data loading and saving
 
+### 🚀 **Option 2 Workflow Implementation**
+- **Generate on Same Page**: Timetable generation happens on the generate_timetable.php page
+- **Immediate Preview**: Generated timetables appear on the same page for immediate review
+- **Save to Saved Timetables**: One-click save to the saved timetables section
+- **Context Preservation**: All generation parameters remain visible during the process
+- **Loading States**: Visual feedback during generation and saving processes
+- **Edit Integration**: Seamless integration with existing view_timetable.php for editing
+
 ### 🎨 Modern UI/UX
 - **Bootstrap 5**: Modern styling with consistent design language
 - **Font Awesome Icons**: Intuitive iconography throughout
@@ -25,8 +33,9 @@ A modern, interactive timetable management interface inspired by React-based des
 ## File Structure
 
 ```
-├── timetable_template.php          # Main timetable template interface
+├── generate_timetable.php          # Main interface for generation, editing, and saving
 ├── api_timetable_template.php      # API endpoint for AJAX operations
+├── saved_timetable.php             # View saved timetables
 ├── includes/
 │   ├── header.php                  # Updated with new styling
 │   └── sidebar.php                 # Updated with navigation link
@@ -35,35 +44,36 @@ A modern, interactive timetable management interface inspired by React-based des
 
 ## Usage
 
-### Accessing the Template
-1. Navigate to the main dashboard
-2. Click on "Timetable Template" in the grid or sidebar
-3. Or directly visit `/timetable_template.php`
+### **Option 2 Workflow (Recommended)**
 
-### Adding Courses
-1. Click on any empty cell in the timetable
-2. Fill in the course details:
-   - Course Code (e.g., MATH101)
-   - Start Time
-   - Classes (can add multiple)
-3. Click "Save" to add the course
+1. **Navigate to Generate Timetable**: Click on "Generate Timetable" in the sidebar
+2. **Set Generation Parameters**: Enter timetable name and select semester
+3. **Generate Timetable**: Click "Generate Lecture Timetable" to create a new timetable
+   - Loading state shows generation progress
+   - Generated timetable preview appears on the same page
+   - "Save Timetable" button becomes available
+4. **Review Generated Timetable**: View the timetable preview on the same page
+5. **Edit Timetable**: Click "Edit" button to edit directly on the same page
+6. **Save Changes**: Save edits to the database
+7. **Save to Saved Timetables**: Click "Save Timetable" to store the final version
+8. **View Saved Timetables**: Navigate to "Saved Timetables" to view your saved timetables
 
-### Editing Courses
-1. Click on any existing course cell
-2. Modify the details as needed
-3. Click "Save" to update or "Delete" to remove
+### **Key Pages in Option 2**
+- **Generate Timetable**: Complete interface for generation, editing, and saving
+- **Saved Timetables**: View saved timetable versions
 
-### Setting Time Exclusions
-1. Click "Generate Timetable" button
-2. In the modal, click "Add Exclusion"
-3. Set the day, time range, and reason
-4. Excluded time slots will be marked as "RESERVED"
+### **Key Benefits of Option 2**
+- **Seamless Workflow**: No page navigation between generation and editing
+- **Context Preservation**: All parameters remain visible during editing
+- **Quick Iteration**: Easy to regenerate if needed
+- **Visual Feedback**: Clear indication of generation and save status
 
-### Filtering Data
-- Use the filter controls at the top to select:
-  - Academic Session
-  - Semester (1 or 2)
-  - Timetable Type (Lecture or Exam)
+### **Integration with Existing System**
+1. **Generation**: Uses existing generation logic in generate_timetable.php
+2. **Preview**: Shows generated timetable preview on the same page
+3. **Inline Editing**: Edit timetable entries directly on the generate page
+4. **Database Integration**: Saves changes directly to the timetable table
+5. **Saving**: Creates entries in the saved_timetables table
 
 ## API Endpoints
 
@@ -80,8 +90,10 @@ The `api_timetable_template.php` provides the following endpoints:
 - `get_lecturers` - Get all active lecturers
 
 ### POST Endpoints
-- `save_course` - Save a new course to the timetable
-- `delete_course` - Delete a course from the timetable
+- `get_generated_timetable` - Retrieve generated timetable data
+- `save_generated_timetable` - Save generated timetable to saved timetables
+- `generate_timetable` - Generate a new timetable with exclusions
+- `save_timetable` - Save the current timetable to saved timetables
 
 ## Database Integration
 
