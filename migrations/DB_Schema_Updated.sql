@@ -34,14 +34,12 @@ CREATE TABLE `departments` (
   `name` varchar(100) NOT NULL,
   `code` varchar(20) NOT NULL,
   `description` text,
-  `stream_id` int DEFAULT 1,
   `is_active` tinyint(1) DEFAULT '1',
   `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_dept_code` (`code`),
   UNIQUE KEY `uq_dept_name` (`name`),
-  KEY `idx_departments_stream` (`stream_id`),
   KEY `idx_departments_active` (`is_active`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
@@ -91,7 +89,6 @@ CREATE TABLE `programs` (
   `code` varchar(20) NOT NULL,
   `description` text,
   `duration_years` int DEFAULT '4',
-  `stream_id` int DEFAULT 1,
   `is_active` tinyint(1) DEFAULT '1',
   `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -99,7 +96,6 @@ CREATE TABLE `programs` (
   UNIQUE KEY `uq_program_code` (`code`),
   UNIQUE KEY `uq_program_name` (`name`),
   KEY `idx_programs_department` (`department_id`),
-  KEY `idx_programs_stream` (`stream_id`),
   KEY `idx_programs_active` (`is_active`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
@@ -143,7 +139,6 @@ CREATE TABLE `courses` (
   `code` varchar(20) NOT NULL,
   `name` varchar(200) NOT NULL,
   `department_id` int DEFAULT NULL,
-  `stream_id` int DEFAULT 1,
   `credits` int DEFAULT NULL,
   `hours_per_week` int NOT NULL DEFAULT '3',
   `is_active` tinyint(1) DEFAULT '1',
@@ -152,7 +147,6 @@ CREATE TABLE `courses` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_course_code` (`code`),
   KEY `idx_courses_department` (`department_id`),
-  KEY `idx_courses_stream` (`stream_id`),
   KEY `idx_courses_active` (`is_active`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
@@ -162,13 +156,11 @@ CREATE TABLE `lecturers` (
   `id` int NOT NULL AUTO_INCREMENT,
   `name` varchar(100) NOT NULL,
   `department_id` int NOT NULL,
-  `stream_id` int DEFAULT 1,
   `is_active` tinyint(1) DEFAULT '1',
   `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `idx_lecturers_department` (`department_id`),
-  KEY `idx_lecturers_stream` (`stream_id`),
   KEY `idx_lecturers_active` (`is_active`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
@@ -263,14 +255,12 @@ CREATE TABLE `rooms` (
   `room_type` varchar(50) NOT NULL COMMENT 'Expected values: classroom, lecture_hall, laboratory, computer_lab, seminar_room, auditorium',
   `capacity` int NOT NULL,
   `building_id` int DEFAULT NULL,
-  `stream_id` int DEFAULT 1,
   `is_active` tinyint(1) DEFAULT '1',
   `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_room_name_building` (`name`),
   KEY `idx_rooms_building` (`building_id`),
-  KEY `idx_rooms_stream` (`stream_id`),
   KEY `idx_rooms_type` (`room_type`),
   KEY `idx_rooms_active` (`is_active`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
@@ -396,24 +386,17 @@ CREATE TABLE `timetable_lecturers` (
 -- Enable foreign key checks
 SET FOREIGN_KEY_CHECKS = 1;
 
--- Departments foreign keys
-ALTER TABLE `departments` 
-ADD CONSTRAINT `fk_departments_stream` FOREIGN KEY (`stream_id`) REFERENCES `streams` (`id`) ON DELETE SET NULL;
-
 -- Programs foreign keys
 ALTER TABLE `programs` 
-ADD CONSTRAINT `fk_programs_department` FOREIGN KEY (`department_id`) REFERENCES `departments` (`id`) ON DELETE CASCADE,
-ADD CONSTRAINT `fk_programs_stream` FOREIGN KEY (`stream_id`) REFERENCES `streams` (`id`) ON DELETE SET NULL;
+ADD CONSTRAINT `fk_programs_department` FOREIGN KEY (`department_id`) REFERENCES `departments` (`id`) ON DELETE CASCADE;
 
 -- Courses foreign keys
 ALTER TABLE `courses` 
-ADD CONSTRAINT `fk_courses_department` FOREIGN KEY (`department_id`) REFERENCES `departments` (`id`) ON DELETE SET NULL,
-ADD CONSTRAINT `fk_courses_stream` FOREIGN KEY (`stream_id`) REFERENCES `streams` (`id`) ON DELETE SET NULL;
+ADD CONSTRAINT `fk_courses_department` FOREIGN KEY (`department_id`) REFERENCES `departments` (`id`) ON DELETE SET NULL;
 
 -- Lecturers foreign keys
 ALTER TABLE `lecturers` 
-ADD CONSTRAINT `fk_lecturers_department` FOREIGN KEY (`department_id`) REFERENCES `departments` (`id`) ON DELETE CASCADE,
-ADD CONSTRAINT `fk_lecturers_stream` FOREIGN KEY (`stream_id`) REFERENCES `streams` (`id`) ON DELETE SET NULL;
+ADD CONSTRAINT `fk_lecturers_department` FOREIGN KEY (`department_id`) REFERENCES `departments` (`id`) ON DELETE CASCADE;
 
 -- Classes foreign keys
 ALTER TABLE `classes` 
@@ -423,8 +406,7 @@ ADD CONSTRAINT `fk_classes_stream` FOREIGN KEY (`stream_id`) REFERENCES `streams
 
 -- Rooms foreign keys
 ALTER TABLE `rooms` 
-ADD CONSTRAINT `fk_rooms_building` FOREIGN KEY (`building_id`) REFERENCES `buildings` (`id`) ON DELETE SET NULL,
-ADD CONSTRAINT `fk_rooms_stream` FOREIGN KEY (`stream_id`) REFERENCES `streams` (`id`) ON DELETE SET NULL;
+ADD CONSTRAINT `fk_rooms_building` FOREIGN KEY (`building_id`) REFERENCES `buildings` (`id`) ON DELETE SET NULL;
 
 -- Class courses foreign keys
 ALTER TABLE `class_courses` 
@@ -521,9 +503,7 @@ WHERE t.is_active = 1;
 -- Stream-based timetable view
 CREATE OR REPLACE VIEW `stream_timetable_view` AS
 SELECT 
-    t.*,
-    s.name as stream_name,
-    s.code as stream_code
+    t.*
 FROM timetable_view t
 JOIN streams s ON t.stream_id = s.id
 WHERE s.is_active = 1;
