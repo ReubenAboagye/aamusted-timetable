@@ -962,6 +962,9 @@ $total_courses = $conn->query("SELECT COUNT(*) as count FROM courses WHERE is_ac
                 $ts_rs = $conn->query("SELECT ts.id, ts.start_time, ts.end_time FROM stream_time_slots sts JOIN time_slots ts ON ts.id = sts.time_slot_id WHERE sts.stream_id = " . intval($current_stream_id) . " AND sts.is_active = 1 ORDER BY ts.start_time");
                 if ($ts_rs && $ts_rs->num_rows > 0) {
                     while ($slot = $ts_rs->fetch_assoc()) {
+                        // Add is_break and break_type fields to ensure consistency
+                        $slot['is_break'] = false;
+                        $slot['break_type'] = '';
                         $template_time_slots[] = $slot;
                     }
                 }
@@ -1110,12 +1113,22 @@ $total_courses = $conn->query("SELECT COUNT(*) as count FROM courses WHERE is_ac
                                         <?php 
                                         $current_break_span = 0;
                                         foreach ($template_time_slots as $index => $time_slot): 
+                                            // Ensure is_break key exists
+                                            if (!isset($time_slot['is_break'])) {
+                                                $time_slot['is_break'] = false;
+                                                $time_slot['break_type'] = '';
+                                            }
                                             if ($time_slot['is_break']) {
                                                 if ($current_break_span == 0) {
                                                     // Start of break period
                                                     $break_duration = 0;
                                                     // Count how many periods this break spans
                                                     for ($i = $index; $i < count($template_time_slots); $i++) {
+                                                        // Ensure is_break key exists for this slot
+                                                        if (!isset($template_time_slots[$i]['is_break'])) {
+                                                            $template_time_slots[$i]['is_break'] = false;
+                                                            $template_time_slots[$i]['break_type'] = '';
+                                                        }
                                                         if ($template_time_slots[$i]['is_break'] && $template_time_slots[$i]['break_type'] == $time_slot['break_type']) {
                                                             $break_duration++;
                                                         } else {
@@ -1173,12 +1186,22 @@ $total_courses = $conn->query("SELECT COUNT(*) as count FROM courses WHERE is_ac
                                                 <?php 
                                                 $current_break_span = 0;
                                                 foreach ($template_time_slots as $index => $time_slot): 
+                                                    // Ensure is_break key exists
+                                                    if (!isset($time_slot['is_break'])) {
+                                                        $time_slot['is_break'] = false;
+                                                        $time_slot['break_type'] = '';
+                                                    }
                                                     if ($time_slot['is_break']) {
                                                         if ($current_break_span == 0) {
                                                             // Start of break period
                                                             $break_duration = 0;
                                                             // Count how many periods this break spans
                                                             for ($i = $index; $i < count($template_time_slots); $i++) {
+                                                                // Ensure is_break key exists for this slot
+                                                                if (!isset($template_time_slots[$i]['is_break'])) {
+                                                                    $template_time_slots[$i]['is_break'] = false;
+                                                                    $template_time_slots[$i]['break_type'] = '';
+                                                                }
                                                                 if ($template_time_slots[$i]['is_break'] && $template_time_slots[$i]['break_type'] == $time_slot['break_type']) {
                                                                     $break_duration++;
                                                                 } else {
