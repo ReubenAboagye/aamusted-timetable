@@ -1,4 +1,56 @@
 <?php
+// Handle AJAX requests FIRST, before any output or includes
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'save_checkbox_states') {
+    // Start session for AJAX request
+    if (session_status() == PHP_SESSION_NONE) {
+        session_start();
+    }
+    
+    // Include database connection
+    include 'connect.php';
+    
+    // Handle the AJAX request
+    $room_states = json_decode($_POST['room_states'], true);
+    
+    if (!$room_states || !is_array($room_states)) {
+        header('Content-Type: application/json');
+        echo json_encode(['success' => false, 'message' => 'Invalid room states data.']);
+        exit;
+    }
+    
+    $success_count = 0;
+    $error_count = 0;
+    
+    foreach ($room_states as $room_id => $is_active) {
+        $id = (int)$room_id;
+        $active = (int)$is_active;
+        
+        $update_sql = "UPDATE rooms SET is_active = ? WHERE id = ?";
+        $update_stmt = $conn->prepare($update_sql);
+        $update_stmt->bind_param("ii", $active, $id);
+        
+        if ($update_stmt->execute()) {
+            $success_count++;
+        } else {
+            $error_count++;
+        }
+        $update_stmt->close();
+    }
+    
+    if ($success_count > 0) {
+        $success_message = "Successfully updated active states for $success_count rooms!";
+        if ($error_count > 0) {
+            $success_message .= " $error_count rooms failed to update.";
+        }
+        header('Content-Type: application/json');
+        echo json_encode(['success' => true, 'message' => $success_message]);
+    } else {
+        header('Content-Type: application/json');
+        echo json_encode(['success' => false, 'message' => 'No room states were updated. Please check your selection.']);
+    }
+    exit;
+}
+
 session_start();
 // Normalize action early to avoid undefined index notices
 $action = $_POST['action'] ?? null;
@@ -210,6 +262,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         exit;
     }
+}
+$pageTitle = 'Rooms Management';
+include 'includes/header.php';
+include 'includes/sidebar.php';
+
+/**
+ * HARDCODED ROOM TYPES (Application-level validation):
+ * - classroom
+ * - lecture_hall  
+ * - laboratory
+ * - computer_lab
+ * - seminar_room
+ * - auditorium
+ * 
+ * REMINDER: room_type is stored as VARCHAR in database, validation is enforced at application level
+ */
+
+// Database connection already included above
+
+// Test room type validation (for debugging)
+if (isset($_GET['test_room_type'])) {
+    $test_type = $_GET['test_room_type'];
+    $valid_types = ['classroom', 'lecture_hall', 'laboratory', 'computer_lab', 'seminar_room', 'auditorium'];
+    echo "Testing room type: '$test_type'<br>";
+    echo "Valid types: " . implode(', ', $valid_types) . "<br>";
+    echo "Is valid: " . (in_array($test_type, $valid_types) ? 'YES' : 'NO') . "<br>";
+    echo "Length: " . strlen($test_type) . "<br>";
+    exit;
+}
 
     // Handle multi-add (client sets action to 'add_multiple')
     if ($action === 'add_multiple') {
@@ -423,7 +504,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
         }
-    }
 
     // Bulk Edit
     if ($action === 'bulk_edit' && isset($_POST['room_ids'])) {
@@ -536,17 +616,70 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $stmt->close();
     }
-}
+    
 
-$pageTitle = 'Rooms Management';
-include 'includes/header.php';
-include 'includes/sidebar.php';
+    
+    // Toggle Status (toggle is_active for multiple rooms)
+    if ($action === 'toggle_status' && isset($_POST['room_ids'])) {
+        $room_ids = json_decode($_POST['room_ids'], true);
+        if (!$room_ids || !is_array($room_ids)) {
+            $_SESSION['error_message'] = "Invalid room selection.";
+            header('Location: rooms.php'); exit;
+        } else {
+            $success_count = 0;
+            $error_count = 0;
+            
+            foreach ($room_ids as $room_id) {
+                $id = (int)$room_id;
+                
+                // First get current status
+                $check_sql = "SELECT is_active FROM rooms WHERE id = ?";
+                $check_stmt = $conn->prepare($check_sql);
+                $check_stmt->bind_param("i", $id);
+                $check_stmt->execute();
+                $check_result = $check_stmt->get_result();
+                
+                if ($check_result && $check_result->num_rows > 0) {
+                    $current_status = $check_result->fetch_assoc()['is_active'];
+                    $new_status = $current_status ? 0 : 1; // Toggle
+                    
+                    $check_stmt->close();
+                    
+                    // Update with new status
+                    $update_sql = "UPDATE rooms SET is_active = ? WHERE id = ?";
+                    $update_stmt = $conn->prepare($update_sql);
+                    $update_stmt->bind_param("ii", $new_status, $id);
+                    
+                    if ($update_stmt->execute()) {
+                        $success_count++;
+                    } else {
+                        error_log("ERROR: Toggle Status - Update failed for room $id: " . $update_stmt->error);
+                        $error_count++;
+                    }
+                    $update_stmt->close();
+                } else {
+                    $error_count++;
+                }
+            }
+            
+            if ($success_count > 0) {
+                $success_message = "Successfully toggled status for $success_count rooms!";
+                if ($error_count > 0) {
+                    $success_message .= " $error_count rooms failed to update.";
+                }
+                $_SESSION['success_message'] = $success_message;
+            } else {
+                $_SESSION['error_message'] = "No rooms were updated. Please check your selection.";
+            }
+            header('Location: rooms.php'); exit;
+        }
+    }
+}
 
 // Fetch rooms with all fields from current schema, joining with buildings table
 $sql = "SELECT r.id, r.name, b.name as building_name, r.room_type, r.capacity, r.is_active, r.created_at, r.updated_at, r.building_id 
         FROM rooms r 
         LEFT JOIN buildings b ON r.building_id = b.id 
-        WHERE r.is_active = 1 
         ORDER BY b.name, r.name";
 $result = $conn->query($sql);
 
@@ -604,18 +737,41 @@ $result = $conn->query($sql);
         <?php endif; ?>
 
         <div class="search-container m-3">
-            <input type="text" class="search-input" placeholder="Search rooms...">
+            <div class="row">
+                <div class="col-md-6">
+                    <input type="text" class="search-input form-control" placeholder="Search rooms...">
+                </div>
+                <div class="col-md-3">
+                    <select class="form-select" id="statusFilter">
+                        <option value="all">All Rooms</option>
+                        <option value="active">Active Only</option>
+                        <option value="inactive">Inactive Only</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <button class="btn btn-outline-secondary" id="toggleStatusBtn" style="display: none;">
+                        <i class="fas fa-toggle-on me-2"></i>Toggle Status
+                    </button>
+                    <button class="btn btn-outline-primary" id="saveCheckboxBtn">
+                        <i class="fas fa-save me-2"></i>Save Active States
+                    </button>
+                </div>
+            </div>
         </div>
 
         <div class="table-responsive">
             <table class="table" id="roomsTable">
                 <thead>
                     <tr>
-
+                        <th>
+                            <input type="checkbox" id="selectAllRooms" class="form-check-input">
+                            <br><small class="text-muted">Active</small>
+                        </th>
                         <th>Room Name</th>
                         <th>Type</th>
                         <th>Capacity</th>
                         <th>Building</th>
+                        <th>Status</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
@@ -623,6 +779,9 @@ $result = $conn->query($sql);
                     <?php if ($result && $result->num_rows > 0): ?>
                         <?php while ($row = $result->fetch_assoc()): ?>
                             <tr>
+                                <td>
+                                    <input type="checkbox" class="form-check-input room-checkbox" value="<?php echo $row['id']; ?>" <?php echo $row['is_active'] ? 'checked' : ''; ?>>
+                                </td>
                                 <td><strong><?php echo htmlspecialchars($row['name']); ?></strong></td>
                                 <td>
                                     <?php 
@@ -642,6 +801,13 @@ $result = $conn->query($sql);
                                 <td><span class="badge bg-dark"><?php echo htmlspecialchars($row['capacity']); ?> students</span></td>
                                 <td><?php echo htmlspecialchars($row['building_name']); ?></td>
                                 <td>
+                                    <?php if ($row['is_active']): ?>
+                                        <span class="badge bg-success">Active</span>
+                                    <?php else: ?>
+                                        <span class="badge bg-secondary">Inactive</span>
+                                    <?php endif; ?>
+                                </td>
+                                <td>
                                     <button class="btn btn-sm btn-outline-primary me-1" onclick="editRoom(<?php echo (int)$row['id']; ?>, '<?php echo addslashes($row['name']); ?>', <?php echo (int)$row['building_id']; ?>, '<?php echo addslashes(ucwords(str_replace('_', ' ', $row['room_type']))); ?>', <?php echo (int)$row['capacity']; ?>, <?php echo (int)$row['is_active']; ?>)">
                                         <i class="fas fa-edit"></i>
                                     </button>
@@ -657,7 +823,7 @@ $result = $conn->query($sql);
                         <?php endwhile; ?>
                     <?php else: ?>
                         <tr>
-                            <td colspan="4" class="empty-state">
+                            <td colspan="7" class="empty-state">
                                 <i class="fas fa-door-open"></i>
                                 <p>No rooms found. Add your first room to get started!</p>
                             </td>
@@ -1209,18 +1375,234 @@ function editRoom(id, name, buildingId, roomType, capacity, isActive) {
 
 // Unified initialization block removed duplicate/conflict content; initialization handled below
 
-// Add search functionality
+// Add search and filter functionality
 document.addEventListener('DOMContentLoaded', function() {
-    document.querySelector('.search-input')?.addEventListener('input', function() {
-    const searchTerm = this.value.toLowerCase();
-    const table = document.getElementById('roomsTable');
-    const rows = table.querySelectorAll('tbody tr');
+    const searchInput = document.querySelector('.search-input');
+    const statusFilter = document.getElementById('statusFilter');
+    const toggleStatusBtn = document.getElementById('toggleStatusBtn');
     
-    rows.forEach(row => {
-        const text = row.textContent.toLowerCase();
-        row.style.display = text.includes(searchTerm) ? '' : 'none';
+    // Search functionality
+    searchInput?.addEventListener('input', function() {
+        filterRooms();
     });
+    
+    // Status filter functionality
+    statusFilter?.addEventListener('change', function() {
+        filterRooms();
     });
+    
+    // Toggle status functionality
+    toggleStatusBtn?.addEventListener('click', function() {
+        const selectedRows = document.querySelectorAll('tbody tr:not([style*="display: none"]) input[type="checkbox"]:checked');
+        if (selectedRows.length === 0) {
+            alert('Please select at least one room to toggle status.');
+            return;
+        }
+        
+        if (confirm(`Are you sure you want to toggle the status of ${selectedRows.length} selected room(s)?`)) {
+            const roomIds = Array.from(selectedRows).map(cb => cb.value);
+            toggleRoomStatus(roomIds);
+        }
+    });
+    
+    // Save checkbox states functionality
+    const saveCheckboxBtn = document.getElementById('saveCheckboxBtn');
+    saveCheckboxBtn?.addEventListener('click', function() {
+        const roomCheckboxes = document.querySelectorAll('.room-checkbox');
+        const roomStates = {};
+        
+        roomCheckboxes.forEach(checkbox => {
+            roomStates[checkbox.value] = checkbox.checked ? 1 : 0;
+        });
+        
+        if (confirm('Are you sure you want to save the current room active states?')) {
+            saveCheckboxStates(roomStates);
+        }
+    });
+    
+    function filterRooms() {
+        const searchTerm = searchInput.value.toLowerCase();
+        const statusFilterValue = statusFilter.value;
+        const table = document.getElementById('roomsTable');
+        const rows = table.querySelectorAll('tbody tr');
+        
+        rows.forEach(row => {
+            const text = row.textContent.toLowerCase();
+            const statusCell = row.querySelector('td:nth-child(6)'); // Updated column index
+            const isActive = statusCell && statusCell.textContent.includes('Active');
+            
+            let showBySearch = text.includes(searchTerm);
+            let showByStatus = true;
+            
+            if (statusFilterValue === 'active') {
+                showByStatus = isActive;
+            } else if (statusFilterValue === 'inactive') {
+                showByStatus = !isActive;
+            }
+            
+            row.style.display = (showBySearch && showByStatus) ? '' : 'none';
+        });
+        
+        // Show/hide toggle button based on filter
+        updateToggleButton();
+    }
+    
+    function updateToggleButton() {
+        const visibleRows = document.querySelectorAll('tbody tr:not([style*="display: none"])');
+        const hasVisibleRows = visibleRows.length > 0;
+        toggleStatusBtn.style.display = hasVisibleRows ? 'inline-block' : 'none';
+    }
+    
+    // Select all functionality
+    const selectAllCheckbox = document.getElementById('selectAllRooms');
+    const roomCheckboxes = document.querySelectorAll('.room-checkbox');
+    
+    if (selectAllCheckbox) {
+        selectAllCheckbox.addEventListener('change', function() {
+            const isChecked = this.checked;
+            roomCheckboxes.forEach(checkbox => {
+                checkbox.checked = isChecked;
+            });
+            // Auto-save after select all change with debouncing
+            clearTimeout(window.checkboxSaveTimeout);
+            window.checkboxSaveTimeout = setTimeout(() => {
+                const roomStates = {};
+                roomCheckboxes.forEach(checkbox => {
+                    roomStates[checkbox.value] = checkbox.checked ? 1 : 0;
+                });
+                saveCheckboxStates(roomStates);
+            }, 500); // Increased delay to 500ms for better debouncing
+        });
+    }
+    
+    // Individual checkbox functionality
+    roomCheckboxes.forEach(checkbox => {
+        checkbox.addEventListener('change', function() {
+            updateSelectAllCheckbox();
+            // Auto-save after individual checkbox change with debouncing
+            clearTimeout(window.checkboxSaveTimeout);
+            window.checkboxSaveTimeout = setTimeout(() => {
+                const roomStates = {};
+                roomCheckboxes.forEach(cb => {
+                    roomStates[cb.value] = cb.checked ? 1 : 0;
+                });
+                saveCheckboxStates(roomStates);
+            }, 500); // Increased delay to 500ms for better debouncing
+        });
+    });
+    
+    function updateSelectAllCheckbox() {
+        const checkedCount = document.querySelectorAll('.room-checkbox:checked').length;
+        const totalCount = roomCheckboxes.length;
+        
+        if (checkedCount === 0) {
+            selectAllCheckbox.indeterminate = false;
+            selectAllCheckbox.checked = false;
+        } else if (checkedCount === totalCount) {
+            selectAllCheckbox.indeterminate = false;
+            selectAllCheckbox.checked = true;
+        } else {
+            selectAllCheckbox.indeterminate = true;
+        }
+    }
+    
+    // Initialize select all checkbox state on page load
+    if (selectAllCheckbox && roomCheckboxes.length > 0) {
+        updateSelectAllCheckbox();
+    }
+    
+    function toggleRoomStatus(roomIds) {
+        // Create a form to submit the toggle request
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.style.display = 'none';
+        
+        const actionInput = document.createElement('input');
+        actionInput.type = 'hidden';
+        actionInput.name = 'action';
+        actionInput.value = 'toggle_status';
+        
+        const idsInput = document.createElement('input');
+        idsInput.type = 'hidden';
+        idsInput.name = 'room_ids';
+        idsInput.value = JSON.stringify(roomIds);
+        
+        form.appendChild(actionInput);
+        form.appendChild(idsInput);
+        document.body.appendChild(form);
+        form.submit();
+    }
+    
+    function saveCheckboxStates(roomStates) {
+        // Show saving indicator
+        const saveBtn = document.getElementById('saveCheckboxBtn');
+        if (saveBtn) {
+            const originalText = saveBtn.innerHTML;
+            saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Saving...';
+            saveBtn.disabled = true;
+            
+            // Restore button after save
+            setTimeout(() => {
+                saveBtn.innerHTML = originalText;
+                saveBtn.disabled = false;
+            }, 1000);
+        }
+        
+        // Use AJAX to save checkbox states without page refresh
+        const formData = new FormData();
+        formData.append('action', 'save_checkbox_states');
+        formData.append('room_states', JSON.stringify(roomStates));
+        
+        fetch('rooms.php', {
+            method: 'POST',
+            body: formData,
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                console.log('Room active states saved successfully:', data.message);
+                showSaveIndicator('success');
+            } else {
+                console.error('Error saving room active states:', data.message);
+                showSaveIndicator('error');
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            showSaveIndicator('error');
+        });
+    }
+    
+    function showSaveIndicator(type) {
+        // Create or update save indicator
+        let indicator = document.getElementById('saveIndicator');
+        if (!indicator) {
+            indicator = document.createElement('div');
+            indicator.id = 'saveIndicator';
+            indicator.style.cssText = 'position: fixed; top: 20px; right: 20px; z-index: 9999; padding: 10px 15px; border-radius: 5px; font-weight: bold;';
+            document.body.appendChild(indicator);
+        }
+        
+        if (type === 'success') {
+            indicator.style.backgroundColor = '#28a745';
+            indicator.style.color = 'white';
+            indicator.textContent = '✓ Saved';
+        } else {
+            indicator.style.backgroundColor = '#dc3545';
+            indicator.style.color = 'white';
+            indicator.textContent = '✗ Error';
+        }
+        
+        // Hide indicator after 2 seconds
+        setTimeout(() => {
+            if (indicator.parentNode) {
+                indicator.remove();
+            }
+        }, 2000);
+    }
 
     // Attach delegated handler for add-building links (works even if functions load later)
     document.body.addEventListener('click', function(e) {
@@ -1344,21 +1726,7 @@ function setupBulkEdit() {
         }
     }
     
-    // Update select all checkbox state
-    function updateSelectAllCheckbox() {
-        const checkedCount = document.querySelectorAll('.room-checkbox:checked').length;
-        const totalCount = roomCheckboxes.length;
-        
-        if (checkedCount === 0) {
-            selectAllCheckbox.indeterminate = false;
-            selectAllCheckbox.checked = false;
-        } else if (checkedCount === totalCount) {
-            selectAllCheckbox.indeterminate = false;
-            selectAllCheckbox.checked = true;
-        } else {
-            selectAllCheckbox.indeterminate = true;
-        }
-    }
+
     
     // Setup bulk edit modal functionality
     setupBulkEditModal();
