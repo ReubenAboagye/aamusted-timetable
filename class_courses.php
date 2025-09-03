@@ -6,6 +6,10 @@ $pageTitle = 'Class Course Management';
 include 'includes/header.php';
 include 'includes/sidebar.php';
 
+// Include stream manager for validation
+include_once 'includes/stream_manager.php';
+$streamManager = getStreamManager();
+
 // Handle single assignment
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? null;
@@ -14,16 +18,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $course_id = (int)($_POST['course_id'] ?? 0);
     
     if ($class_id > 0 && $course_id > 0) {
-        $stmt = $conn->prepare("INSERT IGNORE INTO class_courses (class_id, course_id) VALUES (?, ?)");
-        $stmt->bind_param('ii', $class_id, $course_id);
-        
-        if ($stmt->execute()) {
-            $stmt->close();
-            redirect_with_flash('class_courses.php', 'success', 'Course assigned to class successfully!');
+        // Validate stream consistency first
+        if (!$streamManager->validateClassCourseStreamConsistency($class_id, $course_id)) {
+            $error_message = "Cannot assign course from different stream to class. Please ensure both class and course belong to the same stream.";
         } else {
-            $error_message = "Error assigning course to class.";
+            // Use stored procedure for safe assignment
+            $stmt = $conn->prepare("CALL assign_course_to_class(?, ?, 'current', '2024/2025')");
+            $stmt->bind_param('ii', $class_id, $course_id);
+            
+            if ($stmt->execute()) {
+                $stmt->close();
+                redirect_with_flash('class_courses.php', 'success', 'Course assigned to class successfully!');
+            } else {
+                $error_message = "Error assigning course to class: " . $conn->error;
+            }
+            $stmt->close();
         }
-        $stmt->close();
     } else {
         $error_message = "Please select both class and course.";
     }
@@ -35,16 +45,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $course_ids = $_POST['course_ids'] ?? [];
     
     if (!empty($class_ids) && !empty($course_ids)) {
-        $stmt = $conn->prepare("INSERT IGNORE INTO class_courses (class_id, course_id) VALUES (?, ?)");
+        $success_count = 0;
+        $error_count = 0;
+        $errors = [];
+        
+        $stmt = $conn->prepare("CALL assign_course_to_class(?, ?, 'current', '2024/2025')");
         
         foreach ($class_ids as $cid) {
             foreach ($course_ids as $coid) {
-                $stmt->bind_param('ii', $cid, $coid);
-                $stmt->execute();
+                // Validate stream consistency
+                if ($streamManager->validateClassCourseStreamConsistency($cid, $coid)) {
+                    $stmt->bind_param('ii', $cid, $coid);
+                    if ($stmt->execute()) {
+                        $success_count++;
+                    } else {
+                        $error_count++;
+                        $errors[] = "Failed to assign course $coid to class $cid";
+                    }
+                } else {
+                    $error_count++;
+                    $errors[] = "Class $cid and course $coid belong to different streams";
+                }
             }
         }
         $stmt->close();
-        redirect_with_flash('class_courses.php', 'success', 'Bulk assignment completed successfully!');
+        
+        if ($success_count > 0 && $error_count == 0) {
+            redirect_with_flash('class_courses.php', 'success', "Bulk assignment completed successfully! $success_count assignments created.");
+        } else if ($success_count > 0) {
+            redirect_with_flash('class_courses.php', 'warning', "Partial success: $success_count assignments created, $error_count failed. " . implode('; ', array_slice($errors, 0, 3)));
+        } else {
+            $error_message = "Bulk assignment failed: " . implode('; ', array_slice($errors, 0, 3));
+        }
     } else {
         $error_message = "Please select both classes and courses.";
     }
@@ -72,25 +104,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $selected_program = isset($_GET['program_id']) ? (int)$_GET['program_id'] : 0;
 $search_name = isset($_GET['search_name']) ? trim($_GET['search_name']) : '';
 
-// Get all classes for selects (include human-readable level and program)
-$classes_sql = "SELECT c.id, c.name, l.name AS level, p.name AS program_name FROM classes c LEFT JOIN levels l ON c.level_id = l.id LEFT JOIN programs p ON c.program_id = p.id WHERE c.is_active = 1 ORDER BY c.name";
-$classes_result = $conn->query($classes_sql);
+// Get all classes for selects (include human-readable level and program) - STREAM FILTERED
+$current_stream_id = $streamManager->getCurrentStreamId();
+$classes_sql = "SELECT c.id, c.name, l.name AS level, p.name AS program_name 
+                FROM classes c 
+                LEFT JOIN levels l ON c.level_id = l.id 
+                LEFT JOIN programs p ON c.program_id = p.id 
+                WHERE c.is_active = 1 AND c.stream_id = ? 
+                ORDER BY c.name";
+$classes_stmt = $conn->prepare($classes_sql);
+$classes_stmt->bind_param('i', $current_stream_id);
+$classes_stmt->execute();
+$classes_result = $classes_stmt->get_result();
 
-// Get all courses (with basic defensive query)
-$courses_sql = "SELECT id, `code` AS course_code, `name` AS course_name FROM courses WHERE is_active = 1 ORDER BY `code`";
-$courses_result = $conn->query($courses_sql);
+// Get all courses (with stream filtering)
+$courses_sql = "SELECT id, `code` AS course_code, `name` AS course_name 
+                FROM courses 
+                WHERE is_active = 1 AND stream_id = ? 
+                ORDER BY `code`";
+$courses_stmt = $conn->prepare($courses_sql);
+$courses_stmt->bind_param('i', $current_stream_id);
+$courses_stmt->execute();
+$courses_result = $courses_stmt->get_result();
 
-// Prepare mappings query similar to lecturer_courses.php: show class -> assigned courses concatenated
-$mappings_query = "SELECT c.id as class_id, c.name as class_name, l.name AS level, p.name AS program_name, GROUP_CONCAT(co.code ORDER BY co.code SEPARATOR ', ') AS course_codes
+// Prepare mappings query similar to lecturer_courses.php: show class -> assigned courses concatenated (STREAM FILTERED)
+$mappings_query = "SELECT c.id as class_id, c.name as class_name, l.name AS level, p.name AS program_name, 
+                          GROUP_CONCAT(co.code ORDER BY co.code SEPARATOR ', ') AS course_codes,
+                          c.stream_id, s.name as stream_name
                    FROM classes c
                    LEFT JOIN levels l ON c.level_id = l.id
                    LEFT JOIN programs p ON c.program_id = p.id
+                   LEFT JOIN streams s ON c.stream_id = s.id
                    LEFT JOIN class_courses cc ON c.id = cc.class_id AND cc.is_active = 1
-                   LEFT JOIN courses co ON co.id = cc.course_id
-                   WHERE c.is_active = 1";
+                   LEFT JOIN courses co ON co.id = cc.course_id AND co.stream_id = c.stream_id
+                   WHERE c.is_active = 1 AND c.stream_id = ?";
 
-$params = [];
-$types = '';
+$params = [$current_stream_id];
+$types = 'i';
 
 if ($selected_program > 0) {
     $mappings_query .= " AND c.program_id = ?";
@@ -105,19 +155,15 @@ if (!empty($search_name)) {
 
 $mappings_query .= " GROUP BY c.id, c.name, l.name, p.name ORDER BY p.name, c.name";
 
-if (!empty($params)) {
-    $stmt = $conn->prepare($mappings_query);
-    if ($stmt) {
-        $stmt->bind_param($types, ...$params);
-        $stmt->execute();
-        $assignments_result = $stmt->get_result();
-        $stmt->close();
-    } else {
-        // fallback and log
-        error_log('class_courses mappings prepare failed: ' . $conn->error);
-        $assignments_result = $conn->query($mappings_query);
-    }
+$stmt = $conn->prepare($mappings_query);
+if ($stmt) {
+    $stmt->bind_param($types, ...$params);
+    $stmt->execute();
+    $assignments_result = $stmt->get_result();
+    $stmt->close();
 } else {
+    // fallback and log
+    error_log('class_courses mappings prepare failed: ' . $conn->error);
     $assignments_result = $conn->query($mappings_query);
 }
 
