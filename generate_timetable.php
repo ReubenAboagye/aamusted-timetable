@@ -333,7 +333,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 
                 // Fallback to global time slots if no stream-specific slots or period settings
                 if (empty($stream_slots)) {
-                    $ts_rs2 = $conn->query("SELECT id, start_time, end_time FROM time_slots WHERE is_break = 0 ORDER BY start_time");
+                    $ts_rs2 = $conn->query("SELECT id, start_time, end_time FROM time_slots WHERE is_mandatory = 1 ORDER BY start_time");
                     while ($s2 = $ts_rs2->fetch_assoc()) { $stream_slots[] = $s2; }
                 }
 
