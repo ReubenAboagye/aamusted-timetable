@@ -3,9 +3,9 @@
 -- Run this SQL in your database (e.g., via phpMyAdmin or mysql CLI)
 
 CREATE TABLE IF NOT EXISTS `stream_time_slots` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `stream_id` int(11) NOT NULL,
-  `time_slot_id` int(11) NOT NULL,
+  `id` int NOT NULL AUTO_INCREMENT,
+  `stream_id` int NOT NULL,
+  `time_slot_id` int NOT NULL,
   `is_active` tinyint(1) NOT NULL DEFAULT 1,
   `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -19,5 +19,6 @@ CREATE TABLE IF NOT EXISTS `stream_time_slots` (
 -- Optional: insert default mappings for existing streams to use all time slots
 -- INSERT INTO stream_time_slots (stream_id, time_slot_id, is_active)
 -- SELECT s.id, ts.id, 1 FROM streams s JOIN time_slots ts ON ts.is_break = 0;
+
 
 
