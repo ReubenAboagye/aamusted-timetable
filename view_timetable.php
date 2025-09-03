@@ -125,8 +125,16 @@ if (!empty($params)) {
 $stmt->execute();
 $timetable_result = $stmt->get_result();
 
-// Get filter options
-$classes_result = $conn->query("SELECT id, name FROM classes WHERE is_active = 1 ORDER BY name");
+// Get filter options (filter classes by resolved stream if classes.stream_id exists)
+$classes_sql = "SELECT id, name FROM classes WHERE is_active = 1";
+$col = $conn->query("SHOW COLUMNS FROM classes LIKE 'stream_id'");
+$has_stream_col = ($col && $col->num_rows > 0);
+if ($col) $col->close();
+if ($has_stream_col && !empty($resolved_stream_id)) {
+    $classes_sql .= " AND stream_id = " . intval($resolved_stream_id);
+}
+$classes_sql .= " ORDER BY name";
+$classes_result = $conn->query($classes_sql);
 $days_result = $conn->query("SELECT id, name FROM days ORDER BY id");
 $rooms_result = $conn->query("SELECT id, name FROM rooms WHERE is_active = 1 ORDER BY name");
 $streams_result = $conn->query("SELECT id, name FROM streams WHERE is_active = 1 ORDER BY name");

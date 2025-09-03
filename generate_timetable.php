@@ -264,6 +264,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $check_lecturer_stmt = $conn->prepare($check_lecturer_sql);
 
+            // Optional: preload course dependencies mapping if table exists
+            $course_dependencies_map = [];
+            $dep_tbl = $conn->query("SHOW TABLES LIKE 'course_dependencies'");
+            if ($dep_tbl && $dep_tbl->num_rows > 0) {
+                $dep_rs = $conn->query("SELECT course_id, prerequisite_course_id FROM course_dependencies");
+                if ($dep_rs) {
+                    while ($dr = $dep_rs->fetch_assoc()) {
+                        $cid = (int)$dr['course_id'];
+                        $pid = (int)$dr['prerequisite_course_id'];
+                        if ($cid > 0 && $pid > 0) {
+                            if (!isset($course_dependencies_map[$cid])) { $course_dependencies_map[$cid] = []; }
+                            $course_dependencies_map[$cid][] = $pid;
+                        }
+                    }
+                    $dep_rs->close();
+                }
+            }
+            if ($dep_tbl) $dep_tbl->close();
+
+            // Prepare dependency overlap check statements
+            if ($has_t_class_course) {
+                $check_prereq_sql = "SELECT COUNT(*) as count FROM timetable t JOIN class_courses cc ON t.class_course_id = cc.id WHERE t.day_id = ? AND t.time_slot_id = ? AND cc.class_id = ? AND cc.course_id = ?";
+            } else {
+                $check_prereq_sql = "SELECT COUNT(*) as count FROM timetable t WHERE t.day_id = ? AND t.time_slot_id = ? AND t.class_id = ? AND t.course_id = ?";
+            }
+            $check_prereq_stmt = $conn->prepare($check_prereq_sql);
+
             while ($stream = $streams_result->fetch_assoc()) {
                 $stream_id = $stream['id'];
 
@@ -309,7 +336,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 // Fallback to global time slots if none found or mapping table missing
                 if (empty($stream_slots)) {
-                    $ts_rs2 = $conn->query("SELECT id, start_time, end_time FROM time_slots WHERE is_break = 0 ORDER BY start_time");
+                    $ts_rs2 = $conn->query("SELECT id, start_time, end_time FROM time_slots WHERE is_mandatory = 1 ORDER BY start_time");
                     while ($s2 = $ts_rs2->fetch_assoc()) { $stream_slots[] = $s2; }
                 }
                 if ($sts_exists) $sts_exists->close();
@@ -340,6 +367,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $time_slot = $stream_slots[array_rand($stream_slots)];
                         $day = $days[array_rand($days)];
                         $room = $rooms[array_rand($rooms)];
+
+                        // Capacity validation: ensure selected room can hold the class (division-aware if applicable)
+                        $required_capacity = null;
+                        // Fetch class capacity and divisions lazily per attempt for accuracy
+                        $div_count = 1;
+                        $class_total_capacity = null;
+                        $cap_stmt = $conn->prepare("SELECT total_capacity, divisions_count FROM classes WHERE id = ? LIMIT 1");
+                        if ($cap_stmt) {
+                            $cap_stmt->bind_param("i", $assignment['class_id']);
+                            $cap_stmt->execute();
+                            $cap_res = $cap_stmt->get_result();
+                            $cap_row = $cap_res ? $cap_res->fetch_assoc() : null;
+                            $cap_stmt->close();
+                            if ($cap_row) {
+                                if (isset($cap_row['divisions_count']) && (int)$cap_row['divisions_count'] > 0) {
+                                    $div_count = (int)$cap_row['divisions_count'];
+                                }
+                                if (isset($cap_row['total_capacity']) && (int)$cap_row['total_capacity'] > 0) {
+                                    $class_total_capacity = (int)$cap_row['total_capacity'];
+                                }
+                            }
+                        }
+                        if ($class_total_capacity !== null) {
+                            if ($has_division_col && $has_classes_divisions && $div_count > 0) {
+                                $required_capacity = (int)ceil($class_total_capacity / max(1, $div_count));
+                            } else {
+                                $required_capacity = $class_total_capacity;
+                            }
+                        }
+                        if ($required_capacity !== null && isset($room['capacity']) && (int)$room['capacity'] < $required_capacity) {
+                            continue; // try another combination
+                        }
 
                         // Check room/class/lecturer conflicts
                         $check_room_stmt->bind_param("iii", $day['id'], $time_slot['id'], $room['id']);
@@ -390,6 +449,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                         // we'll lookup lecturer_course later; for now assume lecturer might conflict after we fetch it
                         if ($room_count == 0 && $class_count == 0) {
+                            // Course dependency validation: avoid overlapping with prerequisites for the same class
+                            $has_dep_conflict = false;
+                            if (!empty($course_dependencies_map) && isset($course_dependencies_map[(int)$assignment['course_id']])) {
+                                foreach ($course_dependencies_map[(int)$assignment['course_id']] as $preCourseId) {
+                                    $preCourseId = (int)$preCourseId;
+                                    if ($preCourseId <= 0) continue;
+                                    $check_prereq_stmt->bind_param("iiii", $day['id'], $time_slot['id'], $assignment['class_id'], $preCourseId);
+                                    $check_prereq_stmt->execute();
+                                    $pr_count = $check_prereq_stmt->get_result()->fetch_assoc()['count'];
+                                    if ($pr_count > 0) { $has_dep_conflict = true; break; }
+                                }
+                            }
+                            if ($has_dep_conflict) { continue; }
+
                             // Get a default lecturer_course (and lecturer) for this course
                             $lecturer_course_sql = "SELECT lc.id, lc.lecturer_id FROM lecturer_courses lc WHERE lc.course_id = ? LIMIT 1";
                             $lecturer_course_stmt = $conn->prepare($lecturer_course_sql);

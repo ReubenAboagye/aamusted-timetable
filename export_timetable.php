@@ -10,6 +10,14 @@ if (!ob_get_level()) {
 $pageTitle = 'Export Timetable';
 include 'includes/header.php';
 
+// Resolve stream (GET/header/session) via StreamManager
+if (file_exists(__DIR__ . '/includes/stream_manager.php')) include_once __DIR__ . '/includes/stream_manager.php';
+$resolved_stream_id = 0;
+if (function_exists('getStreamManager')) {
+    $sm = getStreamManager();
+    $resolved_stream_id = (int)$sm->getCurrentStreamId();
+}
+
 // Get filter parameters
 $class_filter = isset($_GET['class_id']) ? (int)$_GET['class_id'] : 0;
 $day_filter = isset($_GET['day_id']) ? (int)$_GET['day_id'] : 0;
@@ -55,6 +63,14 @@ if ($has_lecturer_course) {
 
 $main_query = "SELECT " . implode(",\n        ", $select_parts) . "\n    FROM timetable t\n        " . implode("\n        ", $join_parts) . "\n        JOIN days d ON t.day_id = d.id\n        JOIN time_slots ts ON t.time_slot_id = ts.id\n        JOIN rooms r ON t.room_id = r.id\n    WHERE 1=1";
 
+// Apply stream filter via classes when classes.stream_id exists
+$col = $conn->query("SHOW COLUMNS FROM classes LIKE 'stream_id'");
+$has_stream_col = ($col && $col->num_rows > 0);
+if ($col) $col->close();
+if ($has_stream_col && !empty($resolved_stream_id)) {
+    $main_query .= " AND c.stream_id = " . intval($resolved_stream_id);
+}
+
 $params = [];
 $types = "";
 
@@ -86,8 +102,13 @@ if (!empty($params)) {
 $stmt->execute();
 $timetable_result = $stmt->get_result();
 
-// Get filter options
-$classes_result = $conn->query("SELECT id, name FROM classes WHERE is_active = 1 ORDER BY name");
+// Get filter options (filter classes by resolved stream if classes.stream_id exists)
+$classes_sql = "SELECT id, name FROM classes WHERE is_active = 1";
+if ($has_stream_col && !empty($resolved_stream_id)) {
+    $classes_sql .= " AND stream_id = " . intval($resolved_stream_id);
+}
+$classes_sql .= " ORDER BY name";
+$classes_result = $conn->query($classes_sql);
 $days_result = $conn->query("SELECT id, name FROM days WHERE is_active = 1 ORDER BY id");
 $rooms_result = $conn->query("SELECT id, name FROM rooms WHERE is_active = 1 ORDER BY name");
 
@@ -158,35 +179,25 @@ function exportExcel($result) {
     $sheet->getStyle('A1:H1')->applyFromArray($headerStyle);
     
     // Add data
-    $row = 2;
-    while ($data = $result->fetch_assoc()) {
-        $sheet->setCellValue('A' . $row, $data['day_name']);
-        $sheet->setCellValue('B' . $row, substr($data['start_time'], 0, 5) . ' - ' . substr($data['end_time'], 0, 5));
-        $sheet->setCellValue('C' . $row, $data['class_name']);
-        $sheet->setCellValue('D' . $row, $data['course_code']);
-        $sheet->setCellValue('E' . $row, $data['course_name']);
-        $sheet->setCellValue('F' . $row, $data['room_name']);
-        $sheet->setCellValue('G' . $row, $data['capacity']);
-        $sheet->setCellValue('H' . $row, $data['lecturer_name'] ?: 'Not assigned');
-        $row++;
+    $rowNum = 2;
+    while ($row = $result->fetch_assoc()) {
+        $sheet->setCellValue('A' . $rowNum, $row['day_name']);
+        $sheet->setCellValue('B' . $rowNum, substr($row['start_time'], 0, 5) . ' - ' . substr($row['end_time'], 0, 5));
+        $sheet->setCellValue('C' . $rowNum, $row['class_name']);
+        $sheet->setCellValue('D' . $rowNum, $row['course_code']);
+        $sheet->setCellValue('E' . $rowNum, $row['course_name']);
+        $sheet->setCellValue('F' . $rowNum, $row['room_name']);
+        $sheet->setCellValue('G' . $rowNum, $row['capacity']);
+        $sheet->setCellValue('H' . $rowNum, $row['lecturer_name'] ?: 'Not assigned');
+        $rowNum++;
     }
     
-    // Auto-size columns
-    foreach (range('A', 'H') as $col) {
-        $sheet->getColumnDimension($col)->setAutoSize(true);
-    }
-    
-    // Create writer and output
     $writer = new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet);
-    
-    // Clear any prior output and set headers if possible
     if (ob_get_length()) ob_clean();
     if (!headers_sent()) {
         header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         header('Content-Disposition: attachment; filename="timetable_' . date('Y-m-d_H-i-s') . '.xlsx"');
-        header('Cache-Control: max-age=0');
     }
-    
     $writer->save('php://output');
 }
 
