@@ -80,82 +80,33 @@ $pageTitle = 'Apply Corrected Schema';
                         }
                         
                         $sql_content = file_get_contents($file_path);
-
-                        // Respect DELIMITER declarations when splitting SQL file into executable statements
-                        $statements = [];
-                        $current_delim = ";";
-                        $buffer = '';
-                        $lines = preg_split('/\r?\n/', $sql_content);
-                        foreach ($lines as $line) {
-                            $trim = ltrim($line);
-                            // Skip SQL comments that are full-line
-                            if (preg_match('/^--/', $trim)) {
-                                // keep comments inside buffer for readability but do not affect splitting
-                                $buffer .= $line . "\n";
-                                continue;
-                            }
-
-                            // Handle DELIMITER change
-                            if (stripos($trim, 'DELIMITER ') === 0) {
-                                // flush buffer if any (only when delimiter is default)
-                                if (trim($buffer) !== '') {
-                                    $statements[] = trim($buffer);
-                                }
-                                $buffer = '';
-                                $parts = preg_split('/\s+/', $trim);
-                                $current_delim = isset($parts[1]) ? $parts[1] : ';';
-                                continue;
-                            }
-
-                            $buffer .= $line . "\n";
-
-                            // If the buffer ends with the current delimiter, split
-                            if ($current_delim !== '' && substr(trim($buffer), -strlen($current_delim)) === $current_delim) {
-                                // remove trailing delimiter
-                                $stmt = rtrim($buffer);
-                                $stmt = substr($stmt, 0, -strlen($current_delim));
-                                $statements[] = trim($stmt);
-                                $buffer = '';
-                            }
-                        }
-                        if (trim($buffer) !== '') {
-                            $statements[] = trim($buffer);
-                        }
+                        $statements = array_filter(array_map('trim', preg_split('/;\s*$/m', $sql_content)));
                         
-                        // Execute statements one-by-one and continue on errors (DDL often auto-commits)
-                        $conn->autocommit(true);
-                        $any_success = false;
-
-                        foreach ($statements as $statement) {
-                            $s = trim($statement);
-                            if ($s === '' ) continue;
-                            // Skip standalone delimiter or comments-only statements
-                            if (preg_match('/^DELIMITER\b/i', $s)) continue;
-                            if (preg_match('/^--/', ltrim($s))) continue;
-
-                            // Attempt execution; log warning on failure but continue
-                            try {
-                                $res = $conn->query($s);
-                                if ($res === false) {
-                                    logStep("⚠️ Statement failed: " . $conn->error . " -- " . substr(preg_replace('/\s+/', ' ', $s), 0, 200), 'warning');
-                                    $migration_success = false;
-                                } else {
-                                    $any_success = true;
+                        $conn->autocommit(false);
+                        
+                        try {
+                            foreach ($statements as $statement) {
+                                if (empty($statement) || strpos(trim($statement), '--') === 0) {
+                                    continue;
                                 }
-                            } catch (mysqli_sql_exception $e) {
-                                logStep("⚠️ Statement exception: " . $e->getMessage() . " -- " . substr(preg_replace('/\s+/', ' ', $s), 0, 200), 'warning');
-                                $migration_success = false;
-                                // continue to next statement
+                                
+                                if (!$conn->query($statement)) {
+                                    throw new Exception("SQL Error: " . $conn->error);
+                                }
                             }
+                            
+                            $conn->commit();
+                            logStep("✅ Successfully applied: " . basename($file_path), 'success');
+                            return true;
+                            
+                        } catch (Exception $e) {
+                            $conn->rollback();
+                            logStep("❌ Failed to apply " . basename($file_path) . ": " . $e->getMessage(), 'error');
+                            $migration_success = false;
+                            return false;
+                        } finally {
+                            $conn->autocommit(true);
                         }
-
-                        if ($any_success) {
-                            logStep("✅ Applied some or all statements from: " . basename($file_path), 'success');
-                        } else {
-                            logStep("❌ No statements successfully applied from: " . basename($file_path), 'error');
-                        }
-
-                        return $any_success;
                     }
                     
                     // Start migration
@@ -200,30 +151,7 @@ $pageTitle = 'Apply Corrected Schema';
                     }
                     
                     // Check for orphaned timetable entries
-                    $orphaned_tt = 0;
-                    // Determine timetable linkage column safely (class_course_id preferred)
-                    $timetableCols = $conn->query("SHOW COLUMNS FROM `timetable`");
-                    $hasClassCourseCol = false;
-                    $hasClassIdCol = false;
-                    if ($timetableCols) {
-                        while ($col = $timetableCols->fetch_assoc()) {
-                            if ($col['Field'] === 'class_course_id') $hasClassCourseCol = true;
-                            if ($col['Field'] === 'class_id') $hasClassIdCol = true;
-                        }
-                    }
-
-                    if ($hasClassCourseCol) {
-                        $res = $conn->query("SELECT COUNT(*) as count FROM timetable t LEFT JOIN class_courses cc ON t.class_course_id = cc.id WHERE cc.id IS NULL");
-                        $orphaned_tt = $res ? (int)$res->fetch_assoc()['count'] : 0;
-                    } elseif ($hasClassIdCol) {
-                        // Fallback: timetable links directly to classes
-                        $res = $conn->query("SELECT COUNT(*) as count FROM timetable t LEFT JOIN classes c ON t.class_id = c.id WHERE c.id IS NULL");
-                        $orphaned_tt = $res ? (int)$res->fetch_assoc()['count'] : 0;
-                    } else {
-                        logStep("⚠️ Could not determine timetable <> class linkage column; skipping orphaned timetable check", 'warning');
-                        $orphaned_tt = 0;
-                    }
-
+                    $orphaned_tt = $conn->query("SELECT COUNT(*) as count FROM timetable t LEFT JOIN class_courses cc ON t.class_course_id = cc.id WHERE cc.id IS NULL")->fetch_assoc()['count'];
                     if ($orphaned_tt > 0) {
                         logStep("⚠️ Found $orphaned_tt orphaned timetable records", 'warning');
                     } else {
@@ -234,33 +162,13 @@ $pageTitle = 'Apply Corrected Schema';
                     logStep("🧪 Testing new functions and procedures...", 'info');
                     
                     try {
-                        // Check required columns exist before invoking DB function
-                        $colCheckSql = "SELECT 
-                            (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'classes' AND COLUMN_NAME = 'department_id') AS has_class_dept,
-                            (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'courses' AND COLUMN_NAME = 'department_id') AS has_course_dept";
-                        $colCheck = $conn->query($colCheckSql)->fetch_assoc();
-
-                        if (isset($colCheck['has_class_dept']) && $colCheck['has_class_dept'] > 0 && isset($colCheck['has_course_dept']) && $colCheck['has_course_dept'] > 0) {
-                            // Test validation function safely
-                            $fnExistsRes = $conn->query("SELECT ROUTINE_NAME FROM information_schema.ROUTINES WHERE ROUTINE_SCHEMA = DATABASE() AND ROUTINE_NAME = 'validate_class_course_assignment_professional' LIMIT 1");
-                            if ($fnExistsRes && $fnExistsRes->num_rows > 0) {
-                                $test_q = $conn->query("SELECT validate_class_course_assignment_professional(1, 1) as test_result");
-                                if ($test_q) {
-                                    $test_result = $test_q->fetch_assoc()['test_result'];
-                                    $validation_data = json_decode($test_result, true);
-                                    if (is_array($validation_data) && isset($validation_data['valid'])) {
-                                        logStep("✅ Validation function working correctly", 'success');
-                                    } else {
-                                        logStep("⚠️ Validation function returned unexpected result", 'warning');
-                                    }
-                                } else {
-                                    logStep("⚠️ Validation function call failed: " . $conn->error, 'warning');
-                                }
-                            } else {
-                                logStep("⚠️ Validation function not found; skipped function test", 'warning');
-                            }
+                        // Test validation function
+                        $test_result = $conn->query("SELECT validate_class_course_assignment_professional(1, 1) as test_result")->fetch_assoc()['test_result'];
+                        $validation_data = json_decode($test_result, true);
+                        if (is_array($validation_data) && isset($validation_data['valid'])) {
+                            logStep("✅ Validation function working correctly", 'success');
                         } else {
-                            logStep("⚠️ Required columns for validation function missing (classes.department_id or courses.department_id); skipped function test", 'warning');
+                            logStep("⚠️ Validation function may have issues", 'warning');
                         }
                     } catch (Exception $e) {
                         logStep("❌ Error testing validation function: " . $e->getMessage(), 'error');

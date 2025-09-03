@@ -20,29 +20,29 @@ CREATE TABLE IF NOT EXISTS `backup_programs` AS SELECT * FROM `programs`;
 -- ============================================================================
 
 -- Remove stream_id from courses (courses are global)
-ALTER TABLE `courses` DROP FOREIGN KEY `courses_ibfk_2`;
-ALTER TABLE `courses` DROP INDEX `stream_id`;
-ALTER TABLE `courses` DROP COLUMN `stream_id`;
+ALTER TABLE `courses` DROP FOREIGN KEY IF EXISTS `courses_ibfk_2`;
+ALTER TABLE `courses` DROP INDEX IF EXISTS `stream_id`;
+ALTER TABLE `courses` DROP COLUMN IF EXISTS `stream_id`;
 
 -- Remove stream_id from lecturers (lecturers are global)
-ALTER TABLE `lecturers` DROP FOREIGN KEY `lecturers_ibfk_2`;
-ALTER TABLE `lecturers` DROP INDEX `stream_id`;
-ALTER TABLE `lecturers` DROP COLUMN `stream_id`;
+ALTER TABLE `lecturers` DROP FOREIGN KEY IF EXISTS `lecturers_ibfk_2`;
+ALTER TABLE `lecturers` DROP INDEX IF EXISTS `stream_id`;
+ALTER TABLE `lecturers` DROP COLUMN IF EXISTS `stream_id`;
 
 -- Remove stream_id from rooms (rooms are global)
-ALTER TABLE `rooms` DROP FOREIGN KEY `rooms_ibfk_2`;
-ALTER TABLE `rooms` DROP INDEX `stream_id`;
-ALTER TABLE `rooms` DROP COLUMN `stream_id`;
+ALTER TABLE `rooms` DROP FOREIGN KEY IF EXISTS `rooms_ibfk_2`;
+ALTER TABLE `rooms` DROP INDEX IF EXISTS `stream_id`;
+ALTER TABLE `rooms` DROP COLUMN IF EXISTS `stream_id`;
 
 -- Remove stream_id from departments (departments are global)
-ALTER TABLE `departments` DROP FOREIGN KEY `departments_ibfk_2`;
-ALTER TABLE `departments` DROP INDEX `stream_id`;
-ALTER TABLE `departments` DROP COLUMN `stream_id`;
+ALTER TABLE `departments` DROP FOREIGN KEY IF EXISTS `departments_ibfk_2`;
+ALTER TABLE `departments` DROP INDEX IF EXISTS `stream_id`;
+ALTER TABLE `departments` DROP COLUMN IF EXISTS `stream_id`;
 
 -- Remove stream_id from programs (programs are global)
-ALTER TABLE `programs` DROP FOREIGN KEY `programs_ibfk_2`;
-ALTER TABLE `programs` DROP INDEX `stream_id`;
-ALTER TABLE `programs` DROP COLUMN `stream_id`;
+ALTER TABLE `programs` DROP FOREIGN KEY IF EXISTS `programs_ibfk_2`;
+ALTER TABLE `programs` DROP INDEX IF EXISTS `stream_id`;
+ALTER TABLE `programs` DROP COLUMN IF EXISTS `stream_id`;
 
 -- ============================================================================
 -- STEP 3: ENHANCE CLASSES TABLE (The ONLY stream-specific table)
@@ -50,18 +50,18 @@ ALTER TABLE `programs` DROP COLUMN `stream_id`;
 
 -- Ensure classes table has all necessary fields
 ALTER TABLE `classes` 
-ADD COLUMN `class_code` VARCHAR(20) UNIQUE DEFAULT NULL AFTER `name`,
-ADD COLUMN `program_id` INT DEFAULT NULL AFTER `department_id`,
-ADD COLUMN `level_id` INT DEFAULT NULL AFTER `program_id`,
-ADD COLUMN `academic_year` VARCHAR(10) NOT NULL DEFAULT '2024/2025' AFTER `stream_id`,
-ADD COLUMN `semester` ENUM('first', 'second', 'summer') NOT NULL DEFAULT 'first' AFTER `academic_year`,
-ADD COLUMN `divisions_count` INT DEFAULT 1 AFTER `current_enrollment`,
-ADD COLUMN `division_capacity` INT DEFAULT 30 AFTER `divisions_count`;
+ADD COLUMN IF NOT EXISTS `class_code` VARCHAR(20) UNIQUE DEFAULT NULL AFTER `name`,
+ADD COLUMN IF NOT EXISTS `program_id` INT DEFAULT NULL AFTER `department_id`,
+ADD COLUMN IF NOT EXISTS `level_id` INT DEFAULT NULL AFTER `program_id`,
+ADD COLUMN IF NOT EXISTS `academic_year` VARCHAR(10) NOT NULL DEFAULT '2024/2025' AFTER `stream_id`,
+ADD COLUMN IF NOT EXISTS `semester` ENUM('first', 'second', 'summer') NOT NULL DEFAULT 'first' AFTER `academic_year`,
+ADD COLUMN IF NOT EXISTS `divisions_count` INT DEFAULT 1 AFTER `current_enrollment`,
+ADD COLUMN IF NOT EXISTS `division_capacity` INT DEFAULT 30 AFTER `divisions_count`;
 
 -- Add foreign keys for enhanced classes table
 ALTER TABLE `classes` 
-ADD CONSTRAINT `fk_classes_program` FOREIGN KEY (`program_id`) REFERENCES `programs`(`id`) ON DELETE SET NULL,
-ADD CONSTRAINT `fk_classes_level` FOREIGN KEY (`level_id`) REFERENCES `levels`(`id`) ON DELETE SET NULL;
+ADD CONSTRAINT IF NOT EXISTS `fk_classes_program` FOREIGN KEY (`program_id`) REFERENCES `programs`(`id`) ON DELETE SET NULL,
+ADD CONSTRAINT IF NOT EXISTS `fk_classes_level` FOREIGN KEY (`level_id`) REFERENCES `levels`(`id`) ON DELETE SET NULL;
 
 -- Update classes table with proper data
 UPDATE `classes` c 
@@ -87,13 +87,13 @@ WHERE c.level_id IS NULL;
 
 -- Ensure courses table has level_id instead of numeric level
 ALTER TABLE `courses` 
-ADD COLUMN `level_id` INT DEFAULT NULL AFTER `department_id`,
-ADD COLUMN `course_type` ENUM('core', 'elective', 'practical', 'project') DEFAULT 'core' AFTER `hours_per_week`,
-ADD COLUMN `prerequisites` JSON DEFAULT NULL AFTER `course_type`;
+ADD COLUMN IF NOT EXISTS `level_id` INT DEFAULT NULL AFTER `department_id`,
+ADD COLUMN IF NOT EXISTS `course_type` ENUM('core', 'elective', 'practical', 'project') DEFAULT 'core' AFTER `hours_per_week`,
+ADD COLUMN IF NOT EXISTS `prerequisites` JSON DEFAULT NULL AFTER `course_type`;
 
 -- Add foreign key for course level
 ALTER TABLE `courses` 
-ADD CONSTRAINT `fk_courses_level` FOREIGN KEY (`level_id`) REFERENCES `levels`(`id`) ON DELETE SET NULL;
+ADD CONSTRAINT IF NOT EXISTS `fk_courses_level` FOREIGN KEY (`level_id`) REFERENCES `levels`(`id`) ON DELETE SET NULL;
 
 -- Map existing numeric level to level_id
 UPDATE `courses` c 
@@ -106,22 +106,22 @@ WHERE c.level_id IS NULL;
 -- ============================================================================
 
 -- Remove stream_id from class_courses (it's derived from classes.stream_id)
-ALTER TABLE `class_courses` DROP FOREIGN KEY `fk_class_courses_stream`;
-ALTER TABLE `class_courses` DROP INDEX `idx_class_courses_stream`;
-ALTER TABLE `class_courses` DROP COLUMN `stream_id`;
+ALTER TABLE `class_courses` DROP FOREIGN KEY IF EXISTS `fk_class_courses_stream`;
+ALTER TABLE `class_courses` DROP INDEX IF EXISTS `idx_class_courses_stream`;
+ALTER TABLE `class_courses` DROP COLUMN IF EXISTS `stream_id`;
 
 -- Ensure class_courses has proper academic context
 ALTER TABLE `class_courses`
-ADD COLUMN `semester` ENUM('first', 'second', 'summer') NOT NULL DEFAULT 'first' AFTER `course_id`,
-ADD COLUMN `academic_year` VARCHAR(10) NOT NULL DEFAULT '2024/2025' AFTER `semester`,
-ADD COLUMN `assigned_by` VARCHAR(100) DEFAULT NULL AFTER `academic_year`,
-ADD COLUMN `assignment_reason` TEXT DEFAULT NULL AFTER `assigned_by`,
-ADD COLUMN `is_mandatory` BOOLEAN DEFAULT TRUE AFTER `assignment_reason`;
+ADD COLUMN IF NOT EXISTS `semester` ENUM('first', 'second', 'summer') NOT NULL DEFAULT 'first' AFTER `course_id`,
+ADD COLUMN IF NOT EXISTS `academic_year` VARCHAR(10) NOT NULL DEFAULT '2024/2025' AFTER `semester`,
+ADD COLUMN IF NOT EXISTS `assigned_by` VARCHAR(100) DEFAULT NULL AFTER `academic_year`,
+ADD COLUMN IF NOT EXISTS `assignment_reason` TEXT DEFAULT NULL AFTER `assigned_by`,
+ADD COLUMN IF NOT EXISTS `is_mandatory` BOOLEAN DEFAULT TRUE AFTER `assignment_reason`;
 
 -- Update unique constraint for class_courses
 ALTER TABLE `class_courses` 
-DROP INDEX `uq_class_course`,
-DROP INDEX `uq_class_course_semester`,
+DROP INDEX IF EXISTS `uq_class_course`,
+DROP INDEX IF EXISTS `uq_class_course_semester`,
 ADD UNIQUE KEY `unique_class_course_semester` (`class_id`, `course_id`, `semester`, `academic_year`);
 
 -- ============================================================================
@@ -129,25 +129,25 @@ ADD UNIQUE KEY `unique_class_course_semester` (`class_id`, `course_id`, `semeste
 -- ============================================================================
 
 -- Remove stream_id from timetable (it's derived from classes.stream_id via class_courses)
-ALTER TABLE `timetable` DROP FOREIGN KEY `fk_timetable_stream`;
-ALTER TABLE `timetable` DROP INDEX `idx_timetable_stream_day_time`;
-ALTER TABLE `timetable` DROP COLUMN `stream_id`;
+ALTER TABLE `timetable` DROP FOREIGN KEY IF EXISTS `fk_timetable_stream`;
+ALTER TABLE `timetable` DROP INDEX IF EXISTS `idx_timetable_stream_day_time`;
+ALTER TABLE `timetable` DROP COLUMN IF EXISTS `stream_id`;
 
 -- Ensure timetable has proper fields
 ALTER TABLE `timetable`
-ADD COLUMN `semester` ENUM('first', 'second', 'summer') NOT NULL DEFAULT 'first' AFTER `room_id`,
-ADD COLUMN `academic_year` VARCHAR(10) NOT NULL DEFAULT '2024/2025' AFTER `semester`,
-ADD COLUMN `division_label` VARCHAR(10) DEFAULT NULL AFTER `academic_year`,
-ADD COLUMN `notes` TEXT DEFAULT NULL AFTER `division_label`,
-ADD COLUMN `created_by` VARCHAR(100) DEFAULT NULL AFTER `notes`;
+ADD COLUMN IF NOT EXISTS `semester` ENUM('first', 'second', 'summer') NOT NULL DEFAULT 'first' AFTER `room_id`,
+ADD COLUMN IF NOT EXISTS `academic_year` VARCHAR(10) NOT NULL DEFAULT '2024/2025' AFTER `semester`,
+ADD COLUMN IF NOT EXISTS `division_label` VARCHAR(10) DEFAULT NULL AFTER `academic_year`,
+ADD COLUMN IF NOT EXISTS `notes` TEXT DEFAULT NULL AFTER `division_label`,
+ADD COLUMN IF NOT EXISTS `created_by` VARCHAR(100) DEFAULT NULL AFTER `notes`;
 
 -- Update timetable unique constraints (removed stream_id)
 ALTER TABLE `timetable`
-DROP INDEX `uq_tt_slot`,
-DROP INDEX `uq_timetable_slot_stream`,
-DROP INDEX `unique_room_time_slot`,
-DROP INDEX `unique_lecturer_time_slot`,
-DROP INDEX `unique_class_time_division`,
+DROP INDEX IF EXISTS `uq_tt_slot`,
+DROP INDEX IF EXISTS `uq_timetable_slot_stream`,
+DROP INDEX IF EXISTS `unique_room_time_slot`,
+DROP INDEX IF EXISTS `unique_lecturer_time_slot`,
+DROP INDEX IF EXISTS `unique_class_time_division`,
 ADD UNIQUE KEY `unique_room_time_slot` (`room_id`, `day_id`, `time_slot_id`, `semester`, `academic_year`),
 ADD UNIQUE KEY `unique_lecturer_time_slot` (`lecturer_course_id`, `day_id`, `time_slot_id`, `semester`, `academic_year`),
 ADD UNIQUE KEY `unique_class_time_division` (`class_course_id`, `day_id`, `time_slot_id`, `division_label`, `semester`, `academic_year`);

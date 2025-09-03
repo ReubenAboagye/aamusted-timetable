@@ -63,7 +63,9 @@ INSERT INTO `levels` (`name`, `numeric_value`, `description`) VALUES
 ('Level 100', 100, 'First Year'),
 ('Level 200', 200, 'Second Year'),
 ('Level 300', 300, 'Third Year'),
-('Level 400', 400, 'Fourth Year');
+('Level 400', 400, 'Fourth Year'),
+('Level 500', 500, 'Fifth Year (Graduate)'),
+('Level 600', 600, 'Sixth Year (Graduate)');
 
 -- 4. COURSES (Global - all streams share courses)
 CREATE TABLE `courses` (
@@ -183,17 +185,17 @@ INSERT INTO `time_slots` (`start_time`, `end_time`, `duration_minutes`, `slot_na
 ('09:00:00', '10:00:00', 60, 'Period 3'),
 ('10:00:00', '11:00:00', 60, 'Period 4'),
 ('11:00:00', '12:00:00', 60, 'Period 5'),
-('12:00:00', '13:00:00', 60, 'Period 6'),
-('13:00:00', '14:00:00', 60, 'Break'),
-('14:00:00', '15:00:00', 60, 'Period 8'),
-('15:00:00', '16:00:00', 60, 'Period 9'),
-('16:00:00', '17:00:00', 60, 'Period 10'),
-('17:00:00', '18:00:00', 60, 'Period 11'),
-('18:00:00', '19:00:00', 60, 'Period 12'),
-('19:00:00', '20:00:00', 60, 'Period 13');
+('12:00:00', '13:00:00', 60, 'Lunch Break'),
+('13:00:00', '14:00:00', 60, 'Period 6'),
+('14:00:00', '15:00:00', 60, 'Period 7'),
+('15:00:00', '16:00:00', 60, 'Period 8'),
+('16:00:00', '17:00:00', 60, 'Period 9'),
+('17:00:00', '18:00:00', 60, 'Period 10'),
+('18:00:00', '19:00:00', 60, 'Evening Period 1'),
+('19:00:00', '20:00:00', 60, 'Evening Period 2');
 
 -- Update lunch break
-UPDATE `time_slots` SET `is_break_time` = TRUE WHERE `start_time` = '13:00:00';
+UPDATE `time_slots` SET `is_break_time` = TRUE WHERE `start_time` = '12:00:00';
 
 -- ============================================================================
 -- STREAM-SPECIFIC TABLES
@@ -208,12 +210,12 @@ CREATE TABLE `streams` (
     
     -- Time period settings for this stream
     `period_start` TIME NOT NULL DEFAULT '08:00:00',
-    `period_end` TIME NOT NULL DEFAULT '20:00:00',
-    `break_start` TIME DEFAULT '13:00:00',
-    `break_end` TIME DEFAULT '14:00:00',
+    `period_end` TIME NOT NULL DEFAULT '17:00:00',
+    `break_start` TIME DEFAULT '12:00:00',
+    `break_end` TIME DEFAULT '13:00:00',
     
     -- Active days for this stream (JSON array of day names)
-    `active_days` JSON NOT NULL DEFAULT ('["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]'),
+    `active_days` JSON NOT NULL DEFAULT ('["monday", "tuesday", "wednesday", "thursday", "friday"]'),
     
     -- Stream constraints
     `max_daily_hours` INT DEFAULT 8,
