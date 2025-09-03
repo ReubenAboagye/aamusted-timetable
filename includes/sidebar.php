@@ -29,6 +29,9 @@
           <a href="courses.php" class="nav-link <?= ($currentPage == 'courses.php') ? 'active' : '' ?>">
             <i class="fas fa-book me-2"></i>Courses
           </a>
+          <a href="levels.php" class="nav-link <?= ($currentPage == 'levels.php') ? 'active' : '' ?>">
+            <i class="fas fa-layer-group me-2"></i>Levels
+          </a>
           <a href="classes.php" class="nav-link <?= ($currentPage == 'classes.php') ? 'active' : '' ?>">
             <i class="fas fa-users me-2"></i>Classes
           </a>
@@ -50,6 +53,9 @@
           <div class="dropdown-menu-items">
                          <a href="generate_timetable.php" class="nav-link <?= ($currentPage == 'generate_timetable.php') ? 'active' : '' ?>">
                <i class="fas fa-calendar-plus me-2"></i>Generate Timetable
+             </a>
+             <a href="time_slots.php" class="nav-link <?= ($currentPage == 'time_slots.php') ? 'active' : '' ?>">
+               <i class="fas fa-clock me-2"></i>Time Slots
              </a>
              <a href="saved_timetable.php" class="nav-link <?= ($currentPage == 'saved_timetable.php') ? 'active' : '' ?>">
                <i class="fas fa-save me-2"></i>Saved Timetable
