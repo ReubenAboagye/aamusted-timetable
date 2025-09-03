@@ -14,7 +14,7 @@ try {
     
     switch ($action) {
         case 'get_timetable_data':
-            $session_id = $_GET['session_id'] ?? 0;
+            $stream_id = $_GET['stream_id'] ?? 0;
             $semester = $_GET['semester'] ?? 1;
             $type = $_GET['type'] ?? 'lecture';
             
@@ -44,9 +44,10 @@ try {
             $params = [];
             $types = "";
             
-            if ($session_id > 0) {
-                $query .= " AND c.session_id = ?";
-                $params[] = $session_id;
+            if ($stream_id > 0) {
+                // classes table has stream_id column
+                $query .= " AND c.stream_id = ?";
+                $params[] = $stream_id;
                 $types .= "i";
             }
             

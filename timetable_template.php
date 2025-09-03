@@ -6,18 +6,17 @@ $pageTitle = 'Timetable Template';
 include 'includes/header.php';
 include 'includes/sidebar.php';
 
-// Get filter parameters
-$session_filter = isset($_GET['session_id']) ? (int)$_GET['session_id'] : 0;
+$stream_filter = isset($_GET['stream_id']) ? (int)$_GET['stream_id'] : 0;
 $semester_filter = isset($_GET['semester']) ? (int)$_GET['semester'] : 1;
 $timetable_type = isset($_GET['type']) ? $_GET['type'] : 'lecture';
 
-// Get sessions for dropdown
-$sessions_query = "SELECT id, name, academic_year FROM sessions ORDER BY academic_year DESC, name ASC";
-$sessions_result = $conn->query($sessions_query);
-$sessions = [];
-if ($sessions_result) {
-    while ($row = $sessions_result->fetch_assoc()) {
-        $sessions[] = $row;
+// Get streams for dropdown
+$streams_query = "SELECT id, name, code FROM streams WHERE is_active = 1 ORDER BY name";
+$streams_result = $conn->query($streams_query);
+$streams = [];
+if ($streams_result) {
+    while ($row = $streams_result->fetch_assoc()) {
+        $streams[] = $row;
     }
 }
 
@@ -51,15 +50,15 @@ if ($days_result) {
     }
 }
 
-// Sample course data for demonstration (in real implementation, this would come from database)
-$sample_courses = [
-    ['id' => '1', 'name' => 'Mathematics 101', 'code' => 'MATH101', 'duration' => 2, 'color' => 'bg-blue-100 text-blue-800', 'lecturer_name' => 'Dr. Johnson', 'classes' => ['Year 1 CS', 'Year 1 IT']],
-    ['id' => '2', 'name' => 'Physics 101', 'code' => 'PHY101', 'duration' => 3, 'color' => 'bg-green-100 text-green-800', 'lecturer_name' => 'Dr. Smith', 'classes' => ['Year 1 CS', 'Year 1 Physics']],
-    ['id' => '3', 'name' => 'Chemistry 101', 'code' => 'CHEM101', 'duration' => 2, 'color' => 'bg-purple-100 text-purple-800', 'lecturer_name' => 'Dr. Brown', 'classes' => ['Year 1 CS', 'Year 1 Chemistry']],
-    ['id' => '4', 'name' => 'Biology 101', 'code' => 'BIO101', 'duration' => 2, 'color' => 'bg-yellow-100 text-yellow-800', 'lecturer_name' => 'Dr. Wilson', 'classes' => ['Year 1 CS', 'Year 1 Biology']],
-    ['id' => '5', 'name' => 'Computer Science 101', 'code' => 'CS101', 'duration' => 3, 'color' => 'bg-red-100 text-red-800', 'lecturer_name' => 'Dr. Davis', 'classes' => ['Year 1 CS']],
-    ['id' => '6', 'name' => 'English 101', 'code' => 'ENG101', 'duration' => 1, 'color' => 'bg-indigo-100 text-indigo-800', 'lecturer_name' => 'Dr. Miller', 'classes' => ['Year 1 CS', 'Year 1 IT', 'Year 1 Engineering']],
-];
+// // Sample course data for demonstration (in real implementation, this would come from database)
+// $sample_courses = [
+//     ['id' => '1', 'name' => 'Mathematics 101', 'code' => 'MATH101', 'duration' => 2, 'color' => 'bg-blue-100 text-blue-800', 'lecturer_name' => 'Dr. Johnson', 'classes' => ['Year 1 CS', 'Year 1 IT']],
+//     ['id' => '2', 'name' => 'Physics 101', 'code' => 'PHY101', 'duration' => 3, 'color' => 'bg-green-100 text-green-800', 'lecturer_name' => 'Dr. Smith', 'classes' => ['Year 1 CS', 'Year 1 Physics']],
+//     ['id' => '3', 'name' => 'Chemistry 101', 'code' => 'CHEM101', 'duration' => 2, 'color' => 'bg-purple-100 text-purple-800', 'lecturer_name' => 'Dr. Brown', 'classes' => ['Year 1 CS', 'Year 1 Chemistry']],
+//     ['id' => '4', 'name' => 'Biology 101', 'code' => 'BIO101', 'duration' => 2, 'color' => 'bg-yellow-100 text-yellow-800', 'lecturer_name' => 'Dr. Wilson', 'classes' => ['Year 1 CS', 'Year 1 Biology']],
+//     ['id' => '5', 'name' => 'Computer Science 101', 'code' => 'CS101', 'duration' => 3, 'color' => 'bg-red-100 text-red-800', 'lecturer_name' => 'Dr. Davis', 'classes' => ['Year 1 CS']],
+//     ['id' => '6', 'name' => 'English 101', 'code' => 'ENG101', 'duration' => 1, 'color' => 'bg-indigo-100 text-indigo-800', 'lecturer_name' => 'Dr. Miller', 'classes' => ['Year 1 CS', 'Year 1 IT', 'Year 1 Engineering']],
+// ];
 
 // Generate sample timetable data
 function generateSampleTimetableData($days, $rooms, $time_slots) {
@@ -447,12 +446,12 @@ $selected_rooms = array_slice($rooms, 0, 5); // Use first 5 rooms for demo
     <div class="filter-controls">
         <div class="filter-row">
             <div class="filter-group">
-                <label for="session-select">Academic Session</label>
-                <select id="session-select" class="form-select" onchange="updateTimetable()">
-                    <option value="">Select Session</option>
-                    <?php foreach ($sessions as $session): ?>
-                        <option value="<?php echo $session['id']; ?>" <?php echo $session_filter == $session['id'] ? 'selected' : ''; ?>>
-                            <?php echo htmlspecialchars($session['name']); ?> (<?php echo htmlspecialchars($session['academic_year']); ?>)
+                <label for="stream-select">Stream</label>
+                <select id="stream-select" class="form-select" onchange="updateTimetable()">
+                    <option value="">All Streams</option>
+                    <?php foreach ($streams as $stream): ?>
+                        <option value="<?php echo $stream['id']; ?>" <?php echo $stream_filter == $stream['id'] ? 'selected' : ''; ?>>
+                            <?php echo htmlspecialchars($stream['name']); ?>
                         </option>
                     <?php endforeach; ?>
                 </select>
@@ -489,9 +488,9 @@ $selected_rooms = array_slice($rooms, 0, 5); // Use first 5 rooms for demo
             <h3 class="mb-0">
                 <?php echo ucfirst($timetable_type); ?> Timetable - 
                 <?php 
-                $selected_session = array_filter($sessions, function($s) use ($session_filter) { return $s['id'] == $session_filter; });
-                $selected_session = reset($selected_session);
-                echo $selected_session ? htmlspecialchars($selected_session['name']) : 'All Sessions';
+                $selected_stream = array_filter($streams, function($s) use ($stream_filter) { return $s['id'] == $stream_filter; });
+                $selected_stream = reset($selected_stream);
+                echo $selected_stream ? htmlspecialchars($selected_stream['name']) : 'All Streams';
                 ?> 
                 (Semester <?php echo $semester_filter; ?>)
             </h3>
@@ -776,19 +775,19 @@ function hideEditModal() {
 
 // Update timetable view
 function updateTimetable() {
-    const sessionId = document.getElementById('session-select').value;
+    const streamId = document.getElementById('stream-select').value;
     const semester = document.getElementById('semester-select').value;
     const type = document.getElementById('type-select').value;
     
     // Load timetable data from API
-    loadTimetableData(sessionId, semester, type);
+    loadTimetableData(streamId, semester, type);
 }
 
 // Load timetable data from API
-function loadTimetableData(sessionId, semester, type) {
+function loadTimetableData(streamId, semester, type) {
     const url = new URL('api_timetable_template.php', window.location.origin);
     url.searchParams.set('action', 'get_timetable_data');
-    if (sessionId) url.searchParams.set('session_id', sessionId);
+    if (streamId) url.searchParams.set('stream_id', streamId);
     if (semester) url.searchParams.set('semester', semester);
     if (type) url.searchParams.set('type', type);
     
@@ -799,7 +798,7 @@ function loadTimetableData(sessionId, semester, type) {
             tableData = data.data;
             // Update the page URL to reflect the new filters
             const pageUrl = new URL(window.location);
-            if (sessionId) pageUrl.searchParams.set('session_id', sessionId);
+            if (streamId) pageUrl.searchParams.set('stream_id', streamId);
             if (semester) pageUrl.searchParams.set('semester', semester);
             if (type) pageUrl.searchParams.set('type', type);
             window.history.pushState({}, '', pageUrl);

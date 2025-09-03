@@ -8,10 +8,14 @@ if (!ob_get_level()) {
 
 // Page title and layout includes
 $pageTitle = 'Export Timetable';
-include 'includes/header.php';
+// Do not include full page header when streaming an export (PDF/CSV/Excel)
+if (!(isset($_GET['export']) && $_GET['export'] === '1')) {
+    include 'includes/header.php';
+}
 
 // Get filter parameters
 $class_filter = isset($_GET['class_id']) ? (int)$_GET['class_id'] : 0;
+$stream_filter = isset($_GET['stream_id']) ? (int)$_GET['stream_id'] : 0;
 $day_filter = isset($_GET['day_id']) ? (int)$_GET['day_id'] : 0;
 $room_filter = isset($_GET['room_id']) ? (int)$_GET['room_id'] : 0;
 $format = isset($_GET['format']) ? $_GET['format'] : 'excel';
@@ -90,11 +94,25 @@ $timetable_result = $stmt->get_result();
 $classes_result = $conn->query("SELECT id, name FROM classes WHERE is_active = 1 ORDER BY name");
 $days_result = $conn->query("SELECT id, name FROM days WHERE is_active = 1 ORDER BY id");
 $rooms_result = $conn->query("SELECT id, name FROM rooms WHERE is_active = 1 ORDER BY name");
+$streams_result = $conn->query("SELECT id, name FROM streams WHERE is_active = 1 ORDER BY name");
 
 // Handle export
 if (isset($_GET['export']) && $_GET['export'] === '1') {
+    $export_stream_name = '';
+    $export_class_name = '';
+    if (!empty($stream_filter)) {
+        $r = $conn->query("SELECT name FROM streams WHERE id = " . intval($stream_filter));
+        $export_stream_name = $r ? ($r->fetch_assoc()['name'] ?? '') : '';
+    }
+    if (!empty($class_filter)) {
+        $r = $conn->query("SELECT name FROM classes WHERE id = " . intval($class_filter));
+        $export_class_name = $r ? ($r->fetch_assoc()['name'] ?? '') : '';
+    }
+
     if ($format === 'csv') {
         exportCSV($timetable_result);
+    } else if ($format === 'pdf') {
+        exportPDF($timetable_result, $export_stream_name, $export_class_name);
     } else {
         exportExcel($timetable_result);
     }
@@ -188,6 +206,81 @@ function exportExcel($result) {
     }
     
     $writer->save('php://output');
+}
+
+function exportPDF($result, $stream_name = '', $class_name = '') {
+    // Try to load Dompdf; require fallback instruction if missing
+    if (!class_exists('\Dompdf\\Dompdf')) {
+        // Attempt to include vendor autoload if not already
+        if (file_exists(__DIR__ . '/vendor/autoload.php')) require_once __DIR__ . '/vendor/autoload.php';
+        if (!class_exists('\Dompdf\\Dompdf')) {
+            die('Dompdf is not installed. Run: composer require dompdf/dompdf');
+        }
+    }
+
+    // Build a simple HTML with header (logo, title, stream, class) and a table of data
+    $html = '<!doctype html><html><head><meta charset="utf-8"><style>'
+        . 'body{font-family: Arial, sans-serif; font-size:12px;}'
+        . '.header{display:flex;align-items:center;border-bottom:1px solid #ccc;padding-bottom:8px;margin-bottom:12px}'
+        . '.logo{width:90px;margin-right:12px}'
+        . '.title{font-size:18px;font-weight:bold}'
+        . '.meta{font-size:12px;color:#555}'
+        . 'table{width:100%;border-collapse:collapse;margin-top:8px}'
+        . 'th,td{border:1px solid #ddd;padding:6px;text-align:left}'
+        . 'th{background:#f2f2f2}'
+        . '</style></head><body>';
+
+    // Logo: reference local images if exists
+    $logo_path = '';
+    if (file_exists(__DIR__ . '/images/aamusted-logo.png')) {
+        $logo_path = __DIR__ . '/images/aamusted-logo.png';
+    } elseif (file_exists(__DIR__ . '/images/aamustedLog.png')) {
+        $logo_path = __DIR__ . '/images/aamustedLog.png';
+    }
+    if ($logo_path) {
+        $data = base64_encode(file_get_contents($logo_path));
+        $src = 'data:image/png;base64,' . $data;
+        $html .= "<div class='header'><img src='{$src}' class='logo' /><div><div class='title'>Timetable Export</div>";
+    } else {
+        $html .= "<div class='header'><div style='width:90px;margin-right:12px'></div><div><div class='title'>Timetable Export</div>";
+    }
+
+    $meta_parts = [];
+    if (!empty($stream_name)) $meta_parts[] = 'Stream: ' . htmlspecialchars($stream_name);
+    if (!empty($class_name)) $meta_parts[] = 'Class: ' . htmlspecialchars($class_name);
+    $meta_parts[] = 'Generated: ' . date('Y-m-d H:i');
+
+    $html .= "<div class='meta'>" . implode(' | ', $meta_parts) . "</div></div></div>";
+
+    // Table header
+    $html .= "<table><thead><tr><th>Day</th><th>Time</th><th>Class</th><th>Course</th><th>Room</th><th>Lecturer</th></tr></thead><tbody>";
+
+    // data rows
+    $result->data_seek(0);
+    while ($row = $result->fetch_assoc()) {
+        $time = htmlspecialchars(substr($row['start_time'], 0, 5) . ' - ' . substr($row['end_time'], 0, 5));
+        $course = htmlspecialchars(($row['course_code'] ?? '') . ' - ' . ($row['course_name'] ?? ''));
+        $html .= '<tr>'
+            . '<td>' . htmlspecialchars($row['day_name'] ?? '') . '</td>'
+            . '<td>' . $time . '</td>'
+            . '<td>' . htmlspecialchars($row['class_name'] ?? '') . '</td>'
+            . '<td>' . $course . '</td>'
+            . '<td>' . htmlspecialchars($row['room_name'] ?? '') . '</td>'
+            . '<td>' . htmlspecialchars($row['lecturer_name'] ?? '') . '</td>'
+            . '</tr>';
+    }
+    $html .= '</tbody></table></body></html>';
+
+    // Generate PDF
+    $dompdf = new \Dompdf\Dompdf();
+    $dompdf->loadHtml($html);
+    $dompdf->setPaper('A4', 'landscape');
+    $dompdf->render();
+
+    if (ob_get_length()) ob_clean();
+    header('Content-Type: application/pdf');
+    header('Content-Disposition: attachment; filename="timetable_' . date('Y-m-d_H-i-s') . '.pdf"');
+    echo $dompdf->output();
 }
 
 // Get statistics
@@ -342,6 +435,9 @@ if ($col) $col->close();
                                                     <button type="submit" name="export" value="1" class="btn btn-primary btn-lg">
                                                         <i class="fas fa-download me-2"></i>Export Timetable
                                                     </button>
+                                                    <button type="button" id="exportPdfBtn" class="btn btn-danger btn-lg">
+                                                        <i class="fas fa-file-pdf me-2"></i>Export PDF
+                                                    </button>
                                                     <a href="export_timetable.php" class="btn btn-outline-secondary">
                                                         <i class="fas fa-times me-2"></i>Clear Filters
                                                     </a>
@@ -460,4 +556,22 @@ if ($col) $col->close();
     </div>
 
 </body>
+<script>
+document.getElementById('exportPdfBtn').addEventListener('click', function() {
+    const params = new URLSearchParams(window.location.search);
+    params.set('format', 'pdf');
+    params.set('export', '1');
+    // Preserve selected filters if present in form
+    const classSel = document.getElementById('class_id');
+    const daySel = document.getElementById('day_id');
+    const roomSel = document.getElementById('room_id');
+    const streamSel = document.getElementById('stream_id');
+    if (classSel) params.set('class_id', classSel.value);
+    if (daySel) params.set('day_id', daySel.value);
+    if (roomSel) params.set('room_id', roomSel.value);
+    if (streamSel) params.set('stream_id', streamSel.value);
+
+    window.location = 'export_timetable.php?' + params.toString();
+});
+</script>
 </html>

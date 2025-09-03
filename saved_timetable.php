@@ -270,7 +270,7 @@ $error_message = $_GET['error'] ?? '';
                                             <strong><?php echo htmlspecialchars($timetable['stream_name']); ?></strong>
                                         </td>
                                         <td>
-                                            <span class="badge bg-info"><?php echo htmlspecialchars($timetable['academic_year']); ?></span>
+                                            <span class="badge bg-info"><?php echo htmlspecialchars($timetable['academic_year'] ?? ''); ?></span>
                                         </td>
                                         <td>
                                             <?php 

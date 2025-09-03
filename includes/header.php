@@ -93,7 +93,8 @@ register_shutdown_function(function() {
     $jsmsg = json_encode($msg);
 
     // Insert a small JS snippet that adds an error card into #mainContent so layout remains intact
-    // The injected card includes a copy button so users can copy the error text for support
+    // Use a separate JS variable for the error text (json_encoded) and assign it to the <pre>.textContent
+    // This avoids embedding backslashes inside another JS string which can form invalid hex escapes.
     echo '<script>document.addEventListener("DOMContentLoaded", function(){'
         . 'var main = document.getElementById("mainContent");'
         . 'if (!main) { main = document.createElement("div"); main.id = "mainContent"; main.className = "main-content"; document.body.appendChild(main); }'
@@ -104,9 +105,10 @@ register_shutdown_function(function() {
             . '<h5 class=\\"card-title text-danger\\" style=\\"margin:0;\\">An error occurred</h5>'
             . '<div><button class=\\"btn btn-sm btn-outline-secondary copyErrorBtn\\" title=\\"Copy error\\"><i class=\\"fas fa-copy\\"></i></button></div>'
             . '</div>'
-            . '<pre class=\\"error-pre\\" style=\\"white-space:pre-wrap;color:#a00;margin:0;\\">' . $jsmsg . '</pre>'
+            . '<pre class=\\"error-pre\\" style=\\"white-space:pre-wrap;color:#a00;margin:0;\\"></pre>'
             . '</div>";'
         . 'if (main.firstChild) main.insertBefore(errBox, main.firstChild); else main.appendChild(errBox);'
+        . 'var errText = ' . $jsmsg . '; var preEl = errBox.querySelector(".error-pre"); if (preEl) preEl.textContent = errText;'
         . 'var btn = errBox.querySelector(".copyErrorBtn");'
         . 'if (btn) { btn.addEventListener("click", function(){'
         . '  var text = errBox.querySelector(".error-pre").textContent || "";'
