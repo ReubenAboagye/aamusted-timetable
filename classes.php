@@ -179,7 +179,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Ensure stream_id is an integer
             $stream_id = (int)$stream_id;
 
-            $sql = "INSERT INTO classes (program_id, level_id, name, code, stream_id, is_active, total_capacity, divisions_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+            // Check if class code already exists (including inactive ones)
+            $check_sql = "SELECT id, name, is_active FROM classes WHERE code = ?";
+            $check_stmt = $conn->prepare($check_sql);
+            $check_stmt->bind_param("s", $class_code);
+            $check_stmt->execute();
+            $check_result = $check_stmt->get_result();
+            
+            if ($check_result->num_rows > 0) {
+                $existing_class = $check_result->fetch_assoc();
+                $check_stmt->close();
+                if ($existing_class['is_active'] == 1) {
+                    $error_message = "Class code '{$class_code}' already exists as an active class.";
+                } else {
+                    $error_message = "Class code '{$class_code}' already exists but is inactive. Please use a different code or reactivate the existing class.";
+                }
+            } else {
+                $check_stmt->close();
+                
+                $sql = "INSERT INTO classes (program_id, level_id, name, code, stream_id, is_active, total_capacity, divisions_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
             $stmt = $conn->prepare($sql);
             if ($stmt) {
                 $stmt->bind_param("iissiiii", $program_id, $level_id, $class_name, $class_code, $stream_id, $is_active, $total_capacity, $divisions_count);
@@ -216,10 +234,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     redirect_with_flash('classes.php', 'success', $msg);
                 } else {
                     $error_message = "Failed to create class: " . $stmt->error;
+                    if (strpos($stmt->error, 'uq_class_code_year_semester') !== false) {
+                        $error_message = "Class code '{$class_code}' already exists. Please use a different code.";
+                    }
                     $stmt->close();
                 }
             } else {
                 $error_message = "Failed to prepare class insert: " . $conn->error;
+            }
             }
         } else {
             $error_message = "Invalid program, level, or stream selected.";
@@ -274,6 +296,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 } else {
                     $error_message = 'Error preparing update: ' . $conn->error;
                 }
+            }
+        }
+    } elseif ($action === 'reactivate' && isset($_POST['id'])) {
+        $id = (int)($_POST['id'] ?? 0);
+        
+        if ($id <= 0) {
+            $error_message = 'Invalid class id.';
+        } else {
+            $reactivate_sql = "UPDATE classes SET is_active = 1 WHERE id = ?";
+            $r_stmt = $conn->prepare($reactivate_sql);
+            if ($r_stmt) {
+                $r_stmt->bind_param('i', $id);
+                if ($r_stmt->execute()) {
+                    $r_stmt->close();
+                    redirect_with_flash('classes.php', 'success', 'Class reactivated successfully!');
+                } else {
+                    $error_message = 'Error reactivating class: ' . $r_stmt->error;
+                    $r_stmt->close();
+                }
+            } else {
+                $error_message = 'Error preparing reactivate: ' . $conn->error;
             }
         }
     }
@@ -352,6 +395,10 @@ if (!empty($select_extra)) {
 }
 
 $where_clause = "WHERE c.is_active = 1";
+// Optionally show inactive classes
+if (isset($_GET['show_inactive']) && $_GET['show_inactive'] == '1') {
+    $where_clause = "WHERE 1=1"; // Show all classes (active and inactive)
+}
 // Temporarily disable stream filtering to debug
 // if ($class_has_stream) {
 //     $where_clause .= " AND c.stream_id = " . $streamManager->getCurrentStreamId();
@@ -426,7 +473,50 @@ $level_result = $conn->query($level_sql);
         <?php endif; ?>
 
         <div class="search-container m-3">
-            <input type="text" class="search-input" placeholder="Search classes...">
+            <div class="row">
+                <div class="col-md-5">
+                    <input type="text" class="search-input form-control" placeholder="Search classes...">
+                </div>
+                <div class="col-md-3">
+                    <select class="form-select" id="streamFilter">
+                        <option value="">All Streams</option>
+                        <?php 
+                        // Fetch streams for the filter dropdown
+                        $filter_streams_sql = "SELECT id, name, code FROM streams ORDER BY name";
+                        $filter_streams_result = $conn->query($filter_streams_sql);
+                        if ($filter_streams_result && $filter_streams_result->num_rows > 0):
+                            while ($stream = $filter_streams_result->fetch_assoc()):
+                        ?>
+                            <option value="<?php echo $stream['id']; ?>">
+                                <?php echo htmlspecialchars($stream['name']); ?>
+                            </option>
+                        <?php 
+                            endwhile;
+                        endif;
+                        ?>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="showInactive" onchange="toggleInactiveClasses()">
+                        <label class="form-check-label" for="showInactive">
+                            Show Inactive
+                        </label>
+                    </div>
+                </div>
+                <div class="col-md-2">
+                    <button class="btn btn-outline-secondary" onclick="clearFilters()">
+                        <i class="fas fa-times"></i> Clear
+                    </button>
+                </div>
+            </div>
+            <div class="row mt-2">
+                <div class="col-12">
+                    <small class="text-muted" id="filterSummary">
+                        Showing all classes
+                    </small>
+                </div>
+            </div>
         </div>
 
         <div class="table-responsive">
@@ -443,44 +533,61 @@ $level_result = $conn->query($level_sql);
                 <tbody>
                     <?php if ($result && $result->num_rows > 0): ?>
                         <?php while ($row = $result->fetch_assoc()): ?>
-                            <tr>
-                                <td><strong><?php echo htmlspecialchars($row['name']); ?></strong></td>
-                                <td><span class="badge bg-warning"><?php echo htmlspecialchars($row['level'] ?? ($row['level_name'] ?? 'N/A')); ?></span></td>
-                                <td>
-                                    <?php $deptCode = trim(strtoupper($row['dept_short'] ?? $row['program_code'] ?? ''));
-                                    $levelTextRow = $row['level_name'] ?? $row['level'] ?? '';
-                                    preg_match('/(\d+)/', $levelTextRow, $lm);
-                                    $rawLevelRow = isset($lm[1]) ? (int)$lm[1] : 0;
-                                    $levelNumRow = ($rawLevelRow > 0 && $rawLevelRow < 10) ? $rawLevelRow * 100 : $rawLevelRow;
-                                    ?>
-                                    <span class="badge bg-info"><?php echo htmlspecialchars(($deptCode ? $deptCode . ' ' : '') . ($row['program_name'] ?? 'N/A')); ?></span>
-                                </td>
-                                <td>
-                                    <div class="d-flex align-items-center gap-2">
-                                        <span class="badge bg-dark"><?php echo (int)($row['total_capacity'] ?? 0); ?> students</span>
-                                        <span class="badge bg-secondary"><?php echo (int)($row['divisions_count'] ?? 1); ?> classes</span>
-                                    </div>
-                                </td>
-                                <td>
-                                    <button class="btn btn-sm btn-outline-secondary me-1" onclick="showDivisions('<?php echo htmlspecialchars(addslashes($deptCode)); ?>', '<?php echo htmlspecialchars(addslashes($levelNumRow)); ?>', <?php echo (int)($row['divisions_count'] ?? 1); ?>)">
-                                        <i class="fas fa-list"></i>
-                                    </button>
-                                    <button class="btn btn-sm btn-outline-primary me-1" onclick="editClass(this)" 
-                                            data-id="<?php echo (int)$row['id']; ?>" 
-                                            data-name="<?php echo htmlspecialchars($row['name'] ?? '', ENT_QUOTES); ?>" 
-                                            data-divisions="<?php echo (int)($row['divisions_count'] ?? 1); ?>" 
-                                            data-total="<?php echo (int)($row['total_capacity'] ?? 0); ?>" 
-                                            data-stream="<?php echo (int)($row['stream_id'] ?? 0); ?>">
-                                        <i class="fas fa-edit"></i>
-                                    </button>
-                                    <form method="POST" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this class?')">
-                                        <input type="hidden" name="action" value="delete">
-                                        <input type="hidden" name="id" value="<?php echo $row['id']; ?>">
-                                        <button type="submit" class="btn btn-sm btn-outline-danger">
-                                            <i class="fas fa-trash"></i>
-                                        </button>
-                                    </form>
-                                </td>
+                                                         <tr class="<?php echo (isset($_GET['show_inactive']) && $_GET['show_inactive'] == '1' && ($row['is_active'] ?? 1) == 0) ? 'table-secondary' : ''; ?>">
+                                 <td>
+                                     <strong><?php echo htmlspecialchars($row['name']); ?></strong>
+                                     <?php if ($class_has_stream && !empty($row['stream_name'])): ?>
+                                         <br><small><span class="badge bg-success"><?php echo htmlspecialchars($row['stream_name']); ?></span></small>
+                                     <?php endif; ?>
+                                     <?php if (isset($_GET['show_inactive']) && $_GET['show_inactive'] == '1' && ($row['is_active'] ?? 1) == 0): ?>
+                                         <br><small><span class="badge bg-warning">Inactive</span></small>
+                                     <?php endif; ?>
+                                 </td>
+                                 <td><span class="badge bg-warning"><?php echo htmlspecialchars($row['level'] ?? ($row['level_name'] ?? 'N/A')); ?></span></td>
+                                 <td>
+                                     <?php $deptCode = trim(strtoupper($row['dept_short'] ?? $row['program_code'] ?? ''));
+                                     $levelTextRow = $row['level_name'] ?? $row['level'] ?? '';
+                                     preg_match('/(\d+)/', $levelTextRow, $lm);
+                                     $rawLevelRow = isset($lm[1]) ? (int)$lm[1] : 0;
+                                     $levelNumRow = ($rawLevelRow > 0 && $rawLevelRow < 10) ? $rawLevelRow * 100 : $rawLevelRow;
+                                     ?>
+                                     <span class="badge bg-info"><?php echo htmlspecialchars(($deptCode ? $deptCode . ' ' : '') . ($row['program_name'] ?? 'N/A')); ?></span>
+                                 </td>
+                                 <td>
+                                     <div class="d-flex align-items-center gap-2">
+                                         <span class="badge bg-dark"><?php echo (int)($row['total_capacity'] ?? 0); ?> students</span>
+                                         <span class="badge bg-secondary"><?php echo (int)($row['divisions_count'] ?? 1); ?> classes</span>
+                                     </div>
+                                 </td>
+                                                                 <td>
+                                     <button class="btn btn-sm btn-outline-secondary me-1" onclick="showDivisions('<?php echo htmlspecialchars(addslashes($deptCode)); ?>', '<?php echo htmlspecialchars(addslashes($levelNumRow)); ?>', <?php echo (int)($row['divisions_count'] ?? 1); ?>)">
+                                         <i class="fas fa-list"></i>
+                                     </button>
+                                     <button class="btn btn-sm btn-outline-primary me-1" onclick="editClass(this)" 
+                                             data-id="<?php echo (int)$row['id']; ?>" 
+                                             data-name="<?php echo htmlspecialchars($row['name'] ?? '', ENT_QUOTES); ?>" 
+                                             data-divisions="<?php echo (int)($row['divisions_count'] ?? 1); ?>" 
+                                             data-total="<?php echo (int)($row['total_capacity'] ?? 0); ?>" 
+                                             data-stream="<?php echo (int)($row['stream_id'] ?? 0); ?>">
+                                         <i class="fas fa-edit"></i>
+                                     </button>
+                                     <?php if (isset($_GET['show_inactive']) && $_GET['show_inactive'] == '1' && ($row['is_active'] ?? 1) == 0): ?>
+                                         <form method="POST" style="display: inline;" onsubmit="return confirm('Are you sure you want to reactivate this class?')">
+                                             <input type="hidden" name="action" value="reactivate">
+                                             <input type="hidden" name="id" value="<?php echo $row['id']; ?>">
+                                             <button type="submit" class="btn btn-sm btn-outline-success" title="Reactivate Class">
+                                                 <i class="fas fa-undo"></i>
+                                             </button>
+                                         </form>
+                                     <?php endif; ?>
+                                     <form method="POST" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this class?')">
+                                         <input type="hidden" name="action" value="delete">
+                                         <input type="hidden" name="id" value="<?php echo $row['id']; ?>">
+                                         <button type="submit" class="btn btn-sm btn-outline-danger">
+                                             <i class="fas fa-trash"></i>
+                                         </button>
+                                     </form>
+                                 </td>
                             </tr>
                         <?php endwhile; ?>
                     <?php else: ?>
@@ -593,7 +700,7 @@ $level_result = $conn->query($level_sql);
                         <div class="col-md-12">
                             <div class="mb-3">
                                 <label for="total_capacity" class="form-label">Number of Students *</label>
-                                <input type="number" class="form-control" id="total_capacity" name="total_capacity" min="1" max="1000" value="100" required>
+                                <input type="number" class="form-control" id="total_capacity" name="total_capacity" min="1" max="10000" value="100" required>
                                 <small class="text-muted">The system will create classes automatically (max 100 students per class)</small>
                                 <small class="text-muted">The system will create classes automatically (max 100 students per class)</small>
                             </div>
@@ -631,15 +738,174 @@ $level_result = $conn->query($level_sql);
     </div>
 </div>
 
+<!-- Edit Class Modal -->
+<div class="modal fade" id="editClassModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Edit Class</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST" id="editClassForm">
+                <div class="modal-body">
+                    <input type="hidden" name="action" value="edit">
+                    <input type="hidden" name="id" id="edit_class_id" value="">
+                    <div class="mb-3">
+                        <label class="form-label">Class Name</label>
+                        <input type="text" name="name" id="edit_class_name" class="form-control" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Total Capacity</label>
+                        <input type="number" name="total_capacity" id="edit_total_capacity" class="form-control" min="1">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Classes</label>
+                        <input type="number" name="divisions_count" id="edit_divisions_count" class="form-control" min="1">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Stream</label>
+                        <select name="stream_id" id="edit_stream_id" class="form-select" required>
+                            <option value="">Select Stream</option>
+                            <?php 
+                            // Fetch streams fresh for the edit dropdown - show all streams
+                            $edit_streams_sql = "SELECT id, name, code, is_active FROM streams ORDER BY name";
+                            $edit_streams_result = $conn->query($edit_streams_sql);
+                            if ($edit_streams_result && $edit_streams_result->num_rows > 0): ?>
+                                <?php while ($stream = $edit_streams_result->fetch_assoc()): ?>
+                                    <option value="<?php echo $stream['id']; ?>">
+                                        <?php echo htmlspecialchars($stream['name']); ?>
+                                        <?php echo $stream['is_active'] ? ' (Active)' : ' (Inactive)'; ?>
+                                    </option>
+                                <?php endwhile; ?>
+                            <?php endif; ?>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 <?php 
 $conn->close();
 include 'includes/footer.php'; 
 ?>
 
 <script>
-function editClass(id) {
-    // Show edit modal using button dataset
-    var btn = id; // may be element
+// Stream filter functionality
+document.addEventListener('DOMContentLoaded', function() {
+    const streamFilter = document.getElementById('streamFilter');
+    const searchInput = document.querySelector('.search-input');
+    
+    // Add event listeners for filtering
+    if (streamFilter) {
+        streamFilter.addEventListener('change', filterClasses);
+    }
+    if (searchInput) {
+        searchInput.addEventListener('input', filterClasses);
+    }
+});
+
+function filterClasses() {
+    const searchTerm = document.querySelector('.search-input').value.toLowerCase();
+    const selectedStream = document.getElementById('streamFilter').value;
+    const tableRows = document.querySelectorAll('#classesTable tbody tr');
+    
+    tableRows.forEach(row => {
+        const className = row.querySelector('td:first-child').textContent.toLowerCase();
+        const streamBadge = row.querySelector('td:first-child .badge.bg-success');
+        const streamName = streamBadge ? streamBadge.textContent.toLowerCase() : '';
+        
+        let showRow = true;
+        
+        // Filter by search term (search in class name and stream name)
+        if (searchTerm && !className.includes(searchTerm) && !streamName.includes(searchTerm)) {
+            showRow = false;
+        }
+        
+        // Filter by stream
+        if (selectedStream) {
+            const streamOption = document.querySelector(`#streamFilter option[value="${selectedStream}"]`);
+            const selectedStreamName = streamOption ? streamOption.textContent.toLowerCase() : '';
+            if (streamName !== selectedStreamName) {
+                showRow = false;
+            }
+        }
+        
+        row.style.display = showRow ? '' : 'none';
+    });
+    
+    // Show/hide empty state message
+    const visibleRows = document.querySelectorAll('#classesTable tbody tr:not([style*="display: none"])');
+    const emptyStateRow = document.querySelector('#classesTable tbody tr.empty-state');
+    
+    if (visibleRows.length === 0) {
+        if (!emptyStateRow) {
+            const tbody = document.querySelector('#classesTable tbody');
+            const newEmptyState = document.createElement('tr');
+            newEmptyState.className = 'empty-state';
+            newEmptyState.innerHTML = `
+                <td colspan="5" class="text-center">
+                    <i class="fas fa-search"></i>
+                    <p>No classes match your current filters.</p>
+                </td>
+            `;
+            tbody.appendChild(newEmptyState);
+        }
+    } else if (emptyStateRow) {
+        emptyStateRow.remove();
+    }
+    
+    // Update filter summary
+    updateFilterSummary(visibleRows.length, searchTerm, selectedStream);
+}
+
+function updateFilterSummary(visibleCount, searchTerm, selectedStream) {
+    const summaryElement = document.getElementById('filterSummary');
+    const totalRows = document.querySelectorAll('#classesTable tbody tr:not(.empty-state)').length;
+    
+    let summaryText = `Showing ${visibleCount} of ${totalRows} classes`;
+    
+    if (searchTerm || selectedStream) {
+        const filters = [];
+        if (searchTerm) filters.push(`search: "${searchTerm}"`);
+        if (selectedStream) {
+            const streamOption = document.querySelector(`#streamFilter option[value="${selectedStream}"]`);
+            const streamName = streamOption ? streamOption.textContent : '';
+            filters.push(`stream: "${streamName}"`);
+        }
+        summaryText += ` (filtered by ${filters.join(', ')})`;
+    }
+    
+    summaryElement.textContent = summaryText;
+}
+
+function clearFilters() {
+    document.querySelector('.search-input').value = '';
+    document.getElementById('streamFilter').value = '';
+    document.getElementById('showInactive').checked = false;
+    filterClasses();
+}
+
+function toggleInactiveClasses() {
+    const showInactive = document.getElementById('showInactive').checked;
+    
+    // Reload the page with a parameter to show inactive classes
+    const url = new URL(window.location);
+    if (showInactive) {
+        url.searchParams.set('show_inactive', '1');
+    } else {
+        url.searchParams.delete('show_inactive');
+    }
+    window.location.href = url.toString();
+}
+
+function editClass(btn) {
+    // Get data from button dataset
     if (btn && btn.dataset) {
         var classId = btn.dataset.id;
         var name = btn.dataset.name || '';
@@ -647,86 +913,27 @@ function editClass(id) {
         var total = btn.dataset.total || '0';
         var stream = btn.dataset.stream || '';
 
-        // Build or reuse modal
-        var modalHtml = `
-        <div class="modal fade" id="editClassModal" tabindex="-1">
-            <div class="modal-dialog">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h5 class="modal-title">Edit Class</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                    </div>
-                    <form method="POST" id="editClassForm">
-                        <div class="modal-body">
-                            <input type="hidden" name="action" value="edit">
-                            <input type="hidden" name="id" id="edit_class_id" value="${classId}">
-                            <div class="mb-3">
-                                <label class="form-label">Class Name</label>
-                                <input type="text" name="name" id="edit_class_name" class="form-control" value="${name}" required>
-                            </div>
-                            <div class="mb-3">
-                                <label class="form-label">Total Capacity</label>
-                                <input type="number" name="total_capacity" id="edit_total_capacity" class="form-control" value="${total}" min="1">
-                            </div>
-                            <div class="mb-3">
-                                <label class="form-label">Classes</label>
-                                <input type="number" name="divisions_count" id="edit_divisions_count" class="form-control" value="${divisions}" min="1">
-                            </div>
-                            <div class="mb-3">
-                                <label class="form-label">Stream</label>
-                                <select name="stream_id" id="edit_stream_id" class="form-select" required>
-                                    <option value="">Select Stream</option>
-                                    <?php 
-                                    // Fetch streams fresh for the edit dropdown
-                                    $edit_streams_sql = "SELECT id, name, code FROM streams WHERE is_active = 1 ORDER BY name";
-                                    $edit_streams_result = $conn->query($edit_streams_sql);
-                                    if ($edit_streams_result && $edit_streams_result->num_rows > 0): ?>
-                                        <?php while ($stream = $edit_streams_result->fetch_assoc()): ?>
-                                            <option value="<?php echo $stream['id']; ?>" 
-                                                    data-stream-id="<?php echo $stream['id']; ?>">
-                                                <?php echo htmlspecialchars($stream['name']); ?>
-                                            </option>
-                                        <?php endwhile; ?>
-                                    <?php endif; ?>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="modal-footer">
-                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                            <button type="submit" class="btn btn-primary">Save changes</button>
-                        </div>
-                    </form>
-                </div>
-            </div>
-        </div>`;
-
-        // Remove existing modal if present to avoid duplicates
-        var existing = document.getElementById('editClassModal');
-        if (existing) existing.remove();
-
-        var div = document.createElement('div');
-        div.innerHTML = modalHtml;
-        document.body.appendChild(div.firstElementChild);
-
+        // Populate the existing modal with data
+        document.getElementById('edit_class_id').value = classId;
+        document.getElementById('edit_class_name').value = name;
+        document.getElementById('edit_total_capacity').value = total;
+        document.getElementById('edit_divisions_count').value = divisions;
+        
         // Set the selected stream in the dropdown
         var streamSelect = document.getElementById('edit_stream_id');
         if (streamSelect && stream) {
             streamSelect.value = stream;
         }
 
-        // Handle form submit via AJAX fallback (POST redirect otherwise)
-        var form = document.getElementById('editClassForm');
-        form.addEventListener('submit', function(e){
-            // let normal POST handle it
-        });
-
+        // Show the modal
         if (typeof bootstrap !== 'undefined' && bootstrap.Modal) {
-            bootstrap.Modal.getOrCreateInstance(document.getElementById('editClassModal')).show();
+            var modal = new bootstrap.Modal(document.getElementById('editClassModal'));
+            modal.show();
         } else {
             alert('Open edit modal for: ' + name);
         }
     } else {
-        alert('Edit functionality will be implemented here for class ID: ' + id);
+        alert('Edit functionality will be implemented here for class ID: ' + btn);
     }
 }
 
