@@ -5,16 +5,30 @@ include 'connect.php';
 // Enable CORS for development
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE');
-header('Access-Control-Allow-Headers: Content-Type');
+header('Access-Control-Allow-Headers: Content-Type, X-Stream-Id, Stream-Id');
+header('Access-Control-Max-Age: 86400');
+
+// Handle CORS preflight
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(204);
+    exit;
+}
 
 $response = ['success' => false, 'message' => '', 'data' => null];
+
+// Bring in StreamManager to resolve stream from headers/GET/session
+if (file_exists(__DIR__ . '/includes/stream_manager.php')) include_once __DIR__ . '/includes/stream_manager.php';
+$current_stream_id = null;
+if (function_exists('getStreamManager')) {
+    $sm = getStreamManager();
+    $current_stream_id = $sm->getCurrentStreamId();
+}
 
 try {
     $action = $_POST['action'] ?? $_GET['action'] ?? '';
     
     switch ($action) {
         case 'get_timetable_data':
-            $session_id = $_GET['session_id'] ?? 0;
             $semester = $_GET['semester'] ?? 1;
             $type = $_GET['type'] ?? 'lecture';
             
@@ -44,9 +58,10 @@ try {
             $params = [];
             $types = "";
             
-            if ($session_id > 0) {
-                $query .= " AND c.session_id = ?";
-                $params[] = $session_id;
+            // Apply stream filter via classes if available
+            if (!empty($current_stream_id)) {
+                $query .= " AND c.stream_id = ?";
+                $params[] = (int)$current_stream_id;
                 $types .= "i";
             }
             

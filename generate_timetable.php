@@ -106,17 +106,63 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($tcol_sem) $tcol_sem->close();
 
         if (empty($error_message)) {
-            // Clear existing timetable entries only for this academic year/semester when supported
-            if ($has_t_academic_year && $has_t_semester) {
-                $del_stmt = $conn->prepare("DELETE FROM timetable WHERE academic_year = ? AND semester = ?");
-                if ($del_stmt) {
-                    $del_stmt->bind_param("ss", $academic_year, $semester);
-                    $del_stmt->execute();
-                    $del_stmt->close();
+            // Clear existing timetable entries scoped to the resolved stream and, if present, the selected academic year/semester
+            // Detect schema variant for timetable (class_course_id or class_id)
+            $tcol_check_for_class_course = $conn->query("SHOW COLUMNS FROM timetable LIKE 'class_course_id'");
+            $has_t_class_course = ($tcol_check_for_class_course && $tcol_check_for_class_course->num_rows > 0);
+            if ($tcol_check_for_class_course) $tcol_check_for_class_course->close();
+
+            // We must filter by classes.stream_id so we do not delete other streams' data
+            if ($has_t_class_course) {
+                if ($has_t_academic_year && $has_t_semester) {
+                    $sql = "DELETE t FROM timetable t
+                            JOIN class_courses cc ON t.class_course_id = cc.id
+                            JOIN classes c ON cc.class_id = c.id
+                            WHERE c.stream_id = ? AND t.academic_year = ? AND t.semester = ?";
+                    $del_stmt = $conn->prepare($sql);
+                    if ($del_stmt) {
+                        $sid = (int)$current_stream_id;
+                        $del_stmt->bind_param("iss", $sid, $academic_year, $semester);
+                        $del_stmt->execute();
+                        $del_stmt->close();
+                    }
+                } else {
+                    $sql = "DELETE t FROM timetable t
+                            JOIN class_courses cc ON t.class_course_id = cc.id
+                            JOIN classes c ON cc.class_id = c.id
+                            WHERE c.stream_id = ?";
+                    $del_stmt = $conn->prepare($sql);
+                    if ($del_stmt) {
+                        $sid = (int)$current_stream_id;
+                        $del_stmt->bind_param("i", $sid);
+                        $del_stmt->execute();
+                        $del_stmt->close();
+                    }
                 }
             } else {
-                // Fallback: clear entire timetable
-                $conn->query("DELETE FROM timetable");
+                if ($has_t_academic_year && $has_t_semester) {
+                    $sql = "DELETE t FROM timetable t
+                            JOIN classes c ON t.class_id = c.id
+                            WHERE c.stream_id = ? AND t.academic_year = ? AND t.semester = ?";
+                    $del_stmt = $conn->prepare($sql);
+                    if ($del_stmt) {
+                        $sid = (int)$current_stream_id;
+                        $del_stmt->bind_param("iss", $sid, $academic_year, $semester);
+                        $del_stmt->execute();
+                        $del_stmt->close();
+                    }
+                } else {
+                    $sql = "DELETE t FROM timetable t
+                            JOIN classes c ON t.class_id = c.id
+                            WHERE c.stream_id = ?";
+                    $del_stmt = $conn->prepare($sql);
+                    if ($del_stmt) {
+                        $sid = (int)$current_stream_id;
+                        $del_stmt->bind_param("i", $sid);
+                        $del_stmt->execute();
+                        $del_stmt->close();
+                    }
+                }
             }
         }
 

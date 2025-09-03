@@ -22,24 +22,61 @@ class StreamManager {
         if (session_status() == PHP_SESSION_NONE) {
             session_start();
         }
-        
-        // Check if stream is set in session
-        if (isset($_SESSION['current_stream_id'])) {
-            $this->current_stream_id = $_SESSION['current_stream_id'];
-        } elseif (isset($_SESSION['active_stream'])) {
-            // Backwards compatibility with older session key
-            $this->current_stream_id = $_SESSION['active_stream'];
-            $_SESSION['current_stream_id'] = $this->current_stream_id;
-        } elseif (isset($_SESSION['stream_id'])) {
-            // Backwards compatibility with alternative session key
-            $this->current_stream_id = $_SESSION['stream_id'];
-            $_SESSION['current_stream_id'] = $this->current_stream_id;
-        } else {
-            // Set default stream (Regular)
-            $this->current_stream_id = 1;
-            $_SESSION['current_stream_id'] = $this->current_stream_id;
+
+        // Resolve stream from (highest priority first): GET -> Header -> Session -> Default(1)
+        $resolved = null;
+
+        // 1) Explicit GET override for UI pages
+        if (isset($_GET['stream_id']) && is_numeric($_GET['stream_id'])) {
+            $resolved = (int)$_GET['stream_id'];
         }
-        
+
+        // 2) Headers (API clients). Support common variants
+        if ($resolved === null) {
+            $headers = [];
+            if (function_exists('getallheaders')) {
+                $headers = getallheaders();
+            }
+            // Normalize header keys to lowercase for consistent lookup
+            $normalized = [];
+            foreach ($headers as $k => $v) { $normalized[strtolower($k)] = $v; }
+            $headerStream = 0;
+            if (isset($normalized['x-stream-id'])) {
+                $headerStream = (int)$normalized['x-stream-id'];
+            } elseif (isset($normalized['stream-id'])) {
+                $headerStream = (int)$normalized['stream-id'];
+            } elseif (isset($_SERVER['HTTP_X_STREAM_ID'])) {
+                $headerStream = (int)$_SERVER['HTTP_X_STREAM_ID'];
+            } elseif (isset($_SERVER['HTTP_STREAM_ID'])) {
+                $headerStream = (int)$_SERVER['HTTP_STREAM_ID'];
+            }
+            if ($headerStream > 0) {
+                $resolved = $headerStream;
+            }
+        }
+
+        // 3) Session (including legacy keys)
+        if ($resolved === null) {
+            if (isset($_SESSION['current_stream_id'])) {
+                $resolved = (int)$_SESSION['current_stream_id'];
+            } elseif (isset($_SESSION['active_stream'])) {
+                $resolved = (int)$_SESSION['active_stream'];
+            } elseif (isset($_SESSION['stream_id'])) {
+                $resolved = (int)$_SESSION['stream_id'];
+            }
+        }
+
+        // 4) Default to Regular stream (id = 1)
+        if ($resolved === null || $resolved <= 0) {
+            $resolved = 1;
+        }
+
+        // Persist and hydrate
+        $this->current_stream_id = $resolved;
+        $_SESSION['current_stream_id'] = $resolved;
+        $_SESSION['active_stream'] = $resolved; // legacy
+        $_SESSION['stream_id'] = $resolved;     // legacy
+
         // Get stream name
         $this->loadStreamName();
     }
