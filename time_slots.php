@@ -11,23 +11,83 @@ include_once 'includes/stream_manager.php';
 $streamManager = getStreamManager();
 $current_stream_id = $streamManager->getCurrentStreamId();
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+	if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 	$action = $_POST['action'];
-	if ($action === 'add') {
+			if ($action === 'add') {
 		$start_time = $conn->real_escape_string($_POST['start_time']);
 		$end_time = $conn->real_escape_string($_POST['end_time']);
 		$duration = (int)$_POST['duration'];
 		$is_break = isset($_POST['is_break']) ? 1 : 0;
 		$is_mandatory = isset($_POST['is_mandatory']) ? 1 : 0;
 
-		$stmt = $conn->prepare("INSERT INTO time_slots (start_time, end_time, duration, is_break, is_mandatory) VALUES (?, ?, ?, ?, ?)");
-		$stmt->bind_param('ssiii', $start_time, $end_time, $duration, $is_break, $is_mandatory);
-		if ($stmt->execute()) {
-			$success_message = 'Time slot added successfully.';
+		// Validate that start time is on the hour (XX:00)
+		$start_minutes = (int)substr($start_time, -2);
+		if ($start_minutes !== 0) {
+			$error_message = 'Start time must be on the hour (XX:00 format).';
 		} else {
-			$error_message = 'Failed to add time slot: ' . $conn->error;
+			// Calculate end time as start time + 60 minutes
+			$start_obj = new DateTime($start_time);
+			$end_obj = clone $start_obj;
+			$end_obj->add(new DateInterval('PT60M'));
+			$calculated_end_time = $end_obj->format('H:i:s');
+			
+			// Override user-provided end time and duration
+			$end_time = $calculated_end_time;
+			$duration = 60;
+
+			$stmt = $conn->prepare("INSERT INTO time_slots (start_time, end_time, duration, is_break, is_mandatory) VALUES (?, ?, ?, ?, ?)");
+			$stmt->bind_param('ssiii', $start_time, $end_time, $duration, $is_break, $is_mandatory);
+			if ($stmt->execute()) {
+				$success_message = 'Time slot added successfully.';
+			} else {
+				$error_message = 'Failed to add time slot: ' . $conn->error;
+			}
+			$stmt->close();
 		}
-		$stmt->close();
+	} elseif ($action === 'add_multiple') {
+		$base_start_time = $conn->real_escape_string($_POST['base_start_time']);
+		$num_slots = (int)$_POST['num_slots'];
+		$is_break = isset($_POST['is_break']) ? 1 : 0;
+		$is_mandatory = isset($_POST['is_mandatory']) ? 1 : 0;
+
+		// Validate that base start time is on the hour (XX:00)
+		$start_minutes = (int)substr($base_start_time, -2);
+		if ($start_minutes !== 0) {
+			$error_message = 'Base start time must be on the hour (XX:00 format).';
+		} else {
+			$success_count = 0;
+			$error_count = 0;
+
+			$stmt = $conn->prepare("INSERT INTO time_slots (start_time, end_time, duration, is_break, is_mandatory) VALUES (?, ?, ?, ?, ?)");
+			$stmt->bind_param('ssiii', $start_time, $end_time, $duration, $is_break, $is_mandatory);
+
+			for ($i = 0; $i < $num_slots; $i++) {
+				// Calculate start time for this slot (XX:00 format)
+				$start_time_obj = new DateTime($base_start_time);
+				$start_time_obj->add(new DateInterval('PT' . ($i * 60) . 'M')); // 60-minute intervals
+				$start_time = $start_time_obj->format('H:i:s');
+
+				// Calculate end time as start time + 60 minutes
+				$end_time_obj = clone $start_time_obj;
+				$end_time_obj->add(new DateInterval('PT60M'));
+				$end_time = $end_time_obj->format('H:i:s');
+
+				$duration = 60; // Fixed 60-minute duration
+
+				if ($stmt->execute()) {
+					$success_count++;
+				} else {
+					$error_count++;
+				}
+			}
+			$stmt->close();
+
+			if ($error_count > 0) {
+				$error_message = "Added $success_count time slots successfully. Failed to add $error_count time slots.";
+			} else {
+				$success_message = "Successfully added $success_count time slots.";
+			}
+		}
 	} elseif ($action === 'edit') {
 		$id = (int)$_POST['id'];
 		$start_time = $conn->real_escape_string($_POST['start_time']);
@@ -79,6 +139,9 @@ $assigned_map = array_flip($assigned_time_slot_ids);
 				<!-- <span class="me-3">Current Stream: <strong><?php echo htmlspecialchars($streamManager->getCurrentStreamName()); ?></strong></span> -->
 				<button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addTimeSlotModal">
 					<i class="fas fa-plus me-2"></i>Add Time Slot
+				</button>
+				<button class="btn btn-success ms-2" data-bs-toggle="modal" data-bs-target="#addMultipleTimeSlotsModal">
+					<i class="fas fa-layer-group me-2"></i>Add Multiple
 				</button>
 			</div>
 		</div>
@@ -139,6 +202,129 @@ $assigned_map = array_flip($assigned_time_slot_ids);
 	</div>
 </div>
 
+<!-- Add Time Slot Modal -->
+<div class="modal fade" id="addTimeSlotModal" tabindex="-1" aria-hidden="true">
+	<div class="modal-dialog">
+		<div class="modal-content">
+			<div class="modal-header">
+				<h5 class="modal-title">Add New Time Slot</h5>
+				<button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+			</div>
+			<form method="post">
+				<div class="modal-body">
+					<input type="hidden" name="action" value="add">
+					<div class="mb-3">
+						<label class="form-label">Start Time</label>
+						<input type="time" name="start_time" class="form-control" step="3600" required>
+						<small class="form-text text-muted">Must be on the hour (XX:00). Duration will be 60 minutes.</small>
+					</div>
+					<div class="mb-3">
+						<label class="form-label">End Time</label>
+						<input type="time" name="end_time" class="form-control" step="3600" readonly>
+						<small class="form-text text-muted">Automatically calculated as start time + 60 minutes</small>
+					</div>
+					<div class="mb-3">
+						<label class="form-label">Duration (minutes)</label>
+						<input type="number" name="duration" class="form-control" value="60" readonly>
+						<small class="form-text text-muted">Fixed at 60 minutes</small>
+					</div>
+					<div class="form-check mb-3">
+						<input type="checkbox" name="is_break" class="form-check-input" id="add_ts_break">
+						<label class="form-check-label" for="add_ts_break">Is Break</label>
+					</div>
+					<div class="form-check mb-3">
+						<input type="checkbox" name="is_mandatory" class="form-check-input" id="add_ts_mand">
+						<label class="form-check-label" for="add_ts_mand">Is Mandatory</label>
+					</div>
+				</div>
+				<div class="modal-footer">
+					<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+					<button type="submit" class="btn btn-primary">Add Time Slot</button>
+				</div>
+			</form>
+		</div>
+	</div>
+</div>
+
+<!-- Add Multiple Time Slots Modal -->
+<div class="modal fade" id="addMultipleTimeSlotsModal" tabindex="-1" aria-hidden="true">
+	<div class="modal-dialog modal-lg">
+		<div class="modal-content">
+			<div class="modal-header">
+				<h5 class="modal-title">Add Multiple Time Slots</h5>
+				<button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+			</div>
+			<form method="post">
+				<div class="modal-body">
+					<input type="hidden" name="action" value="add_multiple">
+					
+					<div class="row">
+						<div class="col-md-6">
+							<div class="mb-3">
+								<label class="form-label">Base Start Time</label>
+								<input type="time" name="base_start_time" class="form-control" step="3600" required>
+								<small class="form-text text-muted">Must be on the hour (XX:00). Each slot will be 60 minutes.</small>
+							</div>
+						</div>
+						<div class="col-md-6">
+							<div class="mb-3">
+								<label class="form-label">Number of Slots</label>
+								<input type="number" name="num_slots" class="form-control" min="1" max="20" value="5" required>
+								<small class="form-text text-muted">How many slots to create (1-20)</small>
+							</div>
+						</div>
+					</div>
+					
+					<div class="alert alert-info">
+						<strong>Format:</strong> Each time slot will be exactly 60 minutes, starting on the hour (XX:00).<br>
+						<strong>Example:</strong> If you start at 08:00 and create 5 slots, you'll get: 08:00-09:00, 09:00-10:00, 10:00-11:00, 11:00-12:00, 12:00-13:00
+					</div>
+					
+					<div class="form-check mb-3">
+						<input type="checkbox" name="is_break" class="form-check-input" id="add_multiple_ts_break">
+						<label class="form-check-label" for="add_multiple_ts_break">Is Break</label>
+					</div>
+					<div class="form-check mb-3">
+						<input type="checkbox" name="is_mandatory" class="form-check-input" id="add_multiple_ts_mand">
+						<label class="form-check-label" for="add_multiple_ts_mand">Is Mandatory</label>
+					</div>
+					
+					<div class="alert alert-info">
+						<strong>Preview:</strong> This will create time slots starting from the base time, with the specified interval between each slot.
+					</div>
+				</div>
+				<div class="modal-footer">
+					<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+					<button type="submit" class="btn btn-success">Add Multiple Time Slots</button>
+				</div>
+			</form>
+		</div>
+	</div>
+</div>
+
 <!-- Assigned slots are rendered server-side based on the current stream in the header/session -->
+
+<script>
+// Auto-calculate end time when start time changes
+document.addEventListener('DOMContentLoaded', function() {
+    const startTimeInput = document.querySelector('input[name="start_time"]');
+    const endTimeInput = document.querySelector('input[name="end_time"]');
+    
+    if (startTimeInput && endTimeInput) {
+        startTimeInput.addEventListener('change', function() {
+            const startTime = this.value;
+            if (startTime) {
+                // Create a Date object with the start time
+                const startDate = new Date('2000-01-01T' + startTime + ':00');
+                // Add 60 minutes
+                startDate.setMinutes(startDate.getMinutes() + 60);
+                // Format as HH:MM
+                const endTime = startDate.toTimeString().slice(0, 5);
+                endTimeInput.value = endTime;
+            }
+        });
+    }
+});
+</script>
 
 <?php include 'includes/footer.php'; ?>
