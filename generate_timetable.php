@@ -3,6 +3,13 @@ include 'connect.php';
 // Ensure flash helper is available for PRG redirects
 if (file_exists(__DIR__ . '/includes/flash.php')) include_once __DIR__ . '/includes/flash.php';
 
+// Include genetic algorithm components
+require_once __DIR__ . '/ga/GeneticAlgorithm.php';
+require_once __DIR__ . '/ga/DBLoader.php';
+require_once __DIR__ . '/ga/TimetableRepresentation.php';
+require_once __DIR__ . '/ga/ConstraintChecker.php';
+require_once __DIR__ . '/ga/FitnessEvaluator.php';
+
 // Register application-wide error/exception handlers (match includes/header.php style)
 set_error_handler(function($severity, $message, $file, $line) {
     if (!(error_reporting() & $severity)) {
@@ -52,13 +59,22 @@ $current_stream_id = $streamManager->getCurrentStreamId();
 
 $success_message = '';
 $error_message = '';
+$generation_results = null;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? null;
     if ($action === 'generate_lecture_timetable') {
-        // Read academic year and semester from user input
-        $academic_year = trim($_POST['academic_year'] ?? '');
+        // Read timetable name and semester from user input (original interface)
+        $timetable_name = trim($_POST['timetable_name'] ?? '');
         $semester = trim($_POST['semester'] ?? '');
+        $stream_id = $current_stream_id; // Use currently active stream
+        
+        // GA parameters (with sensible defaults - hidden from user)
+        $population_size = 100;
+        $generations = 500;
+        $mutation_rate = 0.1;
+        $crossover_rate = 0.8;
+        $max_runtime = 300;
 
         // Normalize academic_year to match DB width and expected format (e.g. "2024/2025").
         // If the user provided a longer descriptive name in the Timetable Name field,
@@ -92,450 +108,69 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             return $tok;
         };
 
-        $academic_year = $normalizeAcademicYear($academic_year);
+        $academic_year = $normalizeAcademicYear($timetable_name);
         if ($academic_year === '' || $semester === '') {
-            $error_message = 'Please specify academic year and semester before generating the timetable.';
-        }
-
-        // Detect if timetable stores academic_year / semester columns so we can clear only that offering
-        $tcol_year = $conn->query("SHOW COLUMNS FROM timetable LIKE 'academic_year'");
-        $tcol_sem = $conn->query("SHOW COLUMNS FROM timetable LIKE 'semester'");
-        $has_t_academic_year = ($tcol_year && $tcol_year->num_rows > 0);
-        $has_t_semester = ($tcol_sem && $tcol_sem->num_rows > 0);
-        if ($tcol_year) $tcol_year->close();
-        if ($tcol_sem) $tcol_sem->close();
-
-        if (empty($error_message)) {
-            // Clear existing timetable entries only for this academic year/semester when supported
-            if ($has_t_academic_year && $has_t_semester) {
-                $del_stmt = $conn->prepare("DELETE FROM timetable WHERE academic_year = ? AND semester = ?");
-                if ($del_stmt) {
-                    $del_stmt->bind_param("ss", $academic_year, $semester);
-                    $del_stmt->execute();
-                    $del_stmt->close();
-                }
-            } else {
-                // Fallback: clear entire timetable
-                $conn->query("DELETE FROM timetable");
-            }
-        }
-
-        // Prepare to fetch time slots per stream using mapping
-        $time_slots_by_stream = [];
-
-        // Get all days (used as a fallback if a stream has no specific days)
-        $days_sql = "SELECT id, name FROM days WHERE is_active = 1 ORDER BY id";
-        $days_result = $conn->query($days_sql);
-        $all_days = [];
-        while ($day = $days_result->fetch_assoc()) {
-            $all_days[] = $day;
-        }
-
-        // Get available rooms (rooms are global / not stream-aware) - only active rooms
-        $rooms_sql = "SELECT id, name, capacity FROM rooms WHERE is_active = 1 ORDER BY capacity";
-        $rooms_result = $conn->query($rooms_sql);
-        $rooms = [];
-        while ($room = $rooms_result->fetch_assoc()) {
-            $rooms[] = $room;
-        }
-
-        // Get active streams to generate per-stream. Respect currently selected stream if set.
-        if (!empty($current_stream_id) && is_numeric($current_stream_id)) {
-            $streams_sql = "SELECT id, name FROM streams WHERE is_active = 1 AND id = " . intval($current_stream_id) . " ORDER BY id";
+            $error_message = 'Please specify timetable name and semester before generating the timetable.';
         } else {
-            $streams_sql = "SELECT id, name FROM streams WHERE is_active = 1 ORDER BY id";
-        }
-        $streams_result = $conn->query($streams_sql);
-
-        if ($streams_result && $streams_result->num_rows > 0) {
-            $success_count = 0;
-            $error_count = 0;
-
-            // Prepare assignment statement (we will bind stream_id per-iteration)
-            // Note: courses table uses `code` and `name` columns. Alias them to match expected keys.
-            $assignments_sql = "SELECT cc.id, cc.class_id, cc.course_id, c.name as class_name, co.`code` AS course_code, co.`name` AS course_name
-                               FROM class_courses cc
-                               JOIN classes c ON cc.class_id = c.id
-                               JOIN courses co ON cc.course_id = co.id
-                               WHERE cc.is_active = 1 AND c.stream_id = ?";
-            $assignments_stmt = $conn->prepare($assignments_sql);
-
-            // Prepare day lookup statement (if stream_days exists)
-            $stream_days_enabled = false;
-            $sd_check = $conn->query("SHOW TABLES LIKE 'stream_days'");
-            if ($sd_check && $sd_check->num_rows > 0) {
-                $stream_days_enabled = true;
-                $stream_days_sql = "SELECT d.id, d.name FROM stream_days sd JOIN days d ON sd.day_id = d.id WHERE sd.stream_id = ? AND d.is_active = 1 ORDER BY d.id";
-                $stream_days_stmt = $conn->prepare($stream_days_sql);
-            }
-
-            // prepare conflict-check statements once
-            $check_room_sql = "SELECT COUNT(*) as count FROM timetable WHERE day_id = ? AND time_slot_id = ? AND room_id = ?";
-            $check_room_stmt = $conn->prepare($check_room_sql);
-
-            // detect if timetable has a division_label column to allow per-division scheduling
-            $div_col_check = $conn->query("SHOW COLUMNS FROM timetable LIKE 'division_label'");
-            $has_division_col = ($div_col_check && $div_col_check->num_rows > 0);
-            if ($div_col_check) $div_col_check->close();
-
-            // check if classes table contains divisions_count
-            $col_div = $conn->query("SHOW COLUMNS FROM classes LIKE 'divisions_count'");
-            $has_classes_divisions = ($col_div && $col_div->num_rows > 0);
-            if ($col_div) $col_div->close();
-
-            // check if class (via class_courses->class_id) already has an entry at the same day/time
-            // Detect whether timetable stores class_course_id (newer schema) or class_id (older schema)
-            $tcol_check_for_class_course = $conn->query("SHOW COLUMNS FROM timetable LIKE 'class_course_id'");
-            $has_t_class_course = ($tcol_check_for_class_course && $tcol_check_for_class_course->num_rows > 0);
-            if ($tcol_check_for_class_course) $tcol_check_for_class_course->close();
-
-            if ($has_t_class_course) {
-                if ($has_division_col) {
-                    // check per-division (allow different divisions of same class at same time)
-                    $check_class_sql = "SELECT COUNT(*) as count FROM timetable t JOIN class_courses cc ON t.class_course_id = cc.id WHERE cc.class_id = ? AND t.division_label = ? AND t.day_id = ? AND t.time_slot_id = ?";
-                } else {
-                    $check_class_sql = "SELECT COUNT(*) as count FROM timetable t JOIN class_courses cc ON t.class_course_id = cc.id WHERE cc.class_id = ? AND t.day_id = ? AND t.time_slot_id = ?";
-                }
-            } else {
-                // timetable stores class_id directly
-                if ($has_division_col) {
-                    $check_class_sql = "SELECT COUNT(*) as count FROM timetable t WHERE t.class_id = ? AND t.division_label = ? AND t.day_id = ? AND t.time_slot_id = ?";
-                } else {
-                    $check_class_sql = "SELECT COUNT(*) as count FROM timetable t WHERE t.class_id = ? AND t.day_id = ? AND t.time_slot_id = ?";
-                }
-            }
-            $check_class_stmt = $conn->prepare($check_class_sql);
-
-            // check if lecturer_course is already teaching at that time
-            $tcol_check_for_lecturer_course = $conn->query("SHOW COLUMNS FROM timetable LIKE 'lecturer_course_id'");
-            $has_t_lecturer_course = ($tcol_check_for_lecturer_course && $tcol_check_for_lecturer_course->num_rows > 0);
-            if ($tcol_check_for_lecturer_course) $tcol_check_for_lecturer_course->close();
-
-            if ($has_t_lecturer_course) {
-                $check_lecturer_sql = "SELECT COUNT(*) as count FROM timetable WHERE lecturer_course_id = ? AND day_id = ? AND time_slot_id = ?";
-            } else {
-                $check_lecturer_sql = "SELECT COUNT(*) as count FROM timetable WHERE lecturer_id = ? AND day_id = ? AND time_slot_id = ?";
-            }
-            $check_lecturer_stmt = $conn->prepare($check_lecturer_sql);
-
-            while ($stream = $streams_result->fetch_assoc()) {
-                $stream_id = $stream['id'];
-
-                // Determine days for this stream using active_days JSON from streams table
-                $days = $all_days; // Default to all active days
+            try {
+                // Clear existing timetable for this period
+                clearExistingTimetable($conn, $academic_year, $semester, $stream_id);
                 
-                // Get stream's active days preference
-                $stream_days_sql = "SELECT active_days FROM streams WHERE id = ?";
-                $stream_active_days_stmt = $conn->prepare($stream_days_sql);
-                $stream_active_days_stmt->bind_param('i', $stream_id);
-                $stream_active_days_stmt->execute();
-                $stream_result = $stream_active_days_stmt->get_result();
-
-                if ($stream_row = $stream_result->fetch_assoc()) {
-                    $active_days_json = $stream_row['active_days'];
-                    if (!empty($active_days_json)) {
-                        $active_days_array = json_decode($active_days_json, true);
-                        if (is_array($active_days_array) && count($active_days_array) > 0) {
-                            // Filter all_days to only include stream's selected days
-                            $stream_specific_days = [];
-                            foreach ($all_days as $day) {
-                                if (in_array($day['name'], $active_days_array)) {
-                                    $stream_specific_days[] = $day;
-                                }
-                            }
-                            if (count($stream_specific_days) > 0) {
-                                $days = $stream_specific_days;
-                            }
-                        }
-                    }
-                }
-                $stream_active_days_stmt->close();
-
-                // Load time slots for this stream - stream-aware periods from database
-                $stream_slots = [];
-                // First try to get stream-specific time slots from stream_time_slots mapping
-                $sts_exists = $conn->query("SHOW TABLES LIKE 'stream_time_slots'");
-                if ($sts_exists && $sts_exists->num_rows > 0) {
-                    $ts_rs = $conn->query("SELECT ts.id, ts.start_time, ts.end_time FROM stream_time_slots sts JOIN time_slots ts ON ts.id = sts.time_slot_id WHERE sts.stream_id = " . intval($stream_id) . " AND sts.is_active = 1 ORDER BY ts.start_time");
-                    if ($ts_rs && $ts_rs->num_rows > 0) {
-                        while ($s = $ts_rs->fetch_assoc()) { $stream_slots[] = $s; }
-                    }
-                }
-                if ($sts_exists) $sts_exists->close();
+                // Initialize genetic algorithm
+                $gaOptions = [
+                    'population_size' => $population_size,
+                    'generations' => $generations,
+                    'mutation_rate' => $mutation_rate,
+                    'crossover_rate' => $crossover_rate,
+                    'max_runtime' => $max_runtime,
+                    'stream_id' => $stream_id,
+                    'academic_year' => $academic_year,
+                    'semester' => $semester
+                ];
                 
-                // If no mapped time slots found, generate them from stream's period settings
-                if (empty($stream_slots)) {
-                    // Fetch stream's period settings from database
-                    $stream_period_sql = "SELECT period_start, period_end, break_start, break_end FROM streams WHERE id = ? AND is_active = 1";
-                    $stream_period_stmt = $conn->prepare($stream_period_sql);
-                    $stream_period_stmt->bind_param('i', $stream_id);
-                    $stream_period_stmt->execute();
-                    $stream_period_result = $stream_period_stmt->get_result();
+                $ga = new GeneticAlgorithm($conn, $gaOptions);
+                
+                // Validate data before generation
+                $loader = new DBLoader($conn);
+                $data = $loader->loadAll($gaOptions);
+                $validation = $loader->validateDataForGeneration($data);
+                
+                if (!$validation['valid']) {
+                    $error_message = 'Cannot generate timetable: ' . implode(', ', $validation['errors']);
+                } else {
+                    // Run genetic algorithm
+                    $start_time = microtime(true);
+                    $results = $ga->run();
+                    $end_time = microtime(true);
                     
-                    if ($stream_period_row = $stream_period_result->fetch_assoc()) {
-                        $period_start = $stream_period_row['period_start'];
-                        $period_end = $stream_period_row['period_end'];
-                        $break_start = $stream_period_row['break_start'];
-                        $break_end = $stream_period_row['break_end'];
-                        
-                        // Generate time slots based on stream's period settings
-                        if (!empty($period_start) && !empty($period_end)) {
-                            $start_time = new DateTime($period_start);
-                            $end_time = new DateTime($period_end);
-                            $current_time = clone $start_time;
-                            $slot_id = 1;
-                            
-                            while ($current_time < $end_time) {
-                                $slot_start = $current_time->format('H:i');
-                                $current_time->add(new DateInterval('PT1H')); // Add 1 hour
-                                $slot_end = $current_time->format('H:i');
-                                
-                                // Don't create a slot that goes beyond the period end
-                                if ($current_time > $end_time) {
-                                    $slot_end = $end_time->format('H:i');
-                                }
-                                
-                                // Check if this slot overlaps with break time
-                                $is_break = false;
-                                
-                                if (!empty($break_start) && !empty($break_end)) {
-                                    $break_start_time = new DateTime($break_start);
-                                    $break_end_time = new DateTime($break_end);
-                                    $slot_start_time = new DateTime($slot_start);
-                                    $slot_end_time = new DateTime($slot_end);
-                                    
-                                    // Check if slot overlaps with break period
-                                    if (($slot_start_time < $break_end_time) && ($slot_end_time > $break_start_time)) {
-                                        $is_break = true;
-                                    }
-                                }
-                                
-                                // Only add non-break slots for scheduling
-                                if (!$is_break) {
-                                    $stream_slots[] = [
-                                        'id' => $slot_id,
-                                        'start_time' => $slot_start,
-                                        'end_time' => $slot_end
-                                    ];
-                                }
-                                
-                                $slot_id++;
-                                
-                                // Safety check to prevent infinite loops
-                                if ($slot_id > 24) {
-                                    break;
-                                }
-                            }
+                    $generation_results = [
+                        'runtime' => $end_time - $start_time,
+                        'generations_completed' => $results['generations_completed'],
+                        'best_solution' => $results['solution'],
+                        'statistics' => $results['statistics']
+                    ];
+                    
+                    // Convert solution to database format
+                    $timetableEntries = $ga->convertToDatabaseFormat($results['solution']);
+                    
+                    // Insert into database
+                    $inserted_count = insertTimetableEntries($conn, $timetableEntries);
+                    
+                    if ($inserted_count > 0) {
+                        $msg = "Timetable generated successfully! $inserted_count entries created.";
+                        if (function_exists('redirect_with_flash')) {
+                            redirect_with_flash('generate_timetable.php', 'success', $msg);
+                        } else {
+                            $success_message = $msg;
                         }
+                    } else {
+                        $error_message = "Timetable generation completed but no entries were inserted.";
                     }
-                    $stream_period_stmt->close();
                 }
                 
-                // Fallback to global time slots if no stream-specific slots or period settings
-                if (empty($stream_slots)) {
-                    $ts_rs2 = $conn->query("SELECT id, start_time, end_time FROM time_slots WHERE is_mandatory = 1 ORDER BY start_time");
-                    while ($s2 = $ts_rs2->fetch_assoc()) { $stream_slots[] = $s2; }
-                }
-
-                // Fetch assignments for classes in this stream
-                $assignments_stmt->bind_param('i', $stream_id);
-                $assignments_stmt->execute();
-                $assignments_result = $assignments_stmt->get_result();
-
-                // Load assignments into array and shuffle to avoid placement bias
-                $assignments_list = [];
-                while ($r = $assignments_result->fetch_assoc()) {
-                    $assignments_list[] = $r;
-                }
-                if (count($assignments_list) > 1) shuffle($assignments_list);
-
-                foreach ($assignments_list as $assignment) {
-                    // Assign to a random time slot and a day from this stream's allowed days
-                    if (empty($stream_slots) || empty($days) || empty($rooms)) {
-                        $error_count++;
-                        continue;
-                    }
-                    // We'll attempt multiple retries to place this assignment in case of conflicts
-                    $placed = false;
-                    $max_attempts = 10;
-                    for ($attempt = 0; $attempt < $max_attempts && !$placed; $attempt++) {
-                        // pick random slot/day/room (shuffle sources to reduce bias)
-                        $time_slot = $stream_slots[array_rand($stream_slots)];
-                        $day = $days[array_rand($days)];
-                        $room = $rooms[array_rand($rooms)];
-
-                        // Check room/class/lecturer conflicts
-                        $check_room_stmt->bind_param("iii", $day['id'], $time_slot['id'], $room['id']);
-                        $check_room_stmt->execute();
-                        $room_count = $check_room_stmt->get_result()->fetch_assoc()['count'];
-
-                        // class id: need to fetch class_id for this assignment (we have class_id in the assignment row)
-                        // If timetable supports division_label, we will try to schedule into a specific division label
-                        $class_count = 0;
-                        $division_label_to_use = null;
-                        if ($has_division_col && $has_classes_divisions) {
-                            // Fetch class divisions_count
-                            $cd_stmt = $conn->prepare("SELECT divisions_count, name FROM classes WHERE id = ? LIMIT 1");
-                            if ($cd_stmt) {
-                                $cd_stmt->bind_param("i", $assignment['class_id']);
-                                $cd_stmt->execute();
-                                $cd_res = $cd_stmt->get_result();
-                                $cd_row = $cd_res->fetch_assoc();
-                                $cd_stmt->close();
-                                $div_count = $cd_row ? (int)$cd_row['divisions_count'] : 1;
-                                $class_base_name = $cd_row ? $cd_row['name'] : '';
-                            } else {
-                                $div_count = 1;
-                                $class_base_name = '';
-                            }
-
-                            // attempt to find a free division label slot (A..Z, AA..)
-                            for ($didx = 0; $didx < $div_count; $didx++) {
-                                $n = $didx;
-                                $label = '';
-                                while (true) {
-                                    $label = chr(65 + ($n % 26)) . $label;
-                                    $n = intdiv($n, 26) - 1;
-                                    if ($n < 0) break;
-                                }
-                                // check this specific division hasn't an entry
-                                $check_class_stmt->bind_param("isii", $assignment['class_id'], $label, $day['id'], $time_slot['id']);
-                                $check_class_stmt->execute();
-                                $class_count = $check_class_stmt->get_result()->fetch_assoc()['count'];
-                                if ($class_count == 0) { $division_label_to_use = $label; break; }
-                            }
-                            // if none free, class_count will be >0
-                        } else {
-                            $check_class_stmt->bind_param("iii", $assignment['class_id'], $day['id'], $time_slot['id']);
-                            $check_class_stmt->execute();
-                            $class_count = $check_class_stmt->get_result()->fetch_assoc()['count'];
-                        }
-
-                        // we'll lookup lecturer_course later; for now assume lecturer might conflict after we fetch it
-                        if ($room_count == 0 && $class_count == 0) {
-                            // Get a default lecturer_course (and lecturer) for this course
-                            $lecturer_course_sql = "SELECT lc.id, lc.lecturer_id FROM lecturer_courses lc WHERE lc.course_id = ? LIMIT 1";
-                            $lecturer_course_stmt = $conn->prepare($lecturer_course_sql);
-                            $lecturer_course_stmt->bind_param("i", $assignment['course_id']);
-                            $lecturer_course_stmt->execute();
-                            $lecturer_course_result = $lecturer_course_stmt->get_result();
-                            $lecturer_course = $lecturer_course_result->fetch_assoc();
-                            $lecturer_course_stmt->close();
-
-                            if ($lecturer_course) {
-                                // Determine which id to use when checking conflicts/insert depending on schema
-                                $lect_param = $has_t_lecturer_course ? $lecturer_course['id'] : $lecturer_course['lecturer_id'];
-
-                                // Ensure lecturer (or lecturer_course) is free at this day/time
-                                $check_lecturer_stmt->bind_param("iii", $lect_param, $day['id'], $time_slot['id']);
-                                $check_lecturer_stmt->execute();
-                                $lect_count = $check_lecturer_stmt->get_result()->fetch_assoc()['count'];
-                                if ($lect_count > 0) {
-                                    // lecturer busy, try another slot
-                                    continue;
-                                }
-
-                                // Insert timetable entry using appropriate columns for current schema
-                                if ($has_t_class_course && $has_t_lecturer_course) {
-                                    // Newer schema: use class_course_id and lecturer_course_id — include semester and academic_year
-                                    if ($has_division_col && $division_label_to_use !== null) {
-                                        $insert_sql = "INSERT INTO timetable (class_course_id, lecturer_course_id, day_id, time_slot_id, room_id, division_label, semester, academic_year) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
-                                        $insert_stmt = $conn->prepare($insert_sql);
-                                        if ($insert_stmt) {
-                                            $p_class_course_id = $assignment['id'];
-                                            $p_lecturer_course_id = $lecturer_course['id'];
-                                            $p_day_id = $day['id'];
-                                            $p_time_slot_id = $time_slot['id'];
-                                            $p_room_id = $room['id'];
-                                            $p_div_label = $division_label_to_use;
-                                            $p_semester = $semester;
-                                            $p_academic_year = $academic_year;
-                                            $insert_stmt->bind_param("iiiiisss", $p_class_course_id, $p_lecturer_course_id, $p_day_id, $p_time_slot_id, $p_room_id, $p_div_label, $p_semester, $p_academic_year);
-                                        }
-                                    } else {
-                                        $insert_sql = "INSERT INTO timetable (class_course_id, lecturer_course_id, day_id, time_slot_id, room_id, semester, academic_year) VALUES (?, ?, ?, ?, ?, ?, ?)";
-                                        $insert_stmt = $conn->prepare($insert_sql);
-                                        if ($insert_stmt) {
-                                            $p_class_course_id = $assignment['id'];
-                                            $p_lecturer_course_id = $lecturer_course['id'];
-                                            $p_day_id = $day['id'];
-                                            $p_time_slot_id = $time_slot['id'];
-                                            $p_room_id = $room['id'];
-                                            $p_semester = $semester;
-                                            $p_academic_year = $academic_year;
-                                            $insert_stmt->bind_param("iiiiiss", $p_class_course_id, $p_lecturer_course_id, $p_day_id, $p_time_slot_id, $p_room_id, $p_semester, $p_academic_year);
-                                        }
-                                    }
-                                } else {
-                                    // Older schema: use class_id and lecturer_id — ensure we also populate course_id to satisfy NOT NULL constraint
-                                    if ($has_division_col && $division_label_to_use !== null) {
-                                        $insert_sql = "INSERT INTO timetable (class_id, course_id, lecturer_id, day_id, time_slot_id, room_id, division_label, semester, academic_year) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
-                                        $insert_stmt = $conn->prepare($insert_sql);
-                                        if ($insert_stmt) {
-                                            $p_class_id = $assignment['class_id'];
-                                            $p_course_id = $assignment['course_id'];
-                                            $p_lecturer_id = $lecturer_course['lecturer_id'];
-                                            $p_day_id = $day['id'];
-                                            $p_time_slot_id = $time_slot['id'];
-                                            $p_room_id = $room['id'];
-                                            $p_div_label = $division_label_to_use;
-                                            $p_semester = $semester;
-                                            $p_academic_year = $academic_year;
-                                            $insert_stmt->bind_param("iiiiiisss", $p_class_id, $p_course_id, $p_lecturer_id, $p_day_id, $p_time_slot_id, $p_room_id, $p_div_label, $p_semester, $p_academic_year);
-                                        }
-                                    } else {
-                                        $insert_sql = "INSERT INTO timetable (class_id, course_id, lecturer_id, day_id, time_slot_id, room_id, semester, academic_year) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
-                                        $insert_stmt = $conn->prepare($insert_sql);
-                                        if ($insert_stmt) {
-                                            $p_class_id = $assignment['class_id'];
-                                            $p_course_id = $assignment['course_id'];
-                                            $p_lecturer_id = $lecturer_course['lecturer_id'];
-                                            $p_day_id = $day['id'];
-                                            $p_time_slot_id = $time_slot['id'];
-                                            $p_room_id = $room['id'];
-                                            $p_semester = $semester;
-                                            $p_academic_year = $academic_year;
-                                            $insert_stmt->bind_param("iiiiiiss", $p_class_id, $p_course_id, $p_lecturer_id, $p_day_id, $p_time_slot_id, $p_room_id, $p_semester, $p_academic_year);
-                                        }
-                                    }
-                                }
-
-                                if (isset($insert_stmt) && $insert_stmt && $insert_stmt->execute()) {
-                                    $placed = true;
-                                    $insert_stmt->close();
-                                    break; // placed successfully
-                                }
-                                if (isset($insert_stmt) && $insert_stmt) $insert_stmt->close();
-                            } else {
-                                // No lecturer assigned to this course, cannot place
-                                break;
-                            }
-                        }
-                    }
-                    // after attempts
-                    if (!$placed) {
-                        $error_count++;
-                    } else {
-                        $success_count++;
-                    }
-                }
+            } catch (Exception $e) {
+                $error_message = 'Timetable generation failed: ' . $e->getMessage();
             }
-
-            // close prepared statements if they exist
-            if (isset($assignments_stmt) && $assignments_stmt) $assignments_stmt->close();
-            if (isset($stream_days_stmt) && $stream_days_stmt) $stream_days_stmt->close();
-
-            if ($success_count > 0) {
-                $msg = "Timetable generated successfully! $success_count entries created.";
-                if ($error_count > 0) {
-                    $msg .= " $error_count entries failed.";
-                }
-                redirect_with_flash('generate_timetable.php', 'success', $msg);
-            } else {
-                $error_message = "No timetable entries could be generated.";
-            }
-        } else {
-            $error_message = "No active streams found. Please create streams first.";
         }
     } elseif ($action === 'generate_exams_timetable') {
         // Placeholder: exams timetable generation not implemented yet
@@ -545,6 +180,67 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error_message = 'Exams timetable generation is not implemented yet.';
         }
     }
+}
+
+// Helper functions
+function clearExistingTimetable($conn, $academic_year, $semester, $stream_id) {
+    // Check if timetable table has the new schema
+    $has_class_course = $conn->query("SHOW COLUMNS FROM timetable LIKE 'class_course_id'")->num_rows > 0;
+    
+    if ($has_class_course) {
+        // New schema: clear via class_courses -> classes -> stream
+        $sql = "DELETE t FROM timetable t 
+                JOIN class_courses cc ON t.class_course_id = cc.id 
+                JOIN classes c ON cc.class_id = c.id 
+                WHERE t.academic_year = ? AND t.semester = ? AND c.stream_id = ?";
+        $stmt = $conn->prepare($sql);
+        $stmt->bind_param("ssi", $academic_year, $semester, $stream_id);
+        $stmt->execute();
+        $stmt->close();
+    } else {
+        // Old schema: clear via class_id -> classes -> stream
+        $sql = "DELETE t FROM timetable t 
+                JOIN classes c ON t.class_id = c.id 
+                WHERE t.academic_year = ? AND t.semester = ? AND c.stream_id = ?";
+        $stmt = $conn->prepare($sql);
+        $stmt->bind_param("ssi", $academic_year, $semester, $stream_id);
+        $stmt->execute();
+        $stmt->close();
+    }
+}
+
+function insertTimetableEntries($conn, $entries) {
+    if (empty($entries)) {
+        return 0;
+    }
+    
+    $inserted_count = 0;
+    
+    foreach ($entries as $entry) {
+        $sql = "INSERT INTO timetable (class_course_id, lecturer_course_id, day_id, time_slot_id, room_id, division_label, semester, academic_year) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+        
+        $stmt = $conn->prepare($sql);
+        if ($stmt) {
+            $stmt->bind_param("iiiiisss", 
+                $entry['class_course_id'],
+                $entry['lecturer_course_id'],
+                $entry['day_id'],
+                $entry['time_slot_id'],
+                $entry['room_id'],
+                $entry['division_label'],
+                $entry['semester'],
+                $entry['academic_year']
+            );
+            
+            if ($stmt->execute()) {
+                $inserted_count++;
+            }
+            $stmt->close();
+        }
+    }
+    
+    return $inserted_count;
 }
 
 // Get statistics
@@ -598,6 +294,9 @@ if ($has_stream_col && !empty($current_stream_id)) {
 }
 if ($col) $col->close();
 $total_courses = $conn->query("SELECT COUNT(*) as count FROM courses WHERE is_active = 1")->fetch_assoc()['count'];
+
+// Get available streams
+$streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 ORDER BY name")->fetch_all(MYSQLI_ASSOC);
 ?>
 
 <?php include 'includes/header.php'; ?>
@@ -634,27 +333,31 @@ $total_courses = $conn->query("SELECT COUNT(*) as count FROM courses WHERE is_ac
                     <div class="card-body">
                         <p class="text-muted">This will generate a new timetable based on current class-course assignments. Any existing timetable entries will be cleared.</p>
 
-                        <div class="d-flex flex-column gap-3">
-                            <div class="d-flex gap-2 align-items-center">
-                                <input type="text" name="timetable_name" class="form-control form-control-sm" placeholder="Timetable name e.g. 2024/2025 First Semester" required style="max-width:300px">
-                                <select name="semester" class="form-select form-select-sm" required style="max-width:140px">
-                                    <option value="">Semester</option>
-                                    <option value="first">First</option>
-                                    <option value="second">Second</option>
-                                </select>
+                        <form method="POST">
+                            <input type="hidden" name="action" value="generate_lecture_timetable">
+                            
+                            <div class="d-flex flex-column gap-3">
+                                <div class="d-flex gap-2 align-items-center">
+                                    <input type="text" name="timetable_name" class="form-control form-control-sm" placeholder="Timetable name e.g. 2024/2025 First Semester" required style="max-width:300px">
+                                    <select name="semester" class="form-select form-select-sm" required style="max-width:140px">
+                                        <option value="">Semester</option>
+                                        <option value="first">First</option>
+                                        <option value="second">Second</option>
+                                    </select>
+                                </div>
+                                <div class="d-flex gap-2 align-items-center">
+                                    <button type="submit" class="btn btn-primary btn-lg" id="generate-btn">
+                                        <i class="fas fa-magic me-2"></i>Generate Lecture Timetable
+                                    </button>
+                                    <button type="button" class="btn btn-outline-primary btn-lg" onclick="generateExamsTimetable()">
+                                        <i class="fas fa-file-alt me-2"></i>Generate Exams Timetable
+                                    </button>
+                                    <button type="button" class="btn btn-success btn-lg" onclick="saveToSavedTimetables()" id="save-timetable-btn" style="display: none;">
+                                        <i class="fas fa-save me-2"></i>Save Timetable
+                                    </button>
+                                </div>
                             </div>
-                            <div class="d-flex gap-2 align-items-center">
-                                <button type="button" class="btn btn-primary btn-lg" onclick="generateTimetable()">
-                                    <i class="fas fa-magic me-2"></i>Generate Lecture Timetable
-                                </button>
-                                <button type="button" class="btn btn-outline-primary btn-lg" onclick="generateExamsTimetable()">
-                                    <i class="fas fa-file-alt me-2"></i>Generate Exams Timetable
-                                </button>
-                                <button type="button" class="btn btn-success btn-lg" onclick="saveToSavedTimetables()" id="save-timetable-btn" style="display: none;">
-                                    <i class="fas fa-save me-2"></i>Save Timetable
-                                </button>
-                            </div>
-                        </div>
+                        </form>
                     </div>
                 </div>
             </div>
@@ -670,10 +373,79 @@ $total_courses = $conn->query("SELECT COUNT(*) as count FROM courses WHERE is_ac
                             <a href="view_timetable.php" class="btn btn-success"><i class="fas fa-eye me-2"></i>View Timetable</a>
                             <a href="export_timetable.php" class="btn btn-outline-info"><i class="fas fa-download me-2"></i>Export Timetable</a>
                         </div>
+                        
+                        <hr>
+                        
+                        <h6 class="mb-3">System Statistics</h6>
+                        <div class="mb-3">
+                            <strong>Total Assignments:</strong>
+                            <span class="badge bg-primary"><?php echo $total_assignments; ?></span>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <strong>Timetable Entries:</strong>
+                            <span class="badge bg-success"><?php echo $total_timetable_entries; ?></span>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <strong>Classes:</strong>
+                            <span class="badge bg-info"><?php echo $total_classes; ?></span>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <strong>Courses:</strong>
+                            <span class="badge bg-warning"><?php echo $total_courses; ?></span>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
+
+        <?php if ($generation_results): ?>
+        <div class="row m-3">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header">
+                        <h6 class="mb-0">Generation Results</h6>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <h6>Performance Metrics</h6>
+                                <ul class="list-unstyled">
+                                    <li><strong>Runtime:</strong> <?php echo round($generation_results['runtime'], 2); ?> seconds</li>
+                                    <li><strong>Generations:</strong> <?php echo $generation_results['generations_completed']; ?></li>
+                                    <li><strong>Best Fitness:</strong> <?php echo round($generation_results['best_solution']['fitness']['total_score'], 2); ?></li>
+                                    <li><strong>Hard Violations:</strong> <?php echo array_sum(array_map('count', $generation_results['best_solution']['fitness']['hard_violations'])); ?></li>
+                                    <li><strong>Soft Violations:</strong> <?php echo array_sum(array_map('count', $generation_results['best_solution']['fitness']['soft_violations'])); ?></li>
+                                </ul>
+                            </div>
+                            <div class="col-md-6">
+                                <h6>Solution Quality</h6>
+                                <ul class="list-unstyled">
+                                    <li><strong>Feasible:</strong> 
+                                        <span class="badge <?php echo $generation_results['best_solution']['fitness']['is_feasible'] ? 'bg-success' : 'bg-warning'; ?>">
+                                            <?php echo $generation_results['best_solution']['fitness']['is_feasible'] ? 'Yes' : 'No'; ?>
+                                        </span>
+                                    </li>
+                                    <li><strong>Quality Rating:</strong> 
+                                        <?php 
+                                        $fitnessEvaluator = new FitnessEvaluator([]);
+                                        $qualityRating = $fitnessEvaluator->getQualityRating($generation_results['best_solution']['individual']);
+                                        $qualityClass = $qualityRating === 'Excellent' ? 'success' : 
+                                                      ($qualityRating === 'Good' ? 'info' : 
+                                                      ($qualityRating === 'Fair' ? 'warning' : 'danger'));
+                                        ?>
+                                        <span class="badge bg-<?php echo $qualityClass; ?>"><?php echo $qualityRating; ?></span>
+                                    </li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <?php endif; ?>
 
         <?php
         // Check if timetable has been generated
@@ -1485,8 +1257,6 @@ $total_courses = $conn->query("SELECT COUNT(*) as count FROM courses WHERE is_ac
         </div>
         <?php endif; ?>
 
-
-
         <!-- Generated Timetable Display Section -->
         <div id="generated-timetable-section" style="display: none;">
             <div class="row m-3">
@@ -1760,73 +1530,17 @@ document.addEventListener('DOMContentLoaded', function () {
             }
         });
     } catch (e) { /* ignore */ }
+    
+    // Add form submission listener for loading state
+    const form = document.querySelector('form');
+    if (form) {
+        form.addEventListener('submit', function() {
+            showLoadingState();
+        });
+    }
 });
 
-// Generate timetable function (Option 2 implementation)
-function generateTimetable() {
-    const timetableName = document.querySelector('input[name="timetable_name"]').value;
-    const semester = document.querySelector('select[name="semester"]').value;
-    
-    if (!timetableName || !semester) {
-        alert('Please fill in both Timetable Name and Semester fields.');
-        return;
-    }
-    
-    if (!confirm('This will clear existing timetable for the selected year/semester and generate a new lecture timetable. Continue?')) {
-        return;
-    }
-    
-    // Show loading state
-    showLoadingState();
-    
-    // Store generation parameters
-    currentGenerationParams = {
-        academic_year: timetableName,
-        semester: semester,
-        type: 'lecture'
-    };
-    
-    // Prepare form data
-    const formData = new FormData();
-    formData.append('action', 'generate_lecture_timetable');
-    formData.append('academic_year', timetableName);
-    formData.append('semester', semester);
-    
-    // Make AJAX call to generate timetable
-    fetch('generate_timetable.php', {
-        method: 'POST',
-        body: formData
-    })
-    .then(response => response.text())
-    .then(html => {
-        hideLoadingState();
-        
-        // Parse the response to check for success
-        if (html.includes('success') || html.includes('Timetable generated successfully')) {
-            // Show success message
-            showSuccessMessage('Timetable generated successfully! You can now edit and save it.');
-            
-            // Fetch the generated timetable data
-            fetchGeneratedTimetableData();
-            
-            // Show the generated timetable section
-            document.getElementById('generated-timetable-section').style.display = 'block';
-            document.getElementById('save-timetable-btn').style.display = 'inline-block';
-            
-            // Scroll to the generated timetable
-            document.getElementById('generated-timetable-section').scrollIntoView({ 
-                behavior: 'smooth' 
-            });
-        } else {
-            showErrorMessage('Failed to generate timetable. Please check the console for details.');
-        }
-    })
-    .catch(error => {
-        hideLoadingState();
-        console.error('Error:', error);
-        showErrorMessage('Error generating timetable. Please try again.');
-    });
-}
+
 
 // Generate exams timetable function
 function generateExamsTimetable() {
@@ -2083,19 +1797,21 @@ function exportTimetable() {
 
 // Show loading state
 function showLoadingState() {
-    const generateBtn = document.querySelector('button[onclick="generateTimetable()"]');
-    const originalText = generateBtn.innerHTML;
-    generateBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Generating...';
-    generateBtn.disabled = true;
-    
-    // Store original text for restoration
-    generateBtn.dataset.originalText = originalText;
+    const generateBtn = document.getElementById('generate-btn');
+    if (generateBtn) {
+        const originalText = generateBtn.innerHTML;
+        generateBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Generating...';
+        generateBtn.disabled = true;
+        
+        // Store original text for restoration
+        generateBtn.dataset.originalText = originalText;
+    }
 }
 
 // Hide loading state
 function hideLoadingState() {
-    const generateBtn = document.querySelector('button[onclick="generateTimetable()"]');
-    if (generateBtn.dataset.originalText) {
+    const generateBtn = document.getElementById('generate-btn');
+    if (generateBtn && generateBtn.dataset.originalText) {
         generateBtn.innerHTML = generateBtn.dataset.originalText;
         generateBtn.disabled = false;
         delete generateBtn.dataset.originalText;
