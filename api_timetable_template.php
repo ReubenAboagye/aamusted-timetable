@@ -18,7 +18,7 @@ try {
             $semester = $_GET['semester'] ?? 1;
             $type = $_GET['type'] ?? 'lecture';
             
-            // Get timetable data from database
+            // Get timetable data from database using new schema
             $query = "SELECT 
                         t.id,
                         t.day_id,
@@ -29,16 +29,19 @@ try {
                         r.name as room_name,
                         r.building,
                         c.name as class_name,
+                        t.division_label,
                         co.code as course_code,
                         co.name as course_name,
                         l.name as lecturer_name
                     FROM timetable t
+                    JOIN class_courses cc ON t.class_course_id = cc.id
+                    JOIN classes c ON cc.class_id = c.id
+                    JOIN courses co ON cc.course_id = co.id
                     JOIN days d ON t.day_id = d.id
                     JOIN time_slots ts ON t.time_slot_id = ts.id
                     JOIN rooms r ON t.room_id = r.id
-                    JOIN classes c ON t.class_id = c.id
-                    JOIN courses co ON t.course_id = co.id
-                    LEFT JOIN lecturers l ON t.lecturer_id = l.id
+                    LEFT JOIN lecturer_courses lc ON t.lecturer_course_id = lc.id
+                    LEFT JOIN lecturers l ON lc.lecturer_id = l.id
                     WHERE 1=1";
             
             $params = [];
@@ -77,7 +80,7 @@ try {
                         'name' => $row['course_name'],
                         'lecturer_name' => $row['lecturer_name'],
                         'color' => 'bg-blue-100 text-blue-800', // Default color
-                        'classes' => [$row['class_name']]
+                        'classes' => [$row['class_name'] . ($row['division_label'] ? ' ' . $row['division_label'] : '')]
                     ],
                     'start_time' => $row['time_slot_id'] - 1, // Assuming time slots start from 1
                     'spans' => 1 // Default to 1 hour
@@ -443,6 +446,7 @@ try {
             $query = "SELECT 
                         t.id,
                         c.name as class_name,
+                        t.division_label,
                         co.code as course_code,
                         co.name as course_name,
                         l.name as lecturer_name,
@@ -467,6 +471,10 @@ try {
             
             $timetable_data = [];
             while ($row = $result->fetch_assoc()) {
+                // Include division label in class name if present
+                if (!empty($row['division_label'])) {
+                    $row['class_name'] .= ' ' . $row['division_label'];
+                }
                 $timetable_data[] = $row;
             }
             
@@ -487,6 +495,7 @@ try {
             $query = "SELECT 
                         t.id,
                         c.name as class_name,
+                        t.division_label,
                         co.code as course_code,
                         co.name as course_name,
                         l.name as lecturer_name,
@@ -511,6 +520,10 @@ try {
             
             $timetable_data = [];
             while ($row = $result->fetch_assoc()) {
+                // Include division label in class name if present
+                if (!empty($row['division_label'])) {
+                    $row['class_name'] .= ' ' . $row['division_label'];
+                }
                 $timetable_data[] = $row;
             }
             
