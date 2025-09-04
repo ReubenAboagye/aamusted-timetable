@@ -120,145 +120,345 @@ if (!$streams_result) {
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? null;
     if ($action === 'add') {
-        // Current schema: classes has program_id and level_id
-        $program_id = $conn->real_escape_string($_POST['program_code'] ?? '');
-        $level_id = $conn->real_escape_string($_POST['level_id'] ?? '');
-        $total_capacity = intval($_POST['total_capacity'] ?? 0);
-        $stream_id = isset($_POST['stream_id']) ? $conn->real_escape_string($_POST['stream_id']) : $streamManager->getCurrentStreamId();
-        $is_active = 1;
+        // Support single or multiple class rows. When multiple, inputs are arrays like program_code[], level_id[], total_capacity[]
+        $is_batch = isset($_POST['program_code']) && is_array($_POST['program_code']);
 
-        // Fetch program and its department short code if available
-        if ($dept_short_exists) {
-            $prog_sql = "SELECT p.id, p.name, p.code, p.department_id, d.short_name AS dept_short FROM programs p LEFT JOIN departments d ON p.department_id = d.id WHERE p.id = ?";
-        } else {
-            // departments.short_name not present; fall back to first 3 chars of department name
-            $prog_sql = "SELECT p.id, p.name, p.code, p.department_id, SUBSTRING(d.name,1,3) AS dept_short FROM programs p LEFT JOIN departments d ON p.department_id = d.id WHERE p.id = ?";
-        }
-        $prog_stmt = $conn->prepare($prog_sql);
-        $prog_stmt->bind_param("i", $program_id);
-        $prog_stmt->execute();
-        $prog_res = $prog_stmt->get_result();
-        $program = $prog_res->fetch_assoc();
-        $prog_stmt->close();
+        // Stream is a single selection for all rows
+        $stream_id = isset($_POST['stream_id']) ? (int)$_POST['stream_id'] : $streamManager->getCurrentStreamId();
 
-        $lvl_stmt = $conn->prepare("SELECT id, name FROM levels WHERE id = ?");
-        $lvl_stmt->bind_param("i", $level_id);
-        $lvl_stmt->execute();
-        $lvl_res = $lvl_stmt->get_result();
-        $level = $lvl_res->fetch_assoc();
-        $lvl_stmt->close();
+        if ($is_batch) {
+            $program_ids = $_POST['program_code'];
+            $level_ids = $_POST['level_id'] ?? [];
+            $capacities = $_POST['total_capacity'] ?? [];
+            $divisions_arr = $_POST['divisions_count'] ?? [];
 
-        // Validate stream
-        $stream_stmt = $conn->prepare("SELECT id, name FROM streams WHERE id = ? AND is_active = 1");
-        $stream_stmt->bind_param("i", $stream_id);
-        $stream_stmt->execute();
-        $stream_res = $stream_stmt->get_result();
-        $stream = $stream_res->fetch_assoc();
-        $stream_stmt->close();
-
-        if ($program && $level && $stream) {
-            // Create a single parent class record and store total_capacity and divisions_count
-            $divisions_count = max(1, (int)ceil($total_capacity / 100));
-
-            // Extract level numeric part for code (e.g., 'Level 100' -> '100' or 'Year 1' -> '100')
-            preg_match('/(\d+)/', $level['name'], $m);
-            $raw_level = isset($m[1]) ? (int)$m[1] : 1;
-            // If level is given as small number like 1,2,3 treat as Year (100,200,300)
-            if ($raw_level > 0 && $raw_level < 10) {
-                $level_num = $raw_level * 100;
+            // Basic length checks
+            $countRows = count($program_ids);
+            if ($countRows === 0) {
+                $error_message = 'No classes provided.';
             } else {
-                $level_num = $raw_level;
-            }
-            $year_suffix = date('Y');
-
-            // Build short class base using department short or program code and level number, e.g. "ITE 100"
-            $dept_short = !empty($program['dept_short']) ? strtoupper(trim($program['dept_short'])) : strtoupper(trim($program['code'] ?? 'PRG'));
-            $class_name = $dept_short . ' ' . $level_num; // e.g. ITE 100
-            $class_code = $dept_short . $level_num; // compact code used for identifiers
-
-            // Ensure stream_id is an integer
-            $stream_id = (int)$stream_id;
-
-            // Check if class code already exists (including inactive ones)
-            $check_sql = "SELECT id, name, is_active FROM classes WHERE code = ?";
-            $check_stmt = $conn->prepare($check_sql);
-            $check_stmt->bind_param("s", $class_code);
-            $check_stmt->execute();
-            $check_result = $check_stmt->get_result();
-            
-            if ($check_result->num_rows > 0) {
-                $existing_class = $check_result->fetch_assoc();
-                $check_stmt->close();
-                if ($existing_class['is_active'] == 1) {
-                    $error_message = "Class code '{$class_code}' already exists as an active class.";
+                // Prepare statements used multiple times
+                if ($dept_short_exists) {
+                    $prog_sql = "SELECT p.id, p.name, p.code, p.duration_years, p.department_id, d.short_name AS dept_short FROM programs p LEFT JOIN departments d ON p.department_id = d.id WHERE p.id = ?";
                 } else {
-                    $error_message = "Class code '{$class_code}' already exists but is inactive. Please use a different code or reactivate the existing class.";
+                    $prog_sql = "SELECT p.id, p.name, p.code, p.duration_years, p.department_id, SUBSTRING(d.name,1,3) AS dept_short FROM programs p LEFT JOIN departments d ON p.department_id = d.id WHERE p.id = ?";
                 }
-            } else {
-                $check_stmt->close();
-                
-                $sql = "INSERT INTO classes (program_id, level_id, name, code, stream_id, is_active, total_capacity, divisions_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
-            $stmt = $conn->prepare($sql);
-            if ($stmt) {
-                $stmt->bind_param("iissiiii", $program_id, $level_id, $class_name, $class_code, $stream_id, $is_active, $total_capacity, $divisions_count);
-                if ($stmt->execute()) {
-                    $insertedId = $stmt->insert_id;
-                    $stmt->close();
-                    // Optionally create persistent division rows if a class_divisions table exists
-                    $createdDivisions = 0;
-                    $checkDivTable = $conn->query("SHOW TABLES LIKE 'class_divisions'");
-                    if ($checkDivTable && $checkDivTable->num_rows > 0) {
-                        $insDiv = $conn->prepare("INSERT INTO class_divisions (class_id, division_label, capacity) VALUES (?, ?, ?)");
-                        if ($insDiv) {
-                            // Distribute capacity evenly (last one gets remainder)
-                            $base = intdiv($total_capacity, $divisions_count);
-                            $remainder = $total_capacity % $divisions_count;
-                            for ($d = 0; $d < $divisions_count; $d++) {
-                                $label = '';
-                                $n = $d;
-                                while (true) {
-                                    $label = chr(65 + ($n % 26)) . $label;
-                                    $n = intdiv($n, 26) - 1;
-                                    if ($n < 0) break;
-                                }
-                                $cap = $base + ($d < $remainder ? 1 : 0);
-                                $insDiv->bind_param("isi", $insertedId, $label, $cap);
-                                if ($insDiv->execute()) $createdDivisions++;
+                $prog_stmt = $conn->prepare($prog_sql);
+                $lvl_stmt = $conn->prepare("SELECT id, name, code FROM levels WHERE id = ?");
+                $stream_stmt = $conn->prepare("SELECT id, name FROM streams WHERE id = ? AND is_active = 1");
+                $check_sql = "SELECT id, name, is_active FROM classes WHERE code = ?";
+                $check_stmt = $conn->prepare($check_sql);
+                $ins_sql = "INSERT INTO classes (program_id, level_id, name, code, stream_id, is_active, total_capacity, divisions_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+                $ins_stmt = $conn->prepare($ins_sql);
+
+                // Validate stream once
+                $stream_stmt->bind_param("i", $stream_id);
+                $stream_stmt->execute();
+                $stream_res = $stream_stmt->get_result();
+                $stream = $stream_res->fetch_assoc();
+                if (!$stream) {
+                    $error_message = 'Invalid stream selected.';
+                } else {
+                    $errors = [];
+                    $createdCount = 0;
+                    $conn->begin_transaction();
+                    try {
+                        for ($i = 0; $i < $countRows; $i++) {
+                            $p_id = (int)($program_ids[$i] ?? 0);
+                            $l_id = (int)($level_ids[$i] ?? 0);
+                            $cap = max(0, (int)($capacities[$i] ?? 0));
+                            $div_count = isset($divisions_arr[$i]) ? max(1, (int)$divisions_arr[$i]) : max(1, (int)ceil($cap / 100));
+
+                            // If the entire row is empty (user added extra rows but left them blank), skip it silently
+                            if ($p_id === 0 && $l_id === 0 && $cap === 0) {
+                                continue;
                             }
-                            $insDiv->close();
-                        }
-                    }
 
-                    $msg = "Successfully created class '{$class_name}' in {$stream['name']} stream with {$divisions_count} divisions.";
-                    if ($createdDivisions > 0) $msg .= " Created {$createdDivisions} class records.";
-                    redirect_with_flash('classes.php', 'success', $msg);
-                } else {
-                    $error_message = "Failed to create class: " . $stmt->error;
-                    if (strpos($stmt->error, 'uq_class_code_year_semester') !== false) {
-                        $error_message = "Class code '{$class_code}' already exists. Please use a different code.";
+                            // Partial/invalid row: some fields present but missing required ones
+                            if ($p_id <= 0 || $l_id <= 0 || $cap <= 0) {
+                                $errors[] = "Row " . ($i+1) . ": missing program, level or capacity.";
+                                continue;
+                            }
+
+                            // Fetch program
+                            $prog_stmt->bind_param("i", $p_id);
+                            $prog_stmt->execute();
+                            $prog_res = $prog_stmt->get_result();
+                            $program = $prog_res->fetch_assoc();
+
+                            // Fetch level
+                            $lvl_stmt->bind_param("i", $l_id);
+                            $lvl_stmt->execute();
+                            $lvl_res = $lvl_stmt->get_result();
+                            $level = $lvl_res->fetch_assoc();
+
+                            if (!$program || !$level) {
+                                $errors[] = "Row " . ($i+1) . ": invalid program or level.";
+                                continue;
+                            }
+
+                            // Server-side duration validation
+                            $programDuration = isset($program['duration_years']) ? (int)$program['duration_years'] : 0;
+                            $levelCodeRaw = $level['code'] ?? $level['name'];
+                            preg_match('/(\d{2,3})/', (string)$levelCodeRaw, $lmv);
+                            $levelCodeNum = isset($lmv[1]) ? (int)$lmv[1] : 0;
+                            if ($levelCodeNum > 0 && $levelCodeNum < 10) $levelCodeNum = $levelCodeNum * 100;
+                            $maxAllowed = $programDuration > 0 ? ($programDuration * 100) : 0;
+                            if ($programDuration > 0 && ($levelCodeNum < 100 || $levelCodeNum > $maxAllowed || $levelCodeNum % 100 !== 0)) {
+                                $errors[] = "Row " . ($i+1) . ": selected level is not valid for program duration.";
+                                continue;
+                            }
+
+                            // Compute level_num for naming
+                            preg_match('/(\d+)/', $level['name'], $m);
+                            $raw_level = isset($m[1]) ? (int)$m[1] : 1;
+                            if ($raw_level > 0 && $raw_level < 10) {
+                                $level_num = $raw_level * 100;
+                            } else {
+                                $level_num = $raw_level;
+                            }
+
+                            $prog_prefix = strtoupper(trim($program['code'] ?? 'PRG'));
+                            $class_name = $prog_prefix . ' ' . $level_num;
+                            $class_code = $prog_prefix . $level_num;
+
+                            // Check existing code
+                            $check_stmt->bind_param("s", $class_code);
+                            $check_stmt->execute();
+                            $chk_res = $check_stmt->get_result();
+                            if ($chk_res && $chk_res->num_rows > 0) {
+                                $existing = $chk_res->fetch_assoc();
+                                $errors[] = "Row " . ($i+1) . ": class code '{$class_code}' already exists.";
+                                continue;
+                            }
+
+                            // Insert class
+                            $is_active = 1;
+                            $ins_stmt->bind_param("iissiiii", $p_id, $l_id, $class_name, $class_code, $stream_id, $is_active, $cap, $div_count);
+                            if ($ins_stmt->execute()) {
+                                $insertedId = $ins_stmt->insert_id;
+                                // Insert divisions if table exists
+                                $checkDivTable = $conn->query("SHOW TABLES LIKE 'class_divisions'");
+                                if ($checkDivTable && $checkDivTable->num_rows > 0) {
+                                    $insDiv = $conn->prepare("INSERT INTO class_divisions (class_id, division_label, capacity) VALUES (?, ?, ?)");
+                                    if ($insDiv) {
+                                        $base = intdiv($cap, $div_count);
+                                        $remainder = $cap % $div_count;
+                                        for ($d = 0; $d < $div_count; $d++) {
+                                            $label = '';
+                                            $n = $d;
+                                            while (true) {
+                                                $label = chr(65 + ($n % 26)) . $label;
+                                                $n = intdiv($n, 26) - 1;
+                                                if ($n < 0) break;
+                                            }
+                                            $capPart = $base + ($d < $remainder ? 1 : 0);
+                                            $insDiv->bind_param("isi", $insertedId, $label, $capPart);
+                                            $insDiv->execute();
+                                        }
+                                        $insDiv->close();
+                                    }
+                                }
+                                $createdCount++;
+                            } else {
+                                $errors[] = "Row " . ($i+1) . ": failed to insert class: " . $ins_stmt->error;
+                            }
+                        }
+
+                        if (!empty($errors)) {
+                            $conn->rollback();
+                            $error_message = "Failed to create classes:\n" . implode("\n", $errors);
+                        } else {
+                            $conn->commit();
+                            redirect_with_flash('classes.php', 'success', "Successfully created {$createdCount} classes.");
+                        }
+                    } catch (Exception $e) {
+                        $conn->rollback();
+                        $error_message = 'Batch create failed: ' . $e->getMessage();
                     }
-                    $stmt->close();
+                    // Close prepared statements
+                    if ($prog_stmt) $prog_stmt->close();
+                    if ($lvl_stmt) $lvl_stmt->close();
+                    if ($stream_stmt) $stream_stmt->close();
+                    if ($check_stmt) $check_stmt->close();
+                    if ($ins_stmt) $ins_stmt->close();
                 }
-            } else {
-                $error_message = "Failed to prepare class insert: " . $conn->error;
-            }
             }
         } else {
-            $error_message = "Invalid program, level, or stream selected.";
+            // Single-row legacy behavior
+            $program_id = (int)($_POST['program_code'] ?? 0);
+            $level_id = (int)($_POST['level_id'] ?? 0);
+            $total_capacity = intval($_POST['total_capacity'] ?? 0);
+            $stream_id = isset($_POST['stream_id']) ? (int)$_POST['stream_id'] : $streamManager->getCurrentStreamId();
+            $is_active = 1;
+
+            // Fetch program and its department short code if available (include duration_years for validation)
+            if ($dept_short_exists) {
+                $prog_sql = "SELECT p.id, p.name, p.code, p.duration_years, p.department_id, d.short_name AS dept_short FROM programs p LEFT JOIN departments d ON p.department_id = d.id WHERE p.id = ?";
+            } else {
+                // departments.short_name not present; fall back to first 3 chars of department name
+                $prog_sql = "SELECT p.id, p.name, p.code, p.duration_years, p.department_id, SUBSTRING(d.name,1,3) AS dept_short FROM programs p LEFT JOIN departments d ON p.department_id = d.id WHERE p.id = ?";
+            }
+            $prog_stmt = $conn->prepare($prog_sql);
+            $prog_stmt->bind_param("i", $program_id);
+            $prog_stmt->execute();
+            $prog_res = $prog_stmt->get_result();
+            $program = $prog_res->fetch_assoc();
+            $prog_stmt->close();
+
+            $lvl_stmt = $conn->prepare("SELECT id, name, code FROM levels WHERE id = ?");
+            $lvl_stmt->bind_param("i", $level_id);
+            $lvl_stmt->execute();
+            $lvl_res = $lvl_stmt->get_result();
+            $level = $lvl_res->fetch_assoc();
+            $lvl_stmt->close();
+
+            // Validate stream
+            $stream_stmt = $conn->prepare("SELECT id, name FROM streams WHERE id = ? AND is_active = 1");
+            $stream_stmt->bind_param("i", $stream_id);
+            $stream_stmt->execute();
+            $stream_res = $stream_stmt->get_result();
+            $stream = $stream_res->fetch_assoc();
+            $stream_stmt->close();
+
+            if ($program && $level && $stream) {
+                // Server-side validation: ensure selected level is valid for the program duration
+                $programDuration = isset($program['duration_years']) ? (int)$program['duration_years'] : 0;
+                $levelCodeRaw = $level['code'] ?? $level['name'];
+                preg_match('/(\d{2,3})/', (string)$levelCodeRaw, $lmv);
+                $levelCodeNum = isset($lmv[1]) ? (int)$lmv[1] : 0;
+                if ($levelCodeNum > 0 && $levelCodeNum < 10) {
+                    $levelCodeNum = $levelCodeNum * 100;
+                }
+                $maxAllowed = $programDuration > 0 ? ($programDuration * 100) : 0;
+                if ($programDuration > 0 && ($levelCodeNum < 100 || $levelCodeNum > $maxAllowed || $levelCodeNum % 100 !== 0)) {
+                    $error_message = "Selected level is not valid for the chosen program (program duration: {$programDuration} years).";
+                }
+                // Create a single parent class record and store total_capacity and divisions_count
+                $divisions_count = max(1, (int)ceil($total_capacity / 100));
+
+                // Extract level numeric part for code (e.g., 'Level 100' -> '100' or 'Year 1' -> '100')
+                preg_match('/(\d+)/', $level['name'], $m);
+                $raw_level = isset($m[1]) ? (int)$m[1] : 1;
+                if ($raw_level > 0 && $raw_level < 10) {
+                    $level_num = $raw_level * 100;
+                } else {
+                    $level_num = $raw_level;
+                }
+                $year_suffix = date('Y');
+
+                // Use program code as the short prefix for class names/codes
+                $prog_prefix = strtoupper(trim($program['code'] ?? 'PRG'));
+                $class_name = $prog_prefix . ' ' . $level_num;
+                $class_code = $prog_prefix . $level_num;
+
+                // Ensure stream_id is an integer
+                $stream_id = (int)$stream_id;
+
+                // Check if class code already exists (including inactive ones)
+                $check_sql = "SELECT id, name, is_active FROM classes WHERE code = ?";
+                $check_stmt = $conn->prepare($check_sql);
+                $check_stmt->bind_param("s", $class_code);
+                $check_stmt->execute();
+                $check_result = $check_stmt->get_result();
+                
+                if ($check_result->num_rows > 0) {
+                    $existing_class = $check_result->fetch_assoc();
+                    $check_stmt->close();
+                    if ($existing_class['is_active'] == 1) {
+                        $error_message = "Class code '{$class_code}' already exists as an active class.";
+                    } else {
+                        $error_message = "Class code '{$class_code}' already exists but is inactive. Please use a different code or reactivate the existing class.";
+                    }
+                } else {
+                    $check_stmt->close();
+                    
+                    $sql = "INSERT INTO classes (program_id, level_id, name, code, stream_id, is_active, total_capacity, divisions_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+                    $stmt = $conn->prepare($sql);
+                    if ($stmt) {
+                        $stmt->bind_param("iissiiii", $program_id, $level_id, $class_name, $class_code, $stream_id, $is_active, $total_capacity, $divisions_count);
+                        if ($stmt->execute()) {
+                            $insertedId = $stmt->insert_id;
+                            $stmt->close();
+                            // Optionally create persistent division rows if a class_divisions table exists
+                            $createdDivisions = 0;
+                            $checkDivTable = $conn->query("SHOW TABLES LIKE 'class_divisions'");
+                            if ($checkDivTable && $checkDivTable->num_rows > 0) {
+                                $insDiv = $conn->prepare("INSERT INTO class_divisions (class_id, division_label, capacity) VALUES (?, ?, ?)");
+                                if ($insDiv) {
+                                    $base = intdiv($total_capacity, $divisions_count);
+                                    $remainder = $total_capacity % $divisions_count;
+                                    for ($d = 0; $d < $divisions_count; $d++) {
+                                        $label = '';
+                                        $n = $d;
+                                        while (true) {
+                                            $label = chr(65 + ($n % 26)) . $label;
+                                            $n = intdiv($n, 26) - 1;
+                                            if ($n < 0) break;
+                                        }
+                                        $cap = $base + ($d < $remainder ? 1 : 0);
+                                        $insDiv->bind_param("isi", $insertedId, $label, $cap);
+                                        if ($insDiv->execute()) $createdDivisions++;
+                                    }
+                                    $insDiv->close();
+                                }
+                            }
+
+                            $msg = "Successfully created class '{$class_name}' in {$stream['name']} stream with {$divisions_count} divisions.";
+                            if ($createdDivisions > 0) $msg .= " Created {$createdDivisions} class records.";
+                            redirect_with_flash('classes.php', 'success', $msg);
+                        } else {
+                            $error_message = "Failed to create class: " . $stmt->error;
+                            if (strpos($stmt->error, 'uq_class_code_year_semester') !== false) {
+                                $error_message = "Class code '{$class_code}' already exists. Please use a different code.";
+                            }
+                            $stmt->close();
+                        }
+                    } else {
+                        $error_message = "Failed to prepare class insert: " . $conn->error;
+                    }
+                }
+            } else {
+                $error_message = "Invalid program, level, or stream selected.";
+            }
         }
     } elseif ($action === 'delete' && isset($_POST['id'])) {
-        $id = $conn->real_escape_string($_POST['id']);
-        $sql = "UPDATE classes SET is_active = 0 WHERE id = ?";
-        $stmt = $conn->prepare($sql);
-        $stmt->bind_param("i", $id);
-        
-        if ($stmt->execute()) {
-            $stmt->close();
-            redirect_with_flash('classes.php', 'success', 'Class deleted successfully!');
-        } else {
-            $error_message = "Error deleting class: " . $conn->error;
+        $id = (int)$conn->real_escape_string($_POST['id']);
+        // Permanently delete class row and any related divisions if present
+        $conn->begin_transaction();
+        try {
+            // Delete class_divisions rows if table exists
+            $checkDivTable = $conn->query("SHOW TABLES LIKE 'class_divisions'");
+            if ($checkDivTable && $checkDivTable->num_rows > 0) {
+                $delDiv = $conn->prepare("DELETE FROM class_divisions WHERE class_id = ?");
+                if ($delDiv) {
+                    $delDiv->bind_param("i", $id);
+                    $delDiv->execute();
+                    $delDiv->close();
+                }
+            }
+
+            // Delete the class row
+            $delClass = $conn->prepare("DELETE FROM classes WHERE id = ?");
+            if ($delClass) {
+                $delClass->bind_param("i", $id);
+                if ($delClass->execute()) {
+                    $delClass->close();
+                    $conn->commit();
+                    redirect_with_flash('classes.php', 'success', 'Class permanently deleted.');
+                } else {
+                    $delClass->close();
+                    $conn->rollback();
+                    $error_message = 'Error deleting class: ' . $conn->error;
+                }
+            } else {
+                $conn->rollback();
+                $error_message = 'Error preparing class delete: ' . $conn->error;
+            }
+        } catch (Exception $e) {
+            $conn->rollback();
+            $error_message = 'Delete failed: ' . $e->getMessage();
         }
-        $stmt->close();
     
     // Edit class (update representative row: name, total_capacity, divisions_count, stream_id)
     } elseif ($action === 'edit' && isset($_POST['id'])) {
@@ -545,7 +745,7 @@ $level_result = $conn->query($level_sql);
                                  </td>
                                  <td><span class="badge bg-warning"><?php echo htmlspecialchars($row['level'] ?? ($row['level_name'] ?? 'N/A')); ?></span></td>
                                  <td>
-                                     <?php $deptCode = trim(strtoupper($row['dept_short'] ?? $row['program_code'] ?? ''));
+                                     <?php $deptCode = trim(strtoupper($row['program_code'] ?? $row['dept_short'] ?? ''));
                                      $levelTextRow = $row['level_name'] ?? $row['level'] ?? '';
                                      preg_match('/(\d+)/', $levelTextRow, $lm);
                                      $rawLevelRow = isset($lm[1]) ? (int)$lm[1] : 0;
@@ -623,75 +823,73 @@ $level_result = $conn->query($level_sql);
                     </div>
                     
                     <div class="row">
-                        <div class="col-md-4">
-                            <div class="mb-3">
-                                <label for="program_code" class="form-label">Program Code *</label>
-                                <select class="form-select" id="program_code" name="program_code" required>
-                                    <option value="">Select Program</option>
-                                    <?php
-                                    // Fetch programs for dropdown (include dept short if available)
-                                    if ($dept_short_exists) {
-                                        $programs_sql = "SELECT p.id, p.name, p.code, d.short_name AS dept_short FROM programs p LEFT JOIN departments d ON p.department_id = d.id WHERE p.is_active = 1 ORDER BY p.name";
-                                    } else {
-                                        $programs_sql = "SELECT p.id, p.name, p.code, SUBSTRING(d.name,1,3) AS dept_short FROM programs p LEFT JOIN departments d ON p.department_id = d.id WHERE p.is_active = 1 ORDER BY p.name";
-                                    }
-                                    $programs_result = $conn->query($programs_sql);
-                                    if ($programs_result && $programs_result->num_rows > 0):
-                                        while ($program = $programs_result->fetch_assoc()):
-                                    ?>
-                                        <option value="<?php echo $program['id']; ?>" data-code="<?php echo htmlspecialchars($program['code']); ?>" data-dept="<?php echo htmlspecialchars($program['dept_short'] ?? $program['code']); ?>">
-                                            <?php echo htmlspecialchars($program['name']); ?> (<?php echo htmlspecialchars($program['code']); ?>)
-                                        </option>
-                                    <?php 
-                                        endwhile;
-                                    endif;
-                                    ?>
-                                </select>
+                        <div class="col-12">
+                            <div class="mb-3 d-flex justify-content-between align-items-center">
+                                <h6 class="mb-0">Classes to Create</h6>
+                                <button type="button" id="addClassRowBtn" class="btn btn-sm btn-outline-primary">+ Add</button>
                             </div>
                         </div>
-                        <div class="col-md-4">
-                            <div class="mb-3">
-                                <label for="level_id" class="form-label">Level *</label>
-                                <select class="form-select" id="level_id" name="level_id" required>
-                                    <option value="">Select Level</option>
-                                    <?php if ($level_result && $level_result->num_rows > 0): ?>
-                                        <?php while ($level = $level_result->fetch_assoc()): ?>
-                                            <option value="<?php echo $level['id']; ?>"><?php echo htmlspecialchars($level['name']); ?></option>
-                                        <?php endwhile; ?>
-                                    <?php endif; ?>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="col-md-4">
-                            <div class="mb-3">
-                                <label for="stream_id" class="form-label">Stream *</label>
-                                <select class="form-select" id="stream_id" name="stream_id" required>
-                                    <option value="">Select Stream</option>
-                                    <?php 
-                                    // Fetch streams fresh for the dropdown to ensure we have the data
-                                    // Temporarily show ALL streams (both active and inactive) for debugging
-                                    $dropdown_streams_sql = "SELECT id, name, code, is_active FROM streams ORDER BY name";
-                                    $dropdown_streams_result = $conn->query($dropdown_streams_sql);
-                                    if ($dropdown_streams_result && $dropdown_streams_result->num_rows > 0): ?>
-                                        <?php while ($stream = $dropdown_streams_result->fetch_assoc()): ?>
-                                            <option value="<?php echo $stream['id']; ?>" 
-                                                    <?php echo $stream['id'] == $streamManager->getCurrentStreamId() ? 'selected' : ''; ?>>
-                                                <?php echo htmlspecialchars($stream['name']); ?>
-                                                <?php echo $stream['is_active'] ? ' (Active)' : ' (Inactive)'; ?>
+                    </div>
+
+                    <div id="classRows">
+                        <!-- Template row (first row keeps original IDs for backward compatibility) -->
+                        <div class="row class-row mb-3">
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label for="program_code" class="form-label">Program Code *</label>
+                                    <select class="form-select program-select" id="program_code" name="program_code[]" required>
+                                        <option value="">Select Program</option>
+                                        <?php
+                                        // Fetch programs for dropdown (include dept short if available)
+                                        if ($dept_short_exists) {
+                                            $programs_sql = "SELECT p.id, p.name, p.code, p.duration_years, d.short_name AS dept_short FROM programs p LEFT JOIN departments d ON p.department_id = d.id WHERE p.is_active = 1 ORDER BY p.name";
+                                        } else {
+                                            $programs_sql = "SELECT p.id, p.name, p.code, p.duration_years, SUBSTRING(d.name,1,3) AS dept_short FROM programs p LEFT JOIN departments d ON p.department_id = d.id WHERE p.is_active = 1 ORDER BY p.name";
+                                        }
+                                        $programs_result = $conn->query($programs_sql);
+                                        if ($programs_result && $programs_result->num_rows > 0):
+                                            while ($program = $programs_result->fetch_assoc()):
+                                        ?>
+                                            <option value="<?php echo $program['id']; ?>" data-code="<?php echo htmlspecialchars($program['code']); ?>" data-duration="<?php echo (int)($program['duration_years'] ?? 4); ?>" data-dept="<?php echo htmlspecialchars($program['dept_short'] ?? $program['code']); ?>">
+                                                <?php echo htmlspecialchars($program['name']); ?> (<?php echo htmlspecialchars($program['code']); ?>)
                                             </option>
-                                        <?php endwhile; ?>
-                                    <?php else: ?>
-                                        <option value="">No streams available</option>
-                                    <?php endif; ?>
-                                </select>
-                                <?php if (isset($_GET['debug_streams'])): ?>
-                                    <small class="text-muted">Debug: Streams result has <?php echo $dropdown_streams_result ? $dropdown_streams_result->num_rows : 0; ?> rows</small>
-                                <?php endif; ?>
-                                <?php if (!$dropdown_streams_result || $dropdown_streams_result->num_rows == 0): ?>
-                                    <small class="text-danger">No streams available. Please create streams first in the Streams Management page.</small>
-                                <?php else: ?>
-                                    <small class="text-info">Showing all streams (active and inactive) for debugging. Inactive streams are marked with "(Inactive)".</small>
-                                <?php endif; ?>
+                                        <?php 
+                                            endwhile;
+                                        endif;
+                                        ?>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label for="level_id" class="form-label">Level *</label>
+                                    <select class="form-select level-select" id="level_id" name="level_id[]" required>
+                                        <option value="">Select Level</option>
+                                        <?php if ($level_result && $level_result->num_rows > 0): ?>
+                                            <?php 
+                                            // Rewind level_result before iterating if it's been used elsewhere
+                                            $level_result->data_seek(0);
+                                            while ($level = $level_result->fetch_assoc()): ?>
+                                                <option value="<?php echo $level['id']; ?>" data-code="<?php echo htmlspecialchars($level['code'] ?? ''); ?>"><?php echo htmlspecialchars($level['name']); ?></option>
+                                            <?php endwhile; ?>
+                                        <?php endif; ?>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="mb-3">
+                                    <label class="form-label">Number of Students *</label>
+                                    <input type="number" class="form-control capacity-input" name="total_capacity[]" min="1" max="10000" value="100" required>
+                                    <input type="hidden" name="divisions_count[]" class="divisions-count" value="1">
+                                </div>
+                            </div>
+                            <div class="col-md-1 d-flex align-items-end">
+                                <button type="button" class="btn btn-outline-danger btn-sm remove-row-btn" style="display:none;">&times;</button>
+                            </div>
+                            <div class="col-12">
+                                <div class="alert alert-secondary class-preview" style="display:none;">
+                                    <strong>Class Preview:</strong> <span class="previewText"></span>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -1021,4 +1219,185 @@ function showDivisions(deptCode, levelNum, count) {
         alert('Classes:\n' + labels.join(', '));
     }
 }
+</script>
+
+<script>
+// Filter levels by program duration
+document.addEventListener('DOMContentLoaded', function() {
+    var programSelect = document.getElementById('program_code');
+    var levelSelect = document.getElementById('level_id');
+    if (!programSelect || !levelSelect) return;
+
+    // Cache original level options
+    var originalLevelOptions = Array.from(levelSelect.options).map(function(opt){
+        return { value: opt.value, text: opt.text, code: opt.dataset.code };
+    });
+
+    function filterLevelsByProgramDuration() {
+        var sel = programSelect.options[programSelect.selectedIndex];
+        var duration = parseInt(sel ? sel.dataset.duration : '') || 0;
+
+        // If no duration, show all
+        if (!duration) {
+            levelSelect.innerHTML = '';
+            originalLevelOptions.forEach(function(o){
+                var opt = document.createElement('option');
+                opt.value = o.value; opt.text = o.text; if (o.code) opt.dataset.code = o.code;
+                levelSelect.appendChild(opt);
+            });
+            return;
+        }
+
+        // Allowed level codes: 100, 200, 300... depending on duration
+        var allowed = [];
+        for (var i = 1; i <= duration; i++) {
+            allowed.push((i * 100).toString());
+        }
+
+        levelSelect.innerHTML = '';
+        originalLevelOptions.forEach(function(o){
+            var code = (o.code || '').toString();
+            if (!code || allowed.indexOf(code) !== -1) {
+                var opt = document.createElement('option');
+                opt.value = o.value; opt.text = o.text; if (o.code) opt.dataset.code = o.code;
+                levelSelect.appendChild(opt);
+            }
+        });     
+    }
+
+    programSelect.addEventListener('change', filterLevelsByProgramDuration);
+    // Run once on load to apply filtering for the initially selected program (if any)
+    filterLevelsByProgramDuration();
+});
+</script>
+
+<script>
+// Dynamic multiple-class rows UI
+document.addEventListener('DOMContentLoaded', function() {
+    var addBtn = document.getElementById('addClassRowBtn');
+    var container = document.getElementById('classRows');
+    if (!addBtn || !container) return;
+
+    function attachRowListeners(row) {
+        var prog = row.querySelector('.program-select');
+        var lvl = row.querySelector('.level-select');
+        var cap = row.querySelector('.capacity-input');
+        var divCount = row.querySelector('.divisions-count');
+        var preview = row.querySelector('.class-preview');
+        var previewText = row.querySelector('.previewText');
+        var removeBtn = row.querySelector('.remove-row-btn');
+
+        function updatePreview() {
+            var progOpt = prog && prog.options[prog.selectedIndex];
+            var levelOpt = lvl && lvl.options[lvl.selectedIndex];
+            if (progOpt && levelOpt) {
+                var deptShort = progOpt.dataset.code || progOpt.dataset.dept || '';
+                var levelNum = (levelOpt.dataset.code || levelOpt.text).match(/(\d+)/)?.[0] || levelOpt.text.replace(/\D/g, '');
+                var capacityVal = parseInt(cap.value) || 0;
+                var numClasses = Math.ceil(capacityVal / 100);
+                var sample = deptShort + ' ' + levelNum + (numClasses>0?String.fromCharCode(65):(""));
+                previewText.textContent = numClasses + ' classes — Sample: ' + sample;
+                if (divCount) divCount.value = numClasses;
+                preview.style.display = 'block';
+            } else {
+                preview.style.display = 'none';
+            }
+        }
+
+        if (prog) prog.addEventListener('change', updatePreview);
+        if (lvl) lvl.addEventListener('change', updatePreview);
+        if (cap) cap.addEventListener('input', updatePreview);
+        if (removeBtn) removeBtn.addEventListener('click', function(){ row.remove(); });
+        // Initial preview
+        updatePreview();
+    }
+
+    addBtn.addEventListener('click', function() {
+        // Clone the first .class-row as template
+        var template = container.querySelector('.class-row');
+        var clone = template.cloneNode(true);
+        // Clear values in inputs
+        clone.querySelectorAll('select').forEach(function(s){ s.selectedIndex = 0; });
+        clone.querySelectorAll('input[type="number"]').forEach(function(i){ if (i.name === 'total_capacity[]') i.value = 100; });
+        // Show remove button
+        var rem = clone.querySelector('.remove-row-btn');
+        if (rem) rem.style.display = '';
+        // Append and attach listeners
+        container.appendChild(clone);
+        attachRowListeners(clone);
+    });
+
+    // Attach listeners to initial row(s)
+    container.querySelectorAll('.class-row').forEach(function(r){ attachRowListeners(r); });
+});
+</script>
+
+<script>
+// Ensure batch rows are serialized correctly before form submit
+document.addEventListener('DOMContentLoaded', function() {
+    // Find the form that contains classRows
+    var container = document.getElementById('classRows');
+    if (!container) return;
+    var theForm = container.closest('form');
+    if (!theForm) return;
+
+    theForm.addEventListener('submit', function(e) {
+        // Collect visible class rows
+        var rows = container.querySelectorAll('.class-row');
+        var programVals = [];
+        var levelVals = [];
+        var capVals = [];
+        var divVals = [];
+        var rowErrors = [];
+
+        rows.forEach(function(r, idx) {
+            var prog = r.querySelector('.program-select');
+            var lvl = r.querySelector('.level-select');
+            var cap = r.querySelector('.capacity-input');
+            var divc = r.querySelector('.divisions-count');
+            var p = prog ? (prog.value || '') : '';
+            var l = lvl ? (lvl.value || '') : '';
+            var c = cap ? (cap.value || '') : '';
+
+            // Skip entirely empty rows
+            if (!p && !l && (!c || c === '0')) return;
+
+            // Validate required
+            if (!p || !l || !c || parseInt(c) <= 0) {
+                rowErrors.push(idx+1);
+                return;
+            }
+
+            programVals.push(p);
+            levelVals.push(l);
+            capVals.push(c);
+            divVals.push(divc ? divc.value : Math.ceil(parseInt(c)/100));
+        });
+
+        if (rowErrors.length > 0) {
+            e.preventDefault();
+            alert('Please fill Program, Level and Number of Students for rows: ' + rowErrors.join(', '));
+            return false;
+        }
+
+        // Remove any existing batch hidden inputs we added earlier
+        Array.from(theForm.querySelectorAll('input.batch-hidden')).forEach(function(n){ n.remove(); });
+
+        // Inject hidden inputs for arrays so server receives them reliably
+        programVals.forEach(function(v){
+            var inp = document.createElement('input'); inp.type = 'hidden'; inp.name = 'program_code[]'; inp.value = v; inp.className = 'batch-hidden'; theForm.appendChild(inp);
+        });
+        levelVals.forEach(function(v){
+            var inp = document.createElement('input'); inp.type = 'hidden'; inp.name = 'level_id[]'; inp.value = v; inp.className = 'batch-hidden'; theForm.appendChild(inp);
+        });
+        capVals.forEach(function(v){
+            var inp = document.createElement('input'); inp.type = 'hidden'; inp.name = 'total_capacity[]'; inp.value = v; inp.className = 'batch-hidden'; theForm.appendChild(inp);
+        });
+        divVals.forEach(function(v){
+            var inp = document.createElement('input'); inp.type = 'hidden'; inp.name = 'divisions_count[]'; inp.value = v; inp.className = 'batch-hidden'; theForm.appendChild(inp);
+        });
+
+        // Allow normal submit to proceed; server will pick up the arrays from hidden inputs
+    });
+});
 </script>
