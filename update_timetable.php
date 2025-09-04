@@ -260,7 +260,13 @@ $lecturer_courses_result = $conn->query("
                                 <div class="col-md-3">
                                     <strong>Class-Course:</strong><br>
                                     <span class="text-primary">
-                                        <?php echo htmlspecialchars($edit_entry['class_name'] . ' - ' . $edit_entry['course_code']); ?>
+                                        <?php 
+                                    $display_class_name = htmlspecialchars($edit_entry['class_name']);
+                                    if (!empty($edit_entry['division_label'])) {
+                                        $display_class_name .= ' ' . htmlspecialchars($edit_entry['division_label']);
+                                    }
+                                    echo $display_class_name . ' - ' . htmlspecialchars($edit_entry['course_code']);
+                                ?>
                                     </span>
                                 </div>
                             </div>
