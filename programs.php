@@ -40,10 +40,29 @@ try {
                 throw new Exception("Failed to prepare database statements");
             }
 
+            // Preload existing codes and name+department pairs to avoid per-row DB lookups
+            $existing_codes = [];
+            $existing_name_dept = [];
+            $codes_rs = $conn->query("SELECT code, name, department_id FROM programs");
+            if ($codes_rs) {
+                while ($r = $codes_rs->fetch_assoc()) {
+                    $c = trim((string)$r['code']);
+                    if ($c !== '') $existing_codes[strtoupper($c)] = true;
+                    $n = trim((string)$r['name']);
+                    $d = (int)$r['department_id'];
+                    if ($n !== '' && $d > 0) $existing_name_dept[strtoupper($n) . '|' . $d] = true;
+                }
+                $codes_rs->close();
+            }
+
+            // Track seen codes and name-dept combos within this import to skip duplicates in-file
+            $seen_codes = [];
+            $seen_name_dept = [];
+
             $row_number = 0;
             foreach ($import_data as $row) {
                 $row_number++;
-                $row_result = process_import_row($conn, $row, $row_number, $check_name_dept_stmt, $check_code_stmt, $check_dept_stmt, $insert_stmt);
+                $row_result = process_import_row($conn, $row, $row_number, $check_name_dept_stmt, $check_code_stmt, $check_dept_stmt, $insert_stmt, $existing_codes, $existing_name_dept, $seen_codes, $seen_name_dept);
                 
                 // Aggregate results
                 $result['success_count'] += $row_result['success'] ? 1 : 0;
@@ -83,7 +102,7 @@ try {
     /**
      * Process a single import row with comprehensive validation and conflict resolution
      */
-    function process_import_row($conn, $row, $row_number, $check_name_dept_stmt, $check_code_stmt, $check_dept_stmt, $insert_stmt) {
+    function process_import_row($conn, $row, $row_number, $check_name_dept_stmt, $check_code_stmt, $check_dept_stmt, $insert_stmt, &$existing_codes = [], &$existing_name_dept = [], &$seen_codes = [], &$seen_name_dept = []) {
         $result = [
             'success' => false,
             'ignored' => false,
@@ -124,6 +143,24 @@ try {
                 return $result;
             }
 
+            // Normalize for quick checks
+            $norm_code = strtoupper(trim($code));
+            $norm_name = strtoupper(trim($name));
+            $nd_key = $norm_name . '|' . $department_id;
+
+            // Check existing caches for duplicates (DB or earlier in this CSV)
+            if ($norm_code !== '' && (isset($existing_codes[$norm_code]) || isset($seen_codes[$norm_code]))) {
+                $result['ignored'] = true;
+                $result['message'] = "Program code '$code' already exists";
+                return $result;
+            }
+
+            if ($norm_name !== '' && (isset($existing_name_dept[$nd_key]) || isset($seen_name_dept[$nd_key]))) {
+                $result['ignored'] = true;
+                $result['message'] = "Program '$name' already exists in department $department_id";
+                return $result;
+            }
+
             // Validate department exists
             $check_dept_stmt->bind_param("i", $department_id);
             $check_dept_stmt->execute();
@@ -141,7 +178,7 @@ try {
                 $result['message'] = "Generated code: $code";
             }
 
-            // Check for name+department conflicts
+            // Check for name+department and code conflicts using prepared statements as a fallback
             $check_name_dept_stmt->bind_param("si", $name, $department_id);
             $check_name_dept_stmt->execute();
             $name_dept_result = $check_name_dept_stmt->get_result();
@@ -160,6 +197,12 @@ try {
                 $result['message'] = "Program code '$code' already exists";
                 return $result;
             }
+
+            // Mark code and name-dept as seen to prevent duplicates later in this import
+            if ($norm_code !== '') {
+                $seen_codes[$norm_code] = true;
+            }
+            $seen_name_dept[$nd_key] = true;
 
             // Validate duration
             if ($duration < 1 || $duration > 10) {
