@@ -124,9 +124,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $is_batch = isset($_POST['program_code']) && is_array($_POST['program_code']);
 
         // Stream is a single selection for all rows
-        $stream_id = isset($_POST['stream_id']) ? (int)$_POST['stream_id'] : $streamManager->getCurrentStreamId();
+        $stream_id = isset($_POST['stream_id']) ? (int)$_POST['stream_id'] : 0;
+        
+        // Validate stream selection
+        if ($stream_id <= 0) {
+            $error_message = 'Please select a valid stream.';
+        }
 
-        if ($is_batch) {
+        if ($is_batch && empty($error_message)) {
             $program_ids = $_POST['program_code'];
             $level_ids = $_POST['level_id'] ?? [];
             $capacities = $_POST['total_capacity'] ?? [];
@@ -134,8 +139,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             // Basic length checks
             $countRows = count($program_ids);
+            $levelCount = count($level_ids);
+            $capacityCount = count($capacities);
+            
             if ($countRows === 0) {
                 $error_message = 'No classes provided.';
+            } elseif ($countRows !== $levelCount || $countRows !== $capacityCount) {
+                $error_message = 'Form data mismatch: program, level, and capacity arrays must have the same number of entries.';
             } else {
                 // Prepare statements used multiple times
                 if ($dept_short_exists) {
@@ -158,16 +168,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stream = $stream_res->fetch_assoc();
                 if (!$stream) {
                     $error_message = 'Invalid stream selected.';
-                } else {
+                } elseif (empty($error_message)) {
                     $errors = [];
                     $createdCount = 0;
                     $conn->begin_transaction();
                     try {
+                        // Group classes by program and level to avoid duplicates
+                        $class_groups = [];
                         for ($i = 0; $i < $countRows; $i++) {
                             $p_id = (int)($program_ids[$i] ?? 0);
                             $l_id = (int)($level_ids[$i] ?? 0);
                             $cap = max(0, (int)($capacities[$i] ?? 0));
-                            $div_count = isset($divisions_arr[$i]) ? max(1, (int)$divisions_arr[$i]) : max(1, (int)ceil($cap / 100));
 
                             // If the entire row is empty (user added extra rows but left them blank), skip it silently
                             if ($p_id === 0 && $l_id === 0 && $cap === 0) {
@@ -176,9 +187,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                             // Partial/invalid row: some fields present but missing required ones
                             if ($p_id <= 0 || $l_id <= 0 || $cap <= 0) {
-                                $errors[] = "Row " . ($i+1) . ": missing program, level or capacity.";
+                                $missing_fields = [];
+                                if ($p_id <= 0) $missing_fields[] = "program";
+                                if ($l_id <= 0) $missing_fields[] = "level";
+                                if ($cap <= 0) $missing_fields[] = "capacity";
+                                $errors[] = "Row " . ($i+1) . ": missing " . implode(", ", $missing_fields) . ".";
                                 continue;
                             }
+
+                            // Group by program_id and level_id
+                            $group_key = $p_id . '_' . $l_id;
+                            if (!isset($class_groups[$group_key])) {
+                                $class_groups[$group_key] = [
+                                    'program_id' => $p_id,
+                                    'level_id' => $l_id,
+                                    'total_capacity' => 0,
+                                    'row_numbers' => []
+                                ];
+                            }
+                            $class_groups[$group_key]['total_capacity'] += $cap;
+                            $class_groups[$group_key]['row_numbers'][] = $i + 1;
+                        }
+
+                        // Process each unique program-level combination
+                        foreach ($class_groups as $group_key => $group_data) {
+                            $p_id = $group_data['program_id'];
+                            $l_id = $group_data['level_id'];
+                            $cap = $group_data['total_capacity'];
+                            $div_count = max(1, (int)ceil($cap / 100));
 
                             // Fetch program
                             $prog_stmt->bind_param("i", $p_id);
@@ -193,7 +229,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $level = $lvl_res->fetch_assoc();
 
                             if (!$program || !$level) {
-                                $errors[] = "Row " . ($i+1) . ": invalid program or level.";
+                                $row_numbers = implode(', ', $group_data['row_numbers']);
+                                $errors[] = "Rows {$row_numbers}: invalid program or level.";
                                 continue;
                             }
 
@@ -205,7 +242,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             if ($levelCodeNum > 0 && $levelCodeNum < 10) $levelCodeNum = $levelCodeNum * 100;
                             $maxAllowed = $programDuration > 0 ? ($programDuration * 100) : 0;
                             if ($programDuration > 0 && ($levelCodeNum < 100 || $levelCodeNum > $maxAllowed || $levelCodeNum % 100 !== 0)) {
-                                $errors[] = "Row " . ($i+1) . ": selected level is not valid for program duration.";
+                                $row_numbers = implode(', ', $group_data['row_numbers']);
+                                $errors[] = "Rows {$row_numbers}: selected level is not valid for program duration.";
                                 continue;
                             }
 
@@ -228,7 +266,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $chk_res = $check_stmt->get_result();
                             if ($chk_res && $chk_res->num_rows > 0) {
                                 $existing = $chk_res->fetch_assoc();
-                                $errors[] = "Row " . ($i+1) . ": class code '{$class_code}' already exists.";
+                                $row_numbers = implode(', ', $group_data['row_numbers']);
+                                $errors[] = "Rows {$row_numbers}: class code '{$class_code}' already exists.";
                                 continue;
                             }
 
@@ -261,16 +300,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 }
                                 $createdCount++;
                             } else {
-                                $errors[] = "Row " . ($i+1) . ": failed to insert class: " . $ins_stmt->error;
+                                $row_numbers = implode(', ', $group_data['row_numbers']);
+                                $errors[] = "Rows {$row_numbers}: failed to insert class: " . $ins_stmt->error;
                             }
                         }
 
                         if (!empty($errors)) {
                             $conn->rollback();
                             $error_message = "Failed to create classes:\n" . implode("\n", $errors);
-                        } else {
+                        } elseif ($createdCount > 0) {
                             $conn->commit();
                             redirect_with_flash('classes.php', 'success', "Successfully created {$createdCount} classes.");
+                        } else {
+                            $conn->rollback();
+                            $error_message = 'No valid classes were created. Please check your input.';
                         }
                     } catch (Exception $e) {
                         $conn->rollback();
@@ -897,10 +940,23 @@ $level_result = $conn->query($level_sql);
                     <div class="row">
                         <div class="col-md-12">
                             <div class="mb-3">
-                                <label for="total_capacity" class="form-label">Number of Students *</label>
-                                <input type="number" class="form-control" id="total_capacity" name="total_capacity" min="1" max="10000" value="100" required>
-                                <small class="text-muted">The system will create classes automatically (max 100 students per class)</small>
-                                <small class="text-muted">The system will create classes automatically (max 100 students per class)</small>
+                                <label for="stream_id" class="form-label">Stream *</label>
+                                <select class="form-select" id="stream_id" name="stream_id" required>
+                                    <option value="">Select Stream</option>
+                                    <?php 
+                                    // Reset streams_result for dropdown
+                                    if ($streams_result) {
+                                        $streams_result->data_seek(0);
+                                        while ($stream = $streams_result->fetch_assoc()) {
+                                    ?>
+                                        <option value="<?php echo $stream['id']; ?>">
+                                            <?php echo htmlspecialchars($stream['name']); ?>
+                                        </option>
+                                    <?php 
+                                        }
+                                    }
+                                    ?>
+                                </select>
                             </div>
                         </div>
                     </div>
