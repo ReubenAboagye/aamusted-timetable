@@ -10,6 +10,7 @@ class ConstraintChecker {
     private $data;
     private $options;
     private $constraintWeights;
+    private $cache = []; // Add caching for repeated calculations
     
     public function __construct(array $data, array $options = []) {
         $this->data = $data;
@@ -24,7 +25,8 @@ class ConstraintChecker {
                 'missing_assignment' => 1000,
                 'invalid_time_slot' => 1000,
                 'invalid_day' => 1000,
-                'invalid_room' => 1000
+                'invalid_room' => 1000,
+                'duplicate_assignment' => 1000
             ],
             'soft' => [
                 'room_capacity' => 10,
@@ -38,9 +40,18 @@ class ConstraintChecker {
     }
     
     /**
+     * Clear cache (call this between different individuals)
+     */
+    private function clearCache(): void {
+        $this->cache = [];
+    }
+    
+    /**
      * Evaluate the fitness of a timetable solution
      */
     public function evaluateFitness(array $individual): array {
+        $this->clearCache(); // Clear cache for new individual
+        
         $hardViolations = $this->checkHardConstraints($individual);
         $softViolations = $this->checkSoftConstraints($individual);
         
@@ -59,7 +70,7 @@ class ConstraintChecker {
     
     /**
      * Check hard constraints (must be satisfied)
-     * Updated to handle combined class assignments
+     * Updated to handle combined class assignments and enhanced duplicate detection
      */
     private function checkHardConstraints(array $individual): array {
         $violations = [];
@@ -68,6 +79,8 @@ class ConstraintChecker {
         $roomSlots = [];
         $lecturerSlots = [];
         $classSlots = [];
+        $classCourseTimeSlots = []; // Track unique class-course-time combinations
+        $processedGenes = []; // Track processed genes to avoid double-counting
         
         foreach ($individual as $classCourseId => $gene) {
             // Check for missing assignments
@@ -77,6 +90,27 @@ class ConstraintChecker {
                     'message' => 'Missing required assignment'
                 ];
                 continue;
+            }
+            
+            // Create a unique identifier for this gene to avoid double-processing
+            $geneId = $classCourseId . '|' . $gene['day_id'] . '|' . $gene['time_slot_id'] . '|' . ($gene['slot_index'] ?? 0);
+            if (isset($processedGenes[$geneId])) {
+                continue; // Skip if we've already processed this gene
+            }
+            $processedGenes[$geneId] = true;
+            
+            // Check for duplicate class-course-time combinations
+            $classCourseTimeKey = $classCourseId . '|' . $gene['day_id'] . '|' . $gene['time_slot_id'];
+            if (isset($classCourseTimeSlots[$classCourseTimeKey])) {
+                $violations['duplicate_assignment'][] = [
+                    'class_course_id' => $classCourseId,
+                    'conflict_with' => $classCourseTimeSlots[$classCourseTimeKey],
+                    'message' => 'Duplicate assignment for same class-course at same time',
+                    'details' => "Gene: $classCourseId, Day: {$gene['day_id']}, Time: {$gene['time_slot_id']}"
+                ];
+                error_log("Duplicate assignment detected in GA: $classCourseTimeKey");
+            } else {
+                $classCourseTimeSlots[$classCourseTimeKey] = $classCourseId;
             }
             
             // Check if this is a combined assignment
@@ -156,7 +190,7 @@ class ConstraintChecker {
                 }
                 
                 // Check class conflicts
-                $classKey = TimetableRepresentation::getClassConflictKey($gene);
+                $classKey = $gene['class_id'] . '|' . $gene['day_id'] . '|' . $gene['time_slot_id'];
                 if (isset($classSlots[$classKey])) {
                     $violations['class_conflict'][] = [
                         'class_course_id' => $classCourseId,
@@ -420,11 +454,27 @@ class ConstraintChecker {
         $dayId = $gene['day_id'];
         $timeSlotId = $gene['time_slot_id'];
         
+        // Use cache key for this calculation
+        $cacheKey = "time_dist_{$classId}_{$dayId}";
+        if (!isset($this->cache[$cacheKey])) {
+            // Pre-calculate time slots for this class on this day for O(n) complexity
+            $classTimeSlots = [];
+            foreach ($individual as $otherGene) {
+                if ($otherGene['class_id'] == $classId && 
+                    $otherGene['day_id'] == $dayId &&
+                    $otherGene['day_id'] && $otherGene['time_slot_id']) {
+                    $classTimeSlots[] = $otherGene['time_slot_id'];
+                }
+            }
+            $this->cache[$cacheKey] = $classTimeSlots;
+        } else {
+            $classTimeSlots = $this->cache[$cacheKey];
+        }
+        
+        // Count consecutive slots more efficiently
         $consecutiveCount = 0;
-        foreach ($individual as $otherGene) {
-            if ($otherGene['class_id'] == $classId && 
-                $otherGene['day_id'] == $dayId &&
-                abs($otherGene['time_slot_id'] - $timeSlotId) <= 1) {
+        foreach ($classTimeSlots as $slot) {
+            if (abs($slot - $timeSlotId) <= 1) {
                 $consecutiveCount++;
             }
         }
@@ -457,13 +507,24 @@ class ConstraintChecker {
         $classId = $gene['class_id'];
         $dayId = $gene['day_id'];
         
-        $dayCount = 0;
-        foreach ($individual as $otherGene) {
-            if ($otherGene['class_id'] == $classId && 
-                $otherGene['day_id'] == $dayId) {
-                $dayCount++;
+        // Use cache key for this calculation
+        $cacheKey = "day_dist_{$classId}";
+        if (!isset($this->cache[$cacheKey])) {
+            // Pre-calculate day counts for this class for O(n) complexity
+            $classDayCounts = [];
+            foreach ($individual as $otherGene) {
+                if ($otherGene['class_id'] == $classId && 
+                    $otherGene['day_id'] && $otherGene['time_slot_id']) {
+                    $otherDayId = $otherGene['day_id'];
+                    $classDayCounts[$otherDayId] = ($classDayCounts[$otherDayId] ?? 0) + 1;
+                }
             }
+            $this->cache[$cacheKey] = $classDayCounts;
+        } else {
+            $classDayCounts = $this->cache[$cacheKey];
         }
+        
+        $dayCount = $classDayCounts[$dayId] ?? 0;
         
         if ($dayCount > 4) { // More than 4 courses per day
             return [
