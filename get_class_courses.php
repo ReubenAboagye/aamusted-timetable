@@ -63,22 +63,21 @@ if ($cstmt) {
 foreach ($available as &$ac) {
     $ac['level_band'] = null;
     $ac['course_semester'] = null;
+    $ac['academic_semester'] = null;
     $code = $ac['course_code'] ?? '';
-    $name = $ac['course_name'] ?? '';
-    if (preg_match('/(\d{3})/', $code, $m) || preg_match('/(\d{3})/', $name, $m)) {
-        $num = (int)$m[1];
-        $ac['level_band'] = (int)(floor($num / 100) * 100);
-        // semester encoded as the middle digit of the 3-digit number, e.g., 356 -> 5
-        $middle = substr($m[1], 1, 1);
-        if (is_numeric($middle)) {
-            $ac['course_semester'] = (int)$middle;
-            // academic semester: odd => 1, even => 2
-            $ac['academic_semester'] = ($ac['course_semester'] % 2 === 1) ? 1 : 2;
-        }
-    } elseif (preg_match('/(\d)/', $code, $m) || preg_match('/(\d)/', $name, $m)) {
-        $num = (int)$m[1];
-        if ($num > 0 && $num < 10) $num = $num * 100;
-        $ac['level_band'] = (int)(floor($num / 100) * 100);
+    
+    // Extract level and semester from 3-digit course code
+    if (preg_match('/(\d{3})/', $code, $m)) {
+        $threeDigit = $m[1];
+        $firstDigit = (int)substr($threeDigit, 0, 1);
+        $secondDigit = (int)substr($threeDigit, 1, 1);
+        
+        // Level: first digit * 100 (e.g., 356 -> level 300)
+        $ac['level_band'] = $firstDigit * 100;
+        
+        // Semester: second digit (odd=1, even=2)
+        $ac['course_semester'] = $secondDigit;
+        $ac['academic_semester'] = ($secondDigit % 2 === 1) ? 1 : 2;
     }
 }
 unset($ac);
@@ -86,20 +85,21 @@ unset($ac);
 foreach ($assigned as &$ac) {
     $ac['level_band'] = null;
     $ac['course_semester'] = null;
+    $ac['academic_semester'] = null;
     $code = $ac['course_code'] ?? '';
-    $name = $ac['course_name'] ?? '';
-    if (preg_match('/(\d{3})/', $code, $m) || preg_match('/(\d{3})/', $name, $m)) {
-        $num = (int)$m[1];
-        $ac['level_band'] = (int)(floor($num / 100) * 100);
-        $middle = substr($m[1], 1, 1);
-        if (is_numeric($middle)) {
-            $ac['course_semester'] = (int)$middle;
-            $ac['academic_semester'] = ($ac['course_semester'] % 2 === 1) ? 1 : 2;
-        }
-    } elseif (preg_match('/(\d)/', $code, $m) || preg_match('/(\d)/', $name, $m)) {
-        $num = (int)$m[1];
-        if ($num > 0 && $num < 10) $num = $num * 100;
-        $ac['level_band'] = (int)(floor($num / 100) * 100);
+    
+    // Extract level and semester from 3-digit course code
+    if (preg_match('/(\d{3})/', $code, $m)) {
+        $threeDigit = $m[1];
+        $firstDigit = (int)substr($threeDigit, 0, 1);
+        $secondDigit = (int)substr($threeDigit, 1, 1);
+        
+        // Level: first digit * 100 (e.g., 356 -> level 300)
+        $ac['level_band'] = $firstDigit * 100;
+        
+        // Semester: second digit (odd=1, even=2)
+        $ac['course_semester'] = $secondDigit;
+        $ac['academic_semester'] = ($secondDigit % 2 === 1) ? 1 : 2;
     }
 }
 unset($ac);
