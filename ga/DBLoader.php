@@ -53,9 +53,12 @@ class DBLoader {
     }
 
     private function loadClassCourses($streamId = null, $academicYear = null, $semester = null) {
-        $sql = "SELECT cc.id, cc.class_id, cc.course_id, cc.lecturer_id, cc.semester, cc.academic_year, cc.is_active 
+        $sql = "SELECT cc.id, cc.class_id, cc.course_id, cc.lecturer_id, cc.semester, cc.academic_year, cc.is_active, 
+                       co.code as course_code, co.name as course_name, co.hours_per_week,
+                       c.name as class_name, c.divisions_count, c.total_capacity
                 FROM class_courses cc 
-                JOIN classes c ON cc.class_id = c.id";
+                JOIN classes c ON cc.class_id = c.id
+                JOIN courses co ON cc.course_id = co.id";
         
         $conditions = ["cc.is_active = 1"];
         
@@ -67,13 +70,106 @@ class DBLoader {
             $conditions[] = "cc.academic_year = '" . $this->conn->real_escape_string($academicYear) . "'";
         }
         
-        if ($semester) {
-            $conditions[] = "cc.semester = '" . $this->conn->real_escape_string($semester) . "'";
-        }
-        
         $sql .= " WHERE " . implode(" AND ", $conditions);
         
-        return $this->fetchAll($sql);
+        $results = $this->fetchAll($sql);
+        
+        // Filter by semester if specified (based on course code)
+        if ($semester && !empty($results)) {
+            $originalCount = count($results);
+            $results = array_filter($results, function($row) use ($semester) {
+                return $this->isCourseInSemester($row['course_code'], $semester);
+            });
+            
+            // If all courses were filtered out, provide helpful error message
+            if (empty($results)) {
+                $availableSemesters = [];
+                foreach ($this->fetchAll($sql) as $row) {
+                    $courseCode = $row['course_code'];
+                    if (preg_match('/(\d{3})/', $courseCode, $matches)) {
+                        $threeDigit = $matches[1];
+                        $secondDigit = (int)substr($threeDigit, 1, 1);
+                        $courseSemester = ($secondDigit % 2 === 1) ? 1 : 2;
+                        $availableSemesters[$courseSemester] = true;
+                    }
+                }
+                
+                $availableSemesterList = array_keys($availableSemesters);
+                if (!empty($availableSemesterList)) {
+                    throw new Exception("No courses found for semester $semester. Available semesters: " . implode(', ', $availableSemesterList) . ". Please select the correct semester.");
+                } else {
+                    throw new Exception("No courses found for semester $semester. Please check your course codes and semester assignments.");
+                }
+            }
+        }
+        
+        // Expand class divisions into individual class assignments
+        $expandedResults = [];
+        foreach ($results as $row) {
+            $divisionsCount = max(1, (int)($row['divisions_count'] ?? 1));
+            
+            for ($i = 0; $i < $divisionsCount; $i++) {
+                // Generate division label (A, B, C, ..., Z, AA, AB, etc.)
+                $divisionLabel = $this->generateDivisionLabel($i);
+                
+                // Calculate individual class capacity
+                $totalCapacity = (int)($row['total_capacity'] ?? 0);
+                $baseCapacity = intdiv($totalCapacity, $divisionsCount);
+                $remainder = $totalCapacity % $divisionsCount;
+                $individualCapacity = $baseCapacity + ($i < $remainder ? 1 : 0);
+                
+                $expandedRow = $row;
+                $expandedRow['division_label'] = $divisionLabel;
+                $expandedRow['individual_capacity'] = $individualCapacity;
+                $expandedRow['original_class_course_id'] = $row['id']; // Keep reference to original
+                $expandedRow['id'] = $row['id'] . '_' . $divisionLabel; // Unique ID for each division
+                
+                $expandedResults[] = $expandedRow;
+            }
+        }
+        
+        return $expandedResults;
+    }
+    
+    /**
+     * Generate division label for class divisions
+     * @param int $index The division index (0-based)
+     * @return string The division label (A, B, C, ..., Z, AA, AB, etc.)
+     */
+    private function generateDivisionLabel($index) {
+        $label = '';
+        $n = $index;
+        while (true) {
+            $label = chr(65 + ($n % 26)) . $label;
+            $n = intdiv($n, 26) - 1;
+            if ($n < 0) break;
+        }
+        return $label;
+    }
+
+    /**
+     * Check if a course belongs to the specified semester based on course code
+     * @param string $courseCode The course code
+     * @param int $semester 1 for first semester, 2 for second semester
+     * @return bool True if course belongs to the semester
+     */
+    private function isCourseInSemester($courseCode, $semester) {
+        // Extract 3-digit number from course code
+        if (preg_match('/(\d{3})/', $courseCode, $matches)) {
+            $threeDigit = $matches[1];
+            $secondDigit = (int)substr($threeDigit, 1, 1);
+            
+            if ($semester == 1) {
+                // First semester: second digit is odd (1,3,5,7,9)
+                return $secondDigit % 2 === 1;
+            } else {
+                // Second semester: second digit is even (2,4,6,8,0)
+                return $secondDigit % 2 === 0;
+            }
+        }
+        
+        // If no 3-digit pattern found, include in both semesters
+        return true;
     }
 
     private function loadLecturerCourses($streamId = null) {
