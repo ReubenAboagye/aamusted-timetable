@@ -307,6 +307,22 @@ class GeneticAlgorithm {
     }
     
     /**
+     * Get termination reason
+     */
+    private function getTerminationReason(int $generation): string {
+        if (microtime(true) - $this->startTime > $this->options['max_runtime']) {
+            return 'time_limit';
+        }
+        if (memory_get_usage(true) > 256 * 1024 * 1024) {
+            return 'memory_limit';
+        }
+        if ($generation >= $this->generations - 1) {
+            return 'generations_completed';
+        }
+        return 'convergence';
+    }
+    
+    /**
      * Calculate average fitness of the population
      */
     private function calculateAverageFitness(array $evaluatedPopulation): float {
@@ -320,11 +336,13 @@ class GeneticAlgorithm {
     }
     
     /**
-     * Convert the best solution to database format for insertion
-     * Updated to handle combined class assignments
+     * Convert the best solution to database format
+     * Enhanced to prevent duplicate entries more robustly
      */
     public function convertToDatabaseFormat(array $solution): array {
         $timetableEntries = [];
+        $uniqueKeys = []; // Track unique combinations to prevent duplicates
+        $processedGenes = []; // Track which genes we've already processed
         
         // Group genes by class_course_id to handle multi-slot courses
         $groupedGenes = [];
@@ -359,18 +377,31 @@ class GeneticAlgorithm {
                     
                     // Create entry for each class division in the combination
                     foreach ($combinedClasses as $classCourse) {
-                        $timetableEntries[] = [
-                            'class_course_id' => $classCourse['original_class_course_id'] ?? $classCourse['id'],
-                            'lecturer_course_id' => $genes[0]['lecturer_course_id'],
-                            'day_id' => $baseDayId,
-                            'time_slot_id' => $timeSlotId,
-                            'room_id' => $baseRoomId,
-                            'division_label' => $classCourse['division_label'] ?? $genes[0]['division_label'],
-                            'semester' => $this->options['semester'],
-                            'academic_year' => $this->options['academic_year'],
-                            'timetable_type' => 'lecture',
-                            'is_active' => 1
-                        ];
+                        $divisionLabel = $classCourse['division_label'] ?? $genes[0]['division_label'];
+                        $actualClassCourseId = $classCourse['original_class_course_id'] ?? $classCourse['id'];
+                        
+                        // Create unique key to prevent duplicates
+                        $uniqueKey = $actualClassCourseId . '-' . $baseDayId . '-' . $timeSlotId . '-' . $divisionLabel;
+                        
+                        if (!in_array($uniqueKey, $uniqueKeys)) {
+                            $uniqueKeys[] = $uniqueKey;
+                            
+                            $timetableEntries[] = [
+                                'class_course_id' => $actualClassCourseId,
+                                'lecturer_course_id' => $genes[0]['lecturer_course_id'],
+                                'day_id' => $baseDayId,
+                                'time_slot_id' => $timeSlotId,
+                                'room_id' => $baseRoomId,
+                                'division_label' => $divisionLabel,
+                                'semester' => $this->options['semester'],
+                                'academic_year' => $this->options['academic_year'],
+                                'timetable_type' => 'lecture',
+                                'is_active' => 1
+                            ];
+                        } else {
+                            // Log duplicate for debugging
+                            error_log("Duplicate detected in combined assignment: " . $uniqueKey);
+                        }
                     }
                 }
             } else {
@@ -382,24 +413,75 @@ class GeneticAlgorithm {
                 
                 for ($i = 0; $i < $courseDuration; $i++) {
                     $timeSlotId = $baseTimeSlotId + $i;
+                    $divisionLabel = $genes[0]['division_label'];
                     
-                    $timetableEntries[] = [
-                        'class_course_id' => $classCourseId,
-                        'lecturer_course_id' => $genes[0]['lecturer_course_id'],
-                        'day_id' => $baseDayId,
-                        'time_slot_id' => $timeSlotId,
-                        'room_id' => $baseRoomId,
-                        'division_label' => $genes[0]['division_label'],
-                        'semester' => $this->options['semester'],
-                        'academic_year' => $this->options['academic_year'],
-                        'timetable_type' => 'lecture',
-                        'is_active' => 1
-                    ];
+                    // Create unique key to prevent duplicates
+                    $uniqueKey = $classCourseId . '-' . $baseDayId . '-' . $timeSlotId . '-' . $divisionLabel;
+                    
+                    if (!in_array($uniqueKey, $uniqueKeys)) {
+                        $uniqueKeys[] = $uniqueKey;
+                        
+                        $timetableEntries[] = [
+                            'class_course_id' => $classCourseId,
+                            'lecturer_course_id' => $genes[0]['lecturer_course_id'],
+                            'day_id' => $baseDayId,
+                            'time_slot_id' => $timeSlotId,
+                            'room_id' => $baseRoomId,
+                            'division_label' => $divisionLabel,
+                            'semester' => $this->options['semester'],
+                            'academic_year' => $this->options['academic_year'],
+                            'timetable_type' => 'lecture',
+                            'is_active' => 1
+                        ];
+                    } else {
+                        // Log duplicate for debugging
+                        error_log("Duplicate detected in individual assignment: " . $uniqueKey);
+                    }
                 }
             }
         }
         
-        return $timetableEntries;
+        // Final validation: ensure no duplicates in the final array
+        $finalEntries = [];
+        $finalUniqueKeys = [];
+        
+        foreach ($timetableEntries as $entry) {
+            $key = $entry['class_course_id'] . '-' . $entry['day_id'] . '-' . $entry['time_slot_id'] . '-' . $entry['division_label'];
+            if (!in_array($key, $finalUniqueKeys)) {
+                $finalUniqueKeys[] = $key;
+                $finalEntries[] = $entry;
+            } else {
+                // Log duplicate for debugging
+                error_log("Final duplicate detected: " . $key . " for entry: " . json_encode($entry));
+            }
+        }
+        
+        // Additional validation: check for any remaining duplicates
+        $duplicateCheck = [];
+        foreach ($finalEntries as $entry) {
+            $key = $entry['class_course_id'] . '-' . $entry['day_id'] . '-' . $entry['time_slot_id'] . '-' . $entry['division_label'];
+            if (isset($duplicateCheck[$key])) {
+                error_log("CRITICAL: Duplicate still found after filtering: " . $key);
+                // Remove the duplicate entry
+                continue;
+            }
+            $duplicateCheck[$key] = true;
+        }
+        
+        // Return only unique entries
+        $uniqueFinalEntries = [];
+        $uniqueCheck = [];
+        foreach ($finalEntries as $entry) {
+            $key = $entry['class_course_id'] . '-' . $entry['day_id'] . '-' . $entry['time_slot_id'] . '-' . $entry['division_label'];
+            if (!isset($uniqueCheck[$key])) {
+                $uniqueCheck[$key] = true;
+                $uniqueFinalEntries[] = $entry;
+            }
+        }
+        
+        error_log("Converted " . count($timetableEntries) . " entries to " . count($uniqueFinalEntries) . " unique entries");
+        
+        return $uniqueFinalEntries;
     }
     
     /**
