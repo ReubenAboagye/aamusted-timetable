@@ -57,6 +57,29 @@ if (file_exists(__DIR__ . '/includes/stream_manager.php')) include_once __DIR__ 
 $streamManager = getStreamManager();
 $current_stream_id = $streamManager->getCurrentStreamId();
 
+// Set current semester from form, URL params, or use defaults
+$current_semester = 2; // Default to semester 2
+
+// Check if we have form data or URL parameters
+if (isset($_POST['semester']) && !empty($_POST['semester'])) {
+    $semester_input = $_POST['semester'];
+    if ($semester_input === 'first' || $semester_input === '1') {
+        $current_semester = 1;
+    } elseif ($semester_input === 'second' || $semester_input === '2') {
+        $current_semester = 2;
+    }
+}
+
+// Also check URL parameters for when page is redirected after generation
+if (isset($_GET['semester']) && !empty($_GET['semester'])) {
+    $semester_param = $_GET['semester'];
+    if ($semester_param === 'first' || $semester_param === '1') {
+        $current_semester = 1;
+    } elseif ($semester_param === 'second' || $semester_param === '2') {
+        $current_semester = 2;
+    }
+}
+
 $success_message = '';
 $error_message = '';
 $generation_results = null;
@@ -64,10 +87,20 @@ $generation_results = null;
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? null;
     if ($action === 'generate_lecture_timetable') {
-        // Read timetable name and semester from user input (original interface)
-        $timetable_name = trim($_POST['timetable_name'] ?? '');
+        // Read semester from user input
         $semester = trim($_POST['semester'] ?? '');
         $stream_id = $current_stream_id; // Use currently active stream
+        
+        // Convert semester to integer for genetic algorithm
+        $semester_int = 0;
+        if ($semester === '1' || strtolower($semester) === 'first' || strtolower($semester) === 'semester 1') {
+            $semester_int = 1;
+        } elseif ($semester === '2' || strtolower($semester) === 'second' || strtolower($semester) === 'semester 2') {
+            $semester_int = 2;
+        }
+        
+        // Update current semester for display
+        $current_semester = $semester_int;
         
         // GA parameters (with sensible defaults - hidden from user)
         $population_size = 100;
@@ -76,45 +109,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $crossover_rate = 0.8;
         $max_runtime = 300;
 
-        // Normalize academic_year to match DB width and expected format (e.g. "2024/2025").
-        // If the user provided a longer descriptive name in the Timetable Name field,
-        // extract a YYYY/YYYY fragment or truncate to the 9-char DB column limit.
-        $normalizeAcademicYear = function($input) {
-            $s = trim((string)$input);
-            if ($s === '') return $s;
-            // Prefer explicit 4-digit/4-digit formats like 2024/2025
-            if (preg_match('/(\d{4}\/\d{4})/', $s, $m)) {
-                return $m[1];
-            }
-            // Accept 4-digit-4-digit variants and normalize to slash
-            if (preg_match('/(\d{4}[-]\d{4})/', $s, $m)) {
-                return str_replace('-', '/', $m[1]);
-            }
-            // Accept shortened second year like 2024/25 -> expand if possible
-            if (preg_match('/(\d{4}\/\d{2})/', $s, $m)) {
-                $parts = explode('/', $m[1]);
-                $start = $parts[0];
-                $end = $parts[1];
-                if (strlen($end) === 2) {
-                    $century = substr($start, 0, 2);
-                    $end = $century . $end;
-                }
-                return $start . '/' . $end;
-            }
-            // Fallback: take the first whitespace-separated token and truncate to 9 chars
-            $parts = preg_split('/\s+/', $s);
-            $tok = $parts[0] ?? $s;
-            if (strlen($tok) > 9) $tok = substr($tok, 0, 9);
-            return $tok;
-        };
-
-        $academic_year = $normalizeAcademicYear($timetable_name);
-        if ($academic_year === '' || $semester === '') {
-            $error_message = 'Please specify timetable name and semester before generating the timetable.';
+        if ($semester === '' || $semester_int === 0) {
+            $error_message = 'Please specify semester (1 or 2) before generating the timetable.';
         } else {
             try {
                 // Clear existing timetable for this period
-                clearExistingTimetable($conn, $academic_year, $semester, $stream_id);
+                clearExistingTimetable($conn, $semester_int, $stream_id);
                 
                 // Initialize genetic algorithm
                 $gaOptions = [
@@ -124,8 +124,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'crossover_rate' => $crossover_rate,
                     'max_runtime' => $max_runtime,
                     'stream_id' => $stream_id,
-                    'academic_year' => $academic_year,
-                    'semester' => $semester
+                    'semester' => $semester_int
                 ];
                 
                 $ga = new GeneticAlgorithm($conn, $gaOptions);
@@ -159,7 +158,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if ($inserted_count > 0) {
                         $msg = "Timetable generated successfully! $inserted_count entries created.";
                         if (function_exists('redirect_with_flash')) {
-                            redirect_with_flash('generate_timetable.php', 'success', $msg);
+                            // Redirect with parameters so the page shows the correct data
+                            $redirect_url = 'generate_timetable.php?semester=' . $semester_int;
+                            redirect_with_flash($redirect_url, 'success', $msg);
                         } else {
                             $success_message = $msg;
                         }
@@ -183,7 +184,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 // Helper functions
-function clearExistingTimetable($conn, $academic_year, $semester, $stream_id) {
+function clearExistingTimetable($conn, $semester, $stream_id) {
     // Check if timetable table has the new schema
     $has_class_course = $conn->query("SHOW COLUMNS FROM timetable LIKE 'class_course_id'")->num_rows > 0;
     
@@ -192,18 +193,18 @@ function clearExistingTimetable($conn, $academic_year, $semester, $stream_id) {
         $sql = "DELETE t FROM timetable t 
                 JOIN class_courses cc ON t.class_course_id = cc.id 
                 JOIN classes c ON cc.class_id = c.id 
-                WHERE t.academic_year = ? AND t.semester = ? AND c.stream_id = ?";
+                WHERE t.semester = ? AND c.stream_id = ?";
         $stmt = $conn->prepare($sql);
-        $stmt->bind_param("ssi", $academic_year, $semester, $stream_id);
+        $stmt->bind_param("si", $semester, $stream_id);
         $stmt->execute();
         $stmt->close();
     } else {
         // Old schema: clear via class_id -> classes -> stream
         $sql = "DELETE t FROM timetable t 
                 JOIN classes c ON t.class_id = c.id 
-                WHERE t.academic_year = ? AND t.semester = ? AND c.stream_id = ?";
+                WHERE t.semester = ? AND c.stream_id = ?";
         $stmt = $conn->prepare($sql);
-        $stmt->bind_param("ssi", $academic_year, $semester, $stream_id);
+        $stmt->bind_param("si", $semester, $stream_id);
         $stmt->execute();
         $stmt->close();
     }
@@ -217,20 +218,19 @@ function insertTimetableEntries($conn, $entries) {
     $inserted_count = 0;
     
     foreach ($entries as $entry) {
-        $sql = "INSERT INTO timetable (class_course_id, lecturer_course_id, day_id, time_slot_id, room_id, division_label, semester, academic_year) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+        $sql = "INSERT INTO timetable (class_course_id, lecturer_course_id, day_id, time_slot_id, room_id, division_label, semester) 
+                VALUES (?, ?, ?, ?, ?, ?, ?)";
         
         $stmt = $conn->prepare($sql);
         if ($stmt) {
-            $stmt->bind_param("iiiiisss", 
+            $stmt->bind_param("iiiiiss", 
                 $entry['class_course_id'],
                 $entry['lecturer_course_id'],
                 $entry['day_id'],
                 $entry['time_slot_id'],
                 $entry['room_id'],
                 $entry['division_label'],
-                $entry['semester'],
-                $entry['academic_year']
+                $entry['semester']
             );
             
             if ($stmt->execute()) {
@@ -241,6 +241,35 @@ function insertTimetableEntries($conn, $entries) {
     }
     
     return $inserted_count;
+}
+
+/**
+ * Format time to HH:MM format for display
+ * @param string $time Time string in HH:MM:SS or HH:MM format
+ * @return string Formatted time in HH:MM
+ */
+function formatTimeForDisplay($time) {
+    if (empty($time)) {
+        return '';
+    }
+    // Remove seconds if present and return HH:MM format
+    return substr($time, 0, 5);
+}
+
+/**
+ * Format time to HH:MM:SS format for database storage
+ * @param string $time Time string in HH:MM or HH:MM:SS format
+ * @return string Formatted time in HH:MM:SS
+ */
+function formatTimeForDatabase($time) {
+    if (empty($time)) {
+        return '';
+    }
+    // Ensure HH:MM:SS format
+    if (strlen($time) === 5) {
+        return $time . ':00';
+    }
+    return $time;
 }
 
 // Get statistics
@@ -338,11 +367,10 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                             
                             <div class="d-flex flex-column gap-3">
                                 <div class="d-flex gap-2 align-items-center">
-                                    <input type="text" name="timetable_name" class="form-control form-control-sm" placeholder="Timetable name e.g. 2024/2025 First Semester" required style="max-width:300px">
                                     <select name="semester" class="form-select form-select-sm" required style="max-width:140px">
                                         <option value="">Semester</option>
-                                        <option value="first">First</option>
-                                        <option value="second">Second</option>
+                                        <option value="first" <?php echo $current_semester == 1 ? 'selected' : ''; ?>>First</option>
+                                        <option value="second" <?php echo $current_semester == 2 ? 'selected' : ''; ?>>Second</option>
                                     </select>
                                 </div>
                                 <div class="d-flex gap-2 align-items-center">
@@ -372,29 +400,6 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                             <a href="class_courses.php" class="btn btn-outline-primary"><i class="fas fa-link me-2"></i>Manage Assignments</a>
                             <a href="view_timetable.php" class="btn btn-success"><i class="fas fa-eye me-2"></i>View Timetable</a>
                             <a href="export_timetable.php" class="btn btn-outline-info"><i class="fas fa-download me-2"></i>Export Timetable</a>
-                        </div>
-                        
-                        <hr>
-                        
-                        <h6 class="mb-3">System Statistics</h6>
-                        <div class="mb-3">
-                            <strong>Total Assignments:</strong>
-                            <span class="badge bg-primary"><?php echo $total_assignments; ?></span>
-                        </div>
-                        
-                        <div class="mb-3">
-                            <strong>Timetable Entries:</strong>
-                            <span class="badge bg-success"><?php echo $total_timetable_entries; ?></span>
-                        </div>
-                        
-                        <div class="mb-3">
-                            <strong>Classes:</strong>
-                            <span class="badge bg-info"><?php echo $total_classes; ?></span>
-                        </div>
-                        
-                        <div class="mb-3">
-                            <strong>Courses:</strong>
-                            <span class="badge bg-warning"><?php echo $total_courses; ?></span>
                         </div>
                     </div>
                 </div>
@@ -853,6 +858,132 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
         while ($room = $rooms_result->fetch_assoc()) {
             $template_rooms[] = $room;
         }
+
+        // Fetch all available rooms for the edit modal
+        $all_rooms = [];
+        $rooms_query = "SELECT id, name, capacity, room_type FROM rooms WHERE is_active = 1 ORDER BY name";
+        $rooms_result = $conn->query($rooms_query);
+        if ($rooms_result) {
+            while ($room = $rooms_result->fetch_assoc()) {
+                $all_rooms[] = $room;
+            }
+        }
+
+        // Fetch actual timetable data for the current stream and semester
+        $timetable_data = [];
+        $course_spans = []; // Track which cells should be spanned
+        
+        // Debug: Check what values we're using
+        $debug_info = "Debug: stream_id=$current_stream_id, semester=$current_semester";
+        
+        if (!empty($current_stream_id) && !empty($current_semester)) {
+            $timetable_query = "
+                SELECT 
+                    t.id,
+                    t.day_id,
+                    t.time_slot_id,
+                    t.room_id,
+                    t.class_course_id,
+                    t.lecturer_course_id,
+                    t.division_label,
+                    t.semester,
+                    t.academic_year,
+                    d.name as day_name,
+                    d.id as day_id,
+                    ts.start_time,
+                    ts.end_time,
+                    ts.id as time_slot_id,
+                    r.name as room_name,
+                    r.id as room_id,
+                    r.capacity,
+                    c.name as class_name,
+                    c.id as class_id,
+                    co.code as course_code,
+                    co.name as course_name,
+                    co.id as course_id,
+                    co.hours_per_week,
+                    l.name as lecturer_name,
+                    l.id as lecturer_id,
+                    s.name as stream_name,
+                    s.id as stream_id
+                FROM timetable t
+                JOIN class_courses cc ON t.class_course_id = cc.id
+                JOIN classes c ON cc.class_id = c.id
+                JOIN courses co ON cc.course_id = co.id
+                JOIN streams s ON c.stream_id = s.id
+                JOIN days d ON t.day_id = d.id
+                JOIN time_slots ts ON t.time_slot_id = ts.id
+                JOIN rooms r ON t.room_id = r.id
+                LEFT JOIN lecturer_courses lc ON t.lecturer_course_id = lc.id
+                LEFT JOIN lecturers l ON lc.lecturer_id = l.id
+                WHERE c.stream_id = ? 
+                AND t.semester = ?
+                ORDER BY d.id, ts.start_time, r.name
+            ";
+
+            $timetable_stmt = $conn->prepare($timetable_query);
+            $timetable_stmt->bind_param("ii", $current_stream_id, $current_semester);
+            $timetable_stmt->execute();
+            $timetable_result = $timetable_stmt->get_result();
+
+            // Group entries by class_course_id to handle multi-hour courses
+            $grouped_entries = [];
+            while ($row = $timetable_result->fetch_assoc()) {
+                $class_course_id = $row['class_course_id'];
+                if (!isset($grouped_entries[$class_course_id])) {
+                    $grouped_entries[$class_course_id] = [];
+                }
+                $grouped_entries[$class_course_id][] = $row;
+            }
+
+            // Process grouped entries to create proper spans
+            foreach ($grouped_entries as $class_course_id => $entries) {
+                if (empty($entries)) continue;
+                
+                // Sort entries by time_slot_id to ensure proper order
+                usort($entries, function($a, $b) {
+                    return $a['time_slot_id'] - $b['time_slot_id'];
+                });
+                
+                $first_entry = $entries[0];
+                $course_duration = $first_entry['hours_per_week'] ?? 1;
+                $day_id = $first_entry['day_id'];
+                $room_id = $first_entry['room_id'];
+                $start_time_slot_id = $first_entry['time_slot_id'];
+                
+                // Store the main entry (first slot)
+                $timetable_data[$day_id][$start_time_slot_id][$room_id] = [
+                    'id' => $first_entry['id'],
+                    'class_name' => $first_entry['class_name'],
+                    'course_code' => $first_entry['course_code'],
+                    'course_name' => $first_entry['course_name'],
+                    'lecturer_name' => $first_entry['lecturer_name'],
+                    'division_label' => $first_entry['division_label'],
+                    'hours_per_week' => $course_duration,
+                    'day_id' => $day_id,
+                    'time_slot_id' => $start_time_slot_id,
+                    'room_id' => $room_id,
+                    'is_spanned' => false, // This is the main cell
+                    'span_count' => $course_duration
+                ];
+                
+                // Mark subsequent cells as spanned (they will be hidden)
+                for ($i = 1; $i < $course_duration; $i++) {
+                    $next_time_slot_id = $start_time_slot_id + $i;
+                    if (isset($timetable_data[$day_id][$next_time_slot_id][$room_id])) {
+                        // If there's already an entry here, mark it as spanned
+                        $timetable_data[$day_id][$next_time_slot_id][$room_id]['is_spanned'] = true;
+                    } else {
+                        // Create a placeholder entry to mark as spanned
+                        $timetable_data[$day_id][$next_time_slot_id][$room_id] = [
+                            'is_spanned' => true,
+                            'span_count' => 0
+                        ];
+                    }
+                }
+            }
+            $timetable_stmt->close();
+        }
         ?>
 
         <!-- Timetable Template Preview -->
@@ -862,8 +993,27 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                 <div class="card mt-3">
                     <div class="card-header">
                         <h6 class="mb-0">
-                            <i class="fas fa-table me-2"></i>Timetable Template Preview
-                            <span class="badge bg-info ms-2">Skeleton Structure</span>
+                            <i class="fas fa-table me-2"></i>Timetable Preview
+                            <?php if (!empty($timetable_data)): ?>
+                                <span class="badge bg-success ms-2">Generated Data</span>
+                                <span class="badge bg-primary ms-1"><?php 
+                                    $total_entries = 0;
+                                    if (is_array($timetable_data)) {
+                                        foreach ($timetable_data as $day_data) {
+                                            if (is_array($day_data)) {
+                                                foreach ($day_data as $time_data) {
+                                                    if (is_array($time_data)) {
+                                                        $total_entries += count($time_data);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    echo $total_entries;
+                                ?> Entries</span>
+                            <?php else: ?>
+                                <span class="badge bg-info ms-2">Skeleton Structure</span>
+                            <?php endif; ?>
                         </h6>
                     </div>
                     <div class="card-body">
@@ -871,9 +1021,21 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                         <div class="mb-3">
                             <p class="text-muted">
                                 <i class="fas fa-info-circle me-1"></i>
-                                This template shows the structure that will be used for timetable generation. 
-                                The cells will be filled with class-course assignments when you generate the timetable.
+                                <?php if (!empty($timetable_data)): ?>
+                                    This timetable shows the actual generated data for the selected stream and semester. 
+                                    Blue cells contain scheduled courses with class, course code, and lecturer details.
+                                    <strong>Click on any course block to edit the day, time slot, or room assignment.</strong>
+                                    Course duration is fixed and cannot be changed. Courses will span multiple periods based on their duration (e.g., 3-hour courses span 3 periods).
+                                <?php else: ?>
+                                    This template shows the structure that will be used for timetable generation. 
+                                    The cells will be filled with class-course assignments when you generate the timetable.
+                                <?php endif; ?>
                             </p>
+                            <!-- Debug information -->
+                            <div class="alert alert-info" style="font-size: 0.8em;">
+                                <strong>Debug Info:</strong> <?php echo htmlspecialchars($debug_info); ?><br>
+                                <strong>Data Count:</strong> <?php echo is_array($timetable_data) ? count($timetable_data) : 0; ?> days with data
+                            </div>
                         </div>
                         
                         <?php if (!empty($template_days) && !empty($template_time_slots) && !empty($template_rooms)): ?>
@@ -913,7 +1075,7 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                                                         <div class="break-info">
                                                             <span class="break-label">Break</span>
                                                             <div class="break-time">
-                                                                <?php echo htmlspecialchars($time_slot['start_time']); ?> - <?php echo htmlspecialchars($time_slot['end_time']); ?>
+                                                                <?php echo htmlspecialchars(formatTimeForDisplay($time_slot['start_time'])); ?> - <?php echo htmlspecialchars(formatTimeForDisplay($time_slot['end_time'])); ?>
                                                             </div>
                                                         </div>
                                                     </th>
@@ -926,7 +1088,7 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                                                 ?>
                                                 <th class="time-period-header text-center" style="min-width: 100px;">
                                                     <div class="period-time">
-                                                        <?php echo htmlspecialchars($time_slot['start_time']); ?>
+                                                        <?php echo htmlspecialchars(formatTimeForDisplay($time_slot['start_time'])); ?>
                                                     </div>
                                                 </th>
                                                 <?php
@@ -994,11 +1156,78 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                                                         }
                                                     } else {
                                                         ?>
-                                                        <td class="template-cell" data-period="<?php echo htmlspecialchars($time_slot['start_time']); ?>" data-room="<?php echo htmlspecialchars($room['name']); ?>" data-day="<?php echo htmlspecialchars($day['name']); ?>">
-                                                            <div class="template-placeholder">
-                                                                <i class="fas fa-plus-circle text-muted"></i>
-                                                                <small class="d-block text-muted">Empty</small>
-                                                            </div>
+                                                        <?php 
+                                                        $day_id = $day['id'];
+                                                        $time_slot_id = $time_slot['id'];
+                                                        $room_id = $room['id'];
+                                                        
+                                                        // Check if this cell should be spanned (hidden)
+                                                        $is_spanned = false;
+                                                        $span_count = 1;
+                                                        $entry = null;
+                                                        
+                                                        if (isset($timetable_data[$day_id][$time_slot_id][$room_id])) {
+                                                            $entry = $timetable_data[$day_id][$time_slot_id][$room_id];
+                                                            $is_spanned = $entry['is_spanned'] ?? false;
+                                                            $span_count = $entry['span_count'] ?? 1;
+                                                        }
+                                                        
+                                                        // Skip rendering if this cell is spanned (will be covered by colspan)
+                                                        if ($is_spanned) {
+                                                            continue;
+                                                        }
+                                                        ?>
+                                                        <td class="template-cell" 
+                                                            data-period="<?php echo htmlspecialchars(formatTimeForDisplay($time_slot['start_time'])); ?>" 
+                                                            data-room="<?php echo htmlspecialchars($room['name']); ?>" 
+                                                            data-day="<?php echo htmlspecialchars($day['name']); ?>"
+                                                            <?php if ($span_count > 1): ?>colspan="<?php echo $span_count; ?>"<?php endif; ?>>
+                                                            <?php 
+                                                            if ($entry) {
+                                                                ?>
+                                                                <div class="course-block editable-course" 
+                                                                     style="background-color: #e3f2fd; border: 2px solid #2196f3; border-radius: 4px; padding: 4px; margin: 2px; height: 100%; display: flex; flex-direction: column; justify-content: center; overflow: hidden; cursor: pointer; min-width: <?php echo $span_count * 100; ?>px;"
+                                                                     data-entry-id="<?php echo $entry['id']; ?>"
+                                                                     data-day-id="<?php echo $entry['day_id']; ?>"
+                                                                     data-time-slot-id="<?php echo $entry['time_slot_id']; ?>"
+                                                                     data-room-id="<?php echo $entry['room_id']; ?>"
+                                                                     data-course-code="<?php echo htmlspecialchars($entry['course_code']); ?>"
+                                                                     data-class-name="<?php echo htmlspecialchars($entry['class_name']); ?>"
+                                                                     data-lecturer-name="<?php echo htmlspecialchars($entry['lecturer_name']); ?>"
+                                                                     data-hours="<?php echo $entry['hours_per_week']; ?>"
+                                                                     onclick="editTimetableCell(this)">
+                                                                    <div class="fw-bold text-primary" style="font-size: 0.8em;">
+                                                                        <?php echo htmlspecialchars($entry['course_code']); ?>
+                                                                        <span class="badge bg-warning ms-1" style="font-size: 0.6em;"><?php echo $entry['hours_per_week']; ?>h</span>
+                                                                        <?php if ($span_count > 1): ?>
+                                                                            <span class="badge bg-info ms-1" style="font-size: 0.6em;">Spans <?php echo $span_count; ?> periods</span>
+                                                                        <?php endif; ?>
+                                                                    </div>
+                                                                    <div style="font-size: 0.7em;">
+                                                                        <strong>Class:</strong> <?php 
+                                                                            $display_class_name = htmlspecialchars($entry['class_name']);
+                                                                            if (!empty($entry['division_label'])) {
+                                                                                $display_class_name .= ' ' . htmlspecialchars($entry['division_label']);
+                                                                            }
+                                                                            echo $display_class_name;
+                                                                        ?>
+                                                                    </div>
+                                                                    <?php if ($entry['lecturer_name']): ?>
+                                                                        <div style="font-size: 0.7em;">
+                                                                            <strong>Lecturer:</strong> <?php echo htmlspecialchars($entry['lecturer_name']); ?>
+                                                                        </div>
+                                                                    <?php endif; ?>
+                                                                </div>
+                                                                <?php
+                                                            } else {
+                                                                ?>
+                                                                <div class="template-placeholder">
+                                                                    <i class="fas fa-plus-circle text-muted"></i>
+                                                                    <small class="d-block text-muted">Empty</small>
+                                                                </div>
+                                                                <?php
+                                                            }
+                                                            ?>
                                                         </td>
                                                         <?php
                                                     }
@@ -1049,9 +1278,9 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                                         $break_end = $stream_period_info_row['break_end'];
                                         
                                         if (!empty($period_start) && !empty($period_end)) {
-                                            echo "Stream period range: " . htmlspecialchars($period_start) . " - " . htmlspecialchars($period_end);
+                                            echo "Stream period range: " . htmlspecialchars(formatTimeForDisplay($period_start)) . " - " . htmlspecialchars(formatTimeForDisplay($period_end));
                                             if (!empty($break_start) && !empty($break_end)) {
-                                                echo ". Break period: " . htmlspecialchars($break_start) . " - " . htmlspecialchars($break_end);
+                                                echo ". Break period: " . htmlspecialchars(formatTimeForDisplay($break_start)) . " - " . htmlspecialchars(formatTimeForDisplay($break_end));
                                             }
                                             echo ". ";
                                         } else {
@@ -1065,8 +1294,9 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                                     echo "Default period range: 07:00 - 20:00 (13 hours). Break periods: 12:00-13:00 and 15:00-16:00. ";
                                 }
                                 ?>
-                                During generation, courses will span multiple periods based on their duration. 
-                                For example, a 3-hour course will occupy 3 consecutive time slots.
+                                <strong>NEW:</strong> Courses now properly span multiple periods based on their duration. 
+                                A 3-hour course will visually span 3 consecutive time slots using colspan. 
+                                Time display has been improved to show HH:MM format only.
                             </small>
                         </div>
                         
@@ -1097,7 +1327,7 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                                                     $period_end = $stream_period_count_row['period_end'];
                                                     
                                                     if (!empty($period_start) && !empty($period_end)) {
-                                                        echo "Stream periods: " . htmlspecialchars($period_start) . " - " . htmlspecialchars($period_end);
+                                                        echo "Stream periods: " . htmlspecialchars(formatTimeForDisplay($period_start)) . " - " . htmlspecialchars(formatTimeForDisplay($period_end));
                                                     } else {
                                                         echo count($template_time_slots) . " periods available";
                                                     }
@@ -1514,14 +1744,86 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
         font-size: 1.2rem;
     }
 }
+
+/* Editable course blocks */
+.editable-course {
+    transition: all 0.2s ease;
+    position: relative;
+}
+
+.editable-course:hover {
+    transform: scale(1.02);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+    z-index: 10;
+}
+
+.editable-course::after {
+    content: "Click to edit";
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    background: rgba(0,0,0,0.7);
+    color: white;
+    font-size: 0.6em;
+    padding: 1px 3px;
+    border-radius: 2px;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+
+.editable-course:hover::after {
+    opacity: 1;
+}
+
+/* Duration badge styling */
+.course-block .badge {
+    font-size: 0.6em;
+    padding: 0.2em 0.4em;
+}
+
+/* Spanned course styling */
+.template-cell[colspan] {
+    background-color: #f8f9fa;
+    border: 2px solid #dee2e6;
+}
+
+.template-cell[colspan] .course-block {
+    border-left: 4px solid #28a745;
+    border-right: 4px solid #28a745;
+}
+
+/* Multi-period course indicators */
+.course-block .badge.bg-info {
+    background-color: #17a2b8 !important;
+    color: white;
+}
+
+/* Responsive adjustments for spanned courses */
+@media (max-width: 768px) {
+    .template-cell[colspan] .course-block {
+        min-width: auto !important;
+        font-size: 0.7em;
+    }
+    
+    .course-block .badge {
+        font-size: 0.5em;
+        padding: 0.1em 0.3em;
+    }
+}
 </style>
 
 <script>
+// Available rooms data for the edit modal
+const availableRooms = <?php echo json_encode($all_rooms); ?>;
+
 // Global variables for Option 2 implementation
 let generatedTimetableData = null;
 let currentGenerationParams = null;
 
 document.addEventListener('DOMContentLoaded', function () {
+    // Debug: Log available rooms
+    console.log('Available rooms for edit modal:', availableRooms);
+    
     try {
         var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
         tooltipTriggerList.forEach(function (tooltipTriggerEl) {
@@ -1599,7 +1901,7 @@ function displayTimetablePreview(timetableData) {
         html += `
             <tr>
                 <td>${entry.day_name}</td>
-                <td>${entry.class_name}</td>
+                <td>${entry.class_name}${entry.division_label ? ' ' + entry.division_label : ''}</td>
                 <td><strong>${entry.course_code}</strong> - ${entry.course_name}</td>
                 <td>${entry.lecturer_name}</td>
                 <td>${entry.room_name}</td>
@@ -1648,7 +1950,7 @@ function showDetailedTimetableEditor() {
                         <option value="Friday" ${entry.day_name === 'Friday' ? 'selected' : ''}>Friday</option>
                     </select>
                 </td>
-                <td>${entry.class_name}</td>
+                <td>${entry.class_name}${entry.division_label ? ' ' + entry.division_label : ''}</td>
                 <td><strong>${entry.course_code}</strong> - ${entry.course_name}</td>
                 <td>${entry.lecturer_name}</td>
                 <td>
@@ -1860,5 +2162,186 @@ function showErrorMessage(message) {
             alertDiv.remove();
         }
     }, 8000);
+}
+
+// Edit timetable cell function
+function editTimetableCell(element) {
+    const entryId = element.dataset.entryId;
+    const dayId = element.dataset.dayId;
+    const timeSlotId = element.dataset.timeSlotId;
+    const roomId = element.dataset.roomId;
+    const courseCode = element.dataset.courseCode;
+    const className = element.dataset.className;
+    const lecturerName = element.dataset.lecturerName;
+    const hours = element.dataset.hours;
+    
+    // Show edit modal
+    showEditModal(entryId, dayId, timeSlotId, roomId, courseCode, className, lecturerName, hours);
+}
+
+// Generate room options for the edit modal
+function generateRoomOptions(selectedRoomId) {
+    let options = '';
+    
+    if (!availableRooms || availableRooms.length === 0) {
+        options = '<option value="">No rooms available</option>';
+        return options;
+    }
+    
+    availableRooms.forEach(room => {
+        const selected = room.id == selectedRoomId ? 'selected' : '';
+        const roomTypeDisplay = room.room_type.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
+        options += `<option value="${room.id}" ${selected}>${room.name} (${room.capacity} seats, ${roomTypeDisplay})</option>`;
+    });
+    return options;
+}
+
+// Show edit modal
+function showEditModal(entryId, dayId, timeSlotId, roomId, courseCode, className, lecturerName, hours) {
+    // Create modal HTML
+    const modalHtml = `
+        <div class="modal fade" id="editTimetableModal" tabindex="-1" aria-labelledby="editTimetableModalLabel" aria-hidden="true">
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="editTimetableModalLabel">
+                            <i class="fas fa-edit me-2"></i>Edit Course Schedule
+                        </h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <form id="editTimetableForm">
+                            <input type="hidden" id="edit_entry_id" name="entry_id" value="${entryId}">
+                            
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="edit_day" class="form-label">Day</label>
+                                        <select class="form-select" id="edit_day" name="day_id" required>
+                                            <option value="">Select Day</option>
+                                            <option value="1" ${dayId == 1 ? 'selected' : ''}>Monday</option>
+                                            <option value="2" ${dayId == 2 ? 'selected' : ''}>Tuesday</option>
+                                            <option value="3" ${dayId == 3 ? 'selected' : ''}>Wednesday</option>
+                                            <option value="4" ${dayId == 4 ? 'selected' : ''}>Thursday</option>
+                                            <option value="5" ${dayId == 5 ? 'selected' : ''}>Friday</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="edit_time_slot" class="form-label">Time Slot</label>
+                                        <select class="form-select" id="edit_time_slot" name="time_slot_id" required>
+                                            <option value="">Select Time Slot</option>
+                                            <option value="1" ${timeSlotId == 1 ? 'selected' : ''}>08:00 - 09:00</option>
+                                            <option value="2" ${timeSlotId == 2 ? 'selected' : ''}>09:00 - 10:00</option>
+                                            <option value="3" ${timeSlotId == 3 ? 'selected' : ''}>10:00 - 11:00</option>
+                                            <option value="4" ${timeSlotId == 4 ? 'selected' : ''}>11:00 - 12:00</option>
+                                            <option value="5" ${timeSlotId == 5 ? 'selected' : ''}>13:00 - 14:00</option>
+                                            <option value="6" ${timeSlotId == 6 ? 'selected' : ''}>14:00 - 15:00</option>
+                                            <option value="7" ${timeSlotId == 7 ? 'selected' : ''}>15:00 - 16:00</option>
+                                            <option value="8" ${timeSlotId == 8 ? 'selected' : ''}>16:00 - 17:00</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="edit_room" class="form-label">Room</label>
+                                        <select class="form-select" id="edit_room" name="room_id" required>
+                                            <option value="">Select Room</option>
+                                            ${generateRoomOptions(roomId)}
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label class="form-label">Course Duration (Read-only)</label>
+                                        <input type="text" class="form-control" value="${hours} Hour(s)" readonly style="background-color: #f8f9fa;">
+                                        <input type="hidden" id="edit_hours" name="hours_per_week" value="${hours}">
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label class="form-label">Current Information</label>
+                                <div class="alert alert-info">
+                                    <strong>Course:</strong> ${courseCode}<br>
+                                    <strong>Class:</strong> ${className}<br>
+                                    <strong>Lecturer:</strong> ${lecturerName || 'Not assigned'}<br>
+                                    <strong>Duration:</strong> ${hours} hour(s)
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="button" class="btn btn-primary" onclick="saveTimetableEdit()">
+                            <i class="fas fa-save me-1"></i>Save Changes
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Remove existing modal if any
+    const existingModal = document.getElementById('editTimetableModal');
+    if (existingModal) {
+        existingModal.remove();
+    }
+    
+    // Add modal to body
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    
+    // Show modal
+    const modal = new bootstrap.Modal(document.getElementById('editTimetableModal'));
+    modal.show();
+}
+
+// Save timetable edit
+function saveTimetableEdit() {
+    const form = document.getElementById('editTimetableForm');
+    const formData = new FormData(form);
+    
+    // Add action
+    formData.append('action', 'update_timetable_entry');
+    
+    // Show loading state
+    const saveBtn = document.querySelector('#editTimetableModal .btn-primary');
+    const originalText = saveBtn.innerHTML;
+    saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Saving...';
+    saveBtn.disabled = true;
+    
+    // Send AJAX request
+    fetch('api_timetable_edit.php', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showSuccessMessage('Timetable entry updated successfully!');
+            // Close modal
+            const modal = bootstrap.Modal.getInstance(document.getElementById('editTimetableModal'));
+            modal.hide();
+            // Reload page to show updated data
+            setTimeout(() => {
+                location.reload();
+            }, 1000);
+        } else {
+            showErrorMessage('Failed to update timetable entry: ' + data.message);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        showErrorMessage('Error updating timetable entry. Please try again.');
+    })
+    .finally(() => {
+        // Restore button state
+        saveBtn.innerHTML = originalText;
+        saveBtn.disabled = false;
+    });
 }
 </script>
