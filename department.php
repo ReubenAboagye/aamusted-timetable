@@ -46,24 +46,70 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($import_data) {
             $success_count = 0;
             $error_count = 0;
-            foreach ($import_data as $row) {
-                if (!empty($row['valid'])) {
-                    $name = $conn->real_escape_string($row['name']);
-                    $code = $conn->real_escape_string($row['code']);
-                    $description = isset($row['description']) ? $conn->real_escape_string($row['description']) : '';
-                    $is_active = isset($row['is_active']) ? (int)$row['is_active'] : 1;
-
-                    $sql = "INSERT INTO departments (name, code, description, is_active) VALUES (?, ?, ?, ?)";
-                    $stmt = $conn->prepare($sql);
-                    $stmt->bind_param("sssi", $name, $code, $description, $is_active);
-
-                    if ($stmt->execute()) {
-                        $success_count++;
-                    } else {
-                        $error_count++;
-                    }
-                    $stmt->close();
+            // Build a set of existing department codes (uppercase) to skip duplicates quickly
+            $existing_codes = [];
+            $rs = $conn->query("SELECT code FROM departments");
+            if ($rs) {
+                while ($r = $rs->fetch_assoc()) {
+                    $existing_codes[strtoupper(trim($r['code']))] = true;
                 }
+                $rs->close();
+            }
+
+            // Track codes seen in this CSV to avoid inserting the same code twice
+            $seen_codes = [];
+
+            foreach ($import_data as $index => $row) {
+                if (empty($row['valid'])) {
+                    continue;
+                }
+
+                // Normalize and validate fields
+                $raw_name = trim($row['name']);
+                $raw_code = strtoupper(trim($row['code']));
+                $raw_description = isset($row['description']) ? trim($row['description']) : '';
+                $is_active = isset($row['is_active']) ? (int)$row['is_active'] : 1;
+
+                // Skip empty code or name just in case
+                if ($raw_name === '' || $raw_code === '') {
+                    $error_count++;
+                    logError("Skipping row due to missing name/code", ['row_index' => $index, 'row' => $row]);
+                    continue;
+                }
+
+                // Check duplicates: existing DB and within-file duplicates
+                if (isset($existing_codes[$raw_code])) {
+                    $error_count++;
+                    logError("Skipping duplicate department code (already in DB)", ['row_index' => $index, 'code' => $raw_code]);
+                    continue;
+                }
+
+                if (isset($seen_codes[$raw_code])) {
+                    $error_count++;
+                    logError("Skipping duplicate department code (duplicate in CSV)", ['row_index' => $index, 'code' => $raw_code]);
+                    continue;
+                }
+
+                // Prepare insert
+                $name = $conn->real_escape_string($raw_name);
+                $code = $conn->real_escape_string($raw_code);
+                $description = $conn->real_escape_string($raw_description);
+
+                $sql = "INSERT INTO departments (name, code, description, is_active) VALUES (?, ?, ?, ?)";
+                $stmt = $conn->prepare($sql);
+                $stmt->bind_param("sssi", $name, $code, $description, $is_active);
+
+                if ($stmt->execute()) {
+                    $success_count++;
+                    // mark code as present to prevent subsequent duplicates
+                    $seen_codes[$raw_code] = true;
+                    $existing_codes[$raw_code] = true;
+                } else {
+                    $error_count++;
+                    logError("Failed to insert department during bulk import", ['row_index' => $index, 'code' => $raw_code, 'error' => $conn->error]);
+                }
+
+                $stmt->close();
             }
             if ($success_count > 0) {
                 $msg = "Successfully imported $success_count departments!";
@@ -113,7 +159,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         } else {
             $check_stmt->close();
 
-            $sql = "INSERT INTO departments (name, code, description, is_active) VALUES (?, ?, ?, ?)";
+            // Ensure stream_id is NULL to avoid FK violations when no stream is selected
+            $sql = "INSERT INTO departments (name, code, description, is_active, stream_id) VALUES (?, ?, ?, ?, NULL)";
             $stmt = $conn->prepare($sql);
             $stmt->bind_param("sssi", $name, $code, $description, $is_active);
 
