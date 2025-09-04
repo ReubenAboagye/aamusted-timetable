@@ -1,4 +1,9 @@
 <?php
+// Set higher limits for genetic algorithm processing
+ini_set('max_execution_time', 300); // 5 minutes
+ini_set('memory_limit', '512M');    // 512MB memory limit
+set_time_limit(300);                // Alternative way to set execution time
+
 include 'connect.php';
 // Ensure flash helper is available for PRG redirects
 if (file_exists(__DIR__ . '/includes/flash.php')) include_once __DIR__ . '/includes/flash.php';
@@ -149,8 +154,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'statistics' => $results['statistics']
                     ];
                     
+                    // Validate solution for duplicates before conversion
+                    $duplicateCheck = validateSolutionForDuplicates($results['solution']);
+                    if (!empty($duplicateCheck['duplicates'])) {
+                        error_log("Duplicate entries found in GA solution: " . implode(', ', $duplicateCheck['duplicates']));
+                        // Log the problematic entries for debugging
+                        foreach ($duplicateCheck['duplicate_entries'] as $entry) {
+                            error_log("Duplicate entry: " . json_encode($entry));
+                        }
+                    }
+                    
                     // Convert solution to database format
                     $timetableEntries = $ga->convertToDatabaseFormat($results['solution']);
+                    
+                    // Additional validation after conversion
+                    $convertedDuplicates = validateTimetableEntries($timetableEntries);
+                    if (!empty($convertedDuplicates)) {
+                        error_log("Duplicates found after conversion: " . implode(', ', $convertedDuplicates));
+                    }
                     
                     // Insert into database
                     $inserted_count = insertTimetableEntries($conn, $timetableEntries);
@@ -198,6 +219,13 @@ function clearExistingTimetable($conn, $semester, $stream_id) {
         $stmt->bind_param("si", $semester, $stream_id);
         $stmt->execute();
         $stmt->close();
+        
+        // Also clear any entries with the same semester to be safe
+        $sql = "DELETE FROM timetable WHERE semester = ?";
+        $stmt = $conn->prepare($sql);
+        $stmt->bind_param("s", $semester);
+        $stmt->execute();
+        $stmt->close();
     } else {
         // Old schema: clear via class_id -> classes -> stream
         $sql = "DELETE t FROM timetable t 
@@ -205,6 +233,13 @@ function clearExistingTimetable($conn, $semester, $stream_id) {
                 WHERE t.semester = ? AND c.stream_id = ?";
         $stmt = $conn->prepare($sql);
         $stmt->bind_param("si", $semester, $stream_id);
+        $stmt->execute();
+        $stmt->close();
+        
+        // Also clear any entries with the same semester to be safe
+        $sql = "DELETE FROM timetable WHERE semester = ?";
+        $stmt = $conn->prepare($sql);
+        $stmt->bind_param("s", $semester);
         $stmt->execute();
         $stmt->close();
     }
@@ -215,9 +250,31 @@ function insertTimetableEntries($conn, $entries) {
         return 0;
     }
     
-    $inserted_count = 0;
+    // Pre-filter duplicates before database insertion
+    $uniqueEntries = [];
+    $duplicateKeys = [];
+    $entryKeys = [];
     
     foreach ($entries as $entry) {
+        $key = $entry['class_course_id'] . '-' . $entry['day_id'] . '-' . $entry['time_slot_id'] . '-' . $entry['division_label'];
+        
+        if (!isset($entryKeys[$key])) {
+            $entryKeys[$key] = true;
+            $uniqueEntries[] = $entry;
+        } else {
+            $duplicateKeys[] = $key;
+            error_log("Pre-insertion duplicate detected: " . $key . " for entry: " . json_encode($entry));
+        }
+    }
+    
+    if (!empty($duplicateKeys)) {
+        error_log("Removed " . count($duplicateKeys) . " duplicate entries before database insertion");
+    }
+    
+    $inserted_count = 0;
+    $db_duplicate_keys = []; // Track duplicate keys for debugging
+    
+    foreach ($uniqueEntries as $entry) {
         $sql = "INSERT INTO timetable (class_course_id, lecturer_course_id, day_id, time_slot_id, room_id, division_label, semester) 
                 VALUES (?, ?, ?, ?, ?, ?, ?)";
         
@@ -235,12 +292,81 @@ function insertTimetableEntries($conn, $entries) {
             
             if ($stmt->execute()) {
                 $inserted_count++;
+            } else {
+                // Check if it's a duplicate key error
+                if ($stmt->errno == 1062) { // MySQL duplicate key error
+                    $duplicate_key = $entry['class_course_id'] . '-' . $entry['day_id'] . '-' . $entry['time_slot_id'] . '-' . $entry['division_label'];
+                    $db_duplicate_keys[] = $duplicate_key;
+                    
+                    // Log the duplicate for debugging
+                    error_log("Database duplicate key error: " . $duplicate_key . " for entry: " . json_encode($entry));
+                } else {
+                    error_log("Database insertion error: " . $stmt->error . " for entry: " . json_encode($entry));
+                }
             }
             $stmt->close();
+        } else {
+            error_log("Failed to prepare statement for entry: " . json_encode($entry));
         }
     }
     
+    // If we had duplicates, log them
+    if (!empty($db_duplicate_keys)) {
+        error_log("Database duplicate keys found: " . implode(', ', $db_duplicate_keys));
+    }
+    
+    error_log("Successfully inserted " . $inserted_count . " out of " . count($uniqueEntries) . " unique entries");
+    
     return $inserted_count;
+}
+
+/**
+ * Validate GA solution for duplicate entries
+ */
+function validateSolutionForDuplicates($solution) {
+    $duplicates = [];
+    $duplicateEntries = [];
+    $seenKeys = [];
+    
+    if (!isset($solution['individual']) || !is_array($solution['individual'])) {
+        return ['duplicates' => [], 'duplicate_entries' => []];
+    }
+    
+    foreach ($solution['individual'] as $geneKey => $gene) {
+        $key = $gene['class_course_id'] . '|' . $gene['day_id'] . '|' . $gene['time_slot_id'];
+        
+        if (isset($seenKeys[$key])) {
+            $duplicates[] = $key;
+            $duplicateEntries[] = $gene;
+        } else {
+            $seenKeys[$key] = true;
+        }
+    }
+    
+    return [
+        'duplicates' => $duplicates,
+        'duplicate_entries' => $duplicateEntries
+    ];
+}
+
+/**
+ * Validate timetable entries for duplicates
+ */
+function validateTimetableEntries($entries) {
+    $duplicates = [];
+    $seenKeys = [];
+    
+    foreach ($entries as $entry) {
+        $key = $entry['class_course_id'] . '-' . $entry['day_id'] . '-' . $entry['time_slot_id'] . '-' . $entry['division_label'];
+        
+        if (isset($seenKeys[$key])) {
+            $duplicates[] = $key;
+        } else {
+            $seenKeys[$key] = true;
+        }
+    }
+    
+    return $duplicates;
 }
 
 /**
