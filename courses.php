@@ -110,6 +110,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
         }
+    } elseif ($_POST['action'] === 'edit' && isset($_POST['id'])) {
+        // Handle editing an existing course
+        $id = isset($_POST['id']) ? (int)$_POST['id'] : null;
+        $course_name = $conn->real_escape_string($_POST['course_name'] ?? '');
+        $course_code = $conn->real_escape_string($_POST['course_code'] ?? '');
+        $department_id = isset($_POST['department_id']) && $_POST['department_id'] !== '' ? (int)$_POST['department_id'] : null;
+        $hours_per_week = isset($_POST['hours_per_week']) ? (int)$_POST['hours_per_week'] : 3;
+        $is_active = isset($_POST['is_active']) ? 1 : 0;
+
+        $sql = "UPDATE courses SET name = ?, code = ?, department_id = ?, hours_per_week = ?, is_active = ?, updated_at = NOW() WHERE id = ?";
+        $stmt = $conn->prepare($sql);
+        if ($stmt) {
+            $stmt->bind_param("ssiiii", $course_name, $course_code, $department_id, $hours_per_week, $is_active, $id);
+            if ($stmt->execute()) {
+                $stmt->close();
+                redirect_with_flash('courses.php', 'success', 'Course updated successfully!');
+            } else {
+                $error_message = "Error updating course: " . $conn->error;
+            }
+            $stmt->close();
+        } else {
+            $error_message = "Error preparing update statement: " . $conn->error;
+        }
     } elseif ($_POST['action'] === 'delete' && isset($_POST['id'])) {
         $id = $conn->real_escape_string($_POST['id']);
         $sql = "UPDATE courses SET is_active = 0 WHERE id = ?";
@@ -273,7 +296,7 @@ $stats = $stats_result ? $stats_result->fetch_assoc() : ['total_courses' => 0, '
 
                                 <td><span class="badge bg-info"><?php echo htmlspecialchars($row['hours_per_week'] ?? 'N/A'); ?> hrs/week</span></td>
                                 <td>
-                                    <button class="btn btn-sm btn-outline-primary me-1" onclick="editCourse(<?php echo $row['id']; ?>)">
+                                    <button class="btn btn-sm btn-outline-primary me-1 edit-course-btn" data-id="<?php echo $row['id']; ?>" data-name="<?php echo htmlspecialchars($row['name'], ENT_QUOTES); ?>" data-code="<?php echo htmlspecialchars($row['code'], ENT_QUOTES); ?>" data-department_id="<?php echo $row['department_id']; ?>" data-hours_per_week="<?php echo $row['hours_per_week']; ?>" data-is_active="<?php echo $row['is_active']; ?>">
                                         <i class="fas fa-edit"></i>
                                     </button>
                                     <form method="POST" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this course?')">
@@ -385,6 +408,92 @@ $stats = $stats_result ? $stats_result->fetch_assoc() : ['total_courses' => 0, '
     </div>
 </div>
 
+<!-- Edit Course Modal -->
+<div class="modal fade" id="editCourseModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Edit Course</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST" id="editCourseForm">
+                <div class="modal-body">
+                    <input type="hidden" name="action" value="edit">
+                    <input type="hidden" name="id" id="edit_course_id">
+                    <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="edit_course_name" class="form-label">Course Name *</label>
+                                <input type="text" class="form-control" id="edit_course_name" name="course_name" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="edit_course_code" class="form-label">Course Code *</label>
+                                <input type="text" class="form-control" id="edit_course_code" name="course_code" required>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="edit_department_id" class="form-label">Department (Optional)</label>
+                                <?php $dept_res_for_edit = $conn->query($dept_sql); ?>
+                                <?php if ($dept_res_for_edit && $dept_res_for_edit->num_rows > 0): ?>
+                                <select class="form-select" id="edit_department_id" name="department_id">
+                                    <option value="">No Department</option>
+                                    <?php while ($dept = $dept_res_for_edit->fetch_assoc()): ?>
+                                        <option value="<?php echo $dept['id']; ?>"><?php echo htmlspecialchars($dept['name']); ?></option>
+                                    <?php endwhile; ?>
+                                </select>
+                                <?php else: ?>
+                                <div class="alert alert-warning mb-0">
+                                    No departments found. <a href="department.php" class="btn btn-sm btn-primary ms-2">Create Department</a>
+                                </div>
+                                <?php endif; ?>
+                            </div>
+                        </div>
+
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="edit_hours_per_week" class="form-label">Hours Per Week *</label>
+                                <select class="form-select" id="edit_hours_per_week" name="hours_per_week" required>
+                                    <option value="">Select Hours</option>
+                                    <option value="1">1 Hour</option>
+                                    <option value="2">2 Hours</option>
+                                    <option value="3">3 Hours</option>
+                                    <option value="4">4 Hours</option>
+                                    <option value="5">5 Hours</option>
+                                    <option value="6">6 Hours</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="edit_is_active" name="is_active">
+                            <label class="form-check-label" for="edit_is_active">
+                                Active Course
+                            </label>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 <!-- Import Modal -->
 <div class="modal fade" id="importModal" tabindex="-1">
     <div class="modal-dialog modal-lg">
@@ -468,10 +577,60 @@ include 'includes/footer.php';
 ?>
 
 <script>
-function editCourse(id) {
-    // TODO: Implement edit functionality
-    alert('Edit functionality will be implemented here for course ID: ' + id);
-}
+// Replace placeholder editCourse and wire up edit buttons to open modal and populate fields
+document.addEventListener('DOMContentLoaded', function() {
+    const editButtons = document.querySelectorAll('.edit-course-btn');
+    const editModalEl = document.getElementById('editCourseModal');
+    let bsEditModal = null;
+    if (editModalEl && typeof bootstrap !== 'undefined') {
+        bsEditModal = new bootstrap.Modal(editModalEl);
+    }
+
+    editButtons.forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            const id = this.getAttribute('data-id');
+            const name = this.getAttribute('data-name') || '';
+            const code = this.getAttribute('data-code') || '';
+            const department_id = this.getAttribute('data-department_id');
+            const hours = this.getAttribute('data-hours_per_week') || '';
+            const is_active = this.getAttribute('data-is_active');
+
+            // Populate modal fields
+            const setVal = (selector, value) => { const el = document.getElementById(selector); if (el) el.value = value; };
+            setVal('edit_course_id', id);
+            setVal('edit_course_name', name);
+            setVal('edit_course_code', code);
+            setVal('edit_hours_per_week', hours);
+
+            const deptSelect = document.getElementById('edit_department_id');
+            if (deptSelect) {
+                // If department_id is empty/null, set to blank
+                deptSelect.value = department_id && department_id !== '0' ? department_id : '';
+            }
+
+            const activeCheckbox = document.getElementById('edit_is_active');
+            if (activeCheckbox) {
+                activeCheckbox.checked = is_active === '1' || is_active === 'true' || is_active === 'on';
+            }
+
+            if (bsEditModal) bsEditModal.show();
+        });
+    });
+
+    // Optional: validate and submit edit form (regular POST will handle it)
+    const editForm = document.getElementById('editCourseForm');
+    if (editForm) {
+        editForm.addEventListener('submit', function(e){
+            // allow normal POST submission; minimal client-side validation
+            const name = document.getElementById('edit_course_name').value.trim();
+            const code = document.getElementById('edit_course_code').value.trim();
+            if (!name || !code) {
+                e.preventDefault();
+                alert('Please provide both course name and course code.');
+            }
+        });
+    }
+});
 </script>
 
 <script>
