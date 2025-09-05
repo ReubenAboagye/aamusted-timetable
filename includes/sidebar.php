@@ -94,6 +94,13 @@
       </div>
     </div>
 
+    <!-- Extract Timetable (public page) -->
+    <div class="nav-section">
+      <a href="extract_timetable.php" class="nav-link <?= ($currentPage == 'extract_timetable.php') ? 'active' : '' ?>">
+        <i class="fas fa-download me-2"></i>Extract Timetable
+      </a>
+    </div>
+
   </div>
   
   <!-- Stream Management - Fixed at bottom -->
