@@ -128,33 +128,48 @@ $safeFilter = htmlspecialchars($filter_value !== '' ? $filter_value : 'All', ENT
 $safeSemester = htmlspecialchars((string)$selected_semester, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 
 $rowsHtml = '';
+// Group by day to calculate rowspans
+$dayToRows = [];
 foreach ($rows as $r) {
-    $rowsHtml .= '<tr>'
-        . '<td>' . htmlspecialchars($r['day_name']) . '</td>'
-        . '<td>' . htmlspecialchars($r['start_time']) . '</td>'
-        . '<td>' . htmlspecialchars($r['end_time']) . '</td>'
-        . '<td><strong>' . htmlspecialchars($r['class_name']) . '</strong></td>'
-        . '<td>' . htmlspecialchars(($r['course_code'] ? ($r['course_code'] . ' - ') : '') . $r['course_name']) . '</td>'
-        . '<td>' . htmlspecialchars($r['lecturer_name']) . '</td>'
-        . '<td>' . htmlspecialchars($r['room_name']) . '</td>'
-        . '</tr>';
+    $dayToRows[$r['day_name']][] = $r;
+}
+
+foreach ($dayToRows as $dayName => $dayRows) {
+    $rowspan = count($dayRows);
+    $first = true;
+    foreach ($dayRows as $r) {
+        $rowsHtml .= '<tr>';
+        if ($first) {
+            $rowsHtml .= '<td rowspan="' . intval($rowspan) . '">' . htmlspecialchars($dayName) . '</td>';
+            $first = false;
+        }
+        $rowsHtml
+            .= '<td>' . htmlspecialchars($r['start_time']) . '</td>'
+            . '<td>' . htmlspecialchars($r['end_time']) . '</td>'
+            . '<td><strong>' . htmlspecialchars($r['class_name']) . '</strong></td>'
+            . '<td>' . htmlspecialchars(($r['course_code'] ? ($r['course_code'] . ' - ') : '') . $r['course_name']) . '</td>'
+            . '<td>' . htmlspecialchars($r['lecturer_name']) . '</td>'
+            . '<td>' . htmlspecialchars($r['room_name']) . '</td>'
+            . '</tr>';
+    }
 }
 
 $html = '<html><head><meta charset="UTF-8"><style>
     body { font-family: DejaVu Sans, Arial, Helvetica, sans-serif; font-size: 11px; }
-    .header { display:flex; align-items:center; gap:14px; border-bottom:2px solid #800020; padding-bottom:8px; margin-bottom:8px; }
-    .title { color:#800020; margin:0; font-size:18px; font-weight:700; }
-    .subtitle { margin:2px 0 0; color:#444; font-size:12px; }
-    .meta { margin:8px 0 12px; font-size:12px; }
-    .meta span { display:inline-block; margin-right:16px; }
+    .header { text-align:center; border-bottom:2px solid #800020; padding-bottom:10px; margin-bottom:10px; }
+    .header img { height:58px; display:block; margin:0 auto 6px; }
+    .title { color:#800020; margin:0; font-size:20px; font-weight:700; text-align:center; }
+    .subtitle { margin:4px 0 0; color:#444; font-size:12px; text-align:center; }
+    .meta { margin:10px 0 14px; font-size:12px; text-align:center; }
+    .meta span { display:inline-block; margin:0 10px; }
     table { width:100%; border-collapse:collapse; }
     th, td { border:1px solid #ddd; padding:6px 8px; }
     thead th { background:#f2f2f2; font-weight:600; }
     </style></head><body>'
     . '<div class="header">'
-    . ($logoDataUri !== '' ? ('<img src="' . htmlspecialchars($logoDataUri) . '" style="height:48px;" />') : '')
-    . '<div><h1 class="title">AKENTEN APPIAH-MENKA UNIVERSITY</h1>'
-    . '<div class="subtitle">Timetable - ' . $safeTitle . ' | Semester ' . $safeSemester . '</div></div>'
+    . ($logoDataUri !== '' ? ('<img src="' . htmlspecialchars($logoDataUri) . '" />') : '')
+    . '<h1 class="title">AKENTEN APPIAH-MENKA UNIVERSITY</h1>'
+    . '<div class="subtitle">Timetable - ' . $safeTitle . ' | Semester ' . $safeSemester . '</div>'
     . '</div>'
     . '<div class="meta"><span><strong>Role:</strong> ' . $safeRole . '</span><span><strong>Filter:</strong> ' . $safeFilter . '</span><span><strong>Generated:</strong> ' . htmlspecialchars(date('Y-m-d H:i')) . '</span></div>'
     . '<table><thead><tr><th>Day</th><th>Start</th><th>End</th><th>Class</th><th>Course</th><th>Lecturer</th><th>Room</th></tr></thead><tbody>'
