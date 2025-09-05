@@ -29,6 +29,10 @@ class GeneticAlgorithm {
     private $generationStats = [];
     private $bestSolution = null;
     private $startTime;
+    // Optional progress callback and rate limiting
+    private $progressCallback = null;
+    private $progressUpdateInterval = 5; // seconds
+    private $lastProgressUpdateTime = 0;
     
     public function __construct(mysqli $conn, array $options = []) {
         $this->conn = $conn;
@@ -61,6 +65,15 @@ class GeneticAlgorithm {
         $this->crossoverRate = $this->options['crossover_rate'];
         $this->elitismRate = $this->options['elitism_rate'];
         $this->tournamentSize = $this->options['tournament_size'];
+        $this->progressUpdateInterval = $this->options['progress_update_interval'] ?? 5;
+    }
+
+    /**
+     * Set a progress callback to receive periodic updates during run().
+     * Callback will be called with a single array argument containing keys: generation, percent, best_fitness, hard_violations, soft_violations
+     */
+    public function setProgressCallback(callable $cb): void {
+        $this->progressCallback = $cb;
     }
     
     /**
@@ -123,6 +136,22 @@ class GeneticAlgorithm {
             // Check for convergence
             if ($currentBest['fitness']['total_score'] <= $this->options['fitness_threshold']) {
                 break;
+            }
+
+            // Progress callback (rate-limited)
+            if ($this->progressCallback) {
+                $now = microtime(true);
+                if ($now - $this->lastProgressUpdateTime >= $this->progressUpdateInterval) {
+                    $percent = ($generation / max(1, $this->generations)) * 100;
+                    call_user_func($this->progressCallback, [
+                        'generation' => $generation,
+                        'percent' => round($percent, 2),
+                        'best_fitness' => $currentBest['fitness']['total_score'],
+                        'hard_violations' => $currentBest['fitness']['hard_violations'],
+                        'soft_violations' => $currentBest['fitness']['soft_violations']
+                    ]);
+                    $this->lastProgressUpdateTime = $now;
+                }
             }
             
             // Generate next generation
