@@ -155,9 +155,11 @@ if ($can_query) {
 			header('Content-Disposition: attachment; filename="timetable_export.csv"');
 			$out = fopen('php://output', 'w');
 			fputcsv($out, ['Day', 'Start', 'End', 'Class', 'Course Code', 'Course Name', 'Lecturer', 'Room', 'Capacity']);
+			$lastDay = null;
 			foreach ($timetable_rows as $r) {
+				$dayCell = ($r['day_name'] !== $lastDay) ? $r['day_name'] : '';
 				fputcsv($out, [
-					$r['day_name'],
+					$dayCell,
 					$r['start_time'],
 					$r['end_time'],
 					$r['class_name'],
@@ -167,6 +169,7 @@ if ($can_query) {
 					$r['room_name'],
 					$r['room_capacity'],
 				]);
+				$lastDay = $r['day_name'];
 			}
 			fclose($out);
 			exit;
