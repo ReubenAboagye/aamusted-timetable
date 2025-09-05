@@ -2073,6 +2073,8 @@ const availableRooms = <?php echo json_encode($all_rooms); ?>;
 // Global variables for Option 2 implementation
 let generatedTimetableData = null;
 let currentGenerationParams = null;
+let currentJobId = null;
+let restartEventPolling = null;
 
 document.addEventListener('DOMContentLoaded', function () {
     // Debug: Log available rooms
@@ -2090,8 +2092,12 @@ document.addEventListener('DOMContentLoaded', function () {
     // Add form submission listener for loading state
     const form = document.querySelector('form');
     if (form) {
-        form.addEventListener('submit', function() {
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
             showLoadingState();
+            
+            // Start generation via AJAX using job queue
+            startGenerationViaJobQueue();
         });
     }
 });
@@ -2367,6 +2373,9 @@ function showLoadingState() {
         // Store original text for restoration
         generateBtn.dataset.originalText = originalText;
     }
+
+    ensureGenerationOverlay();
+    showGenerationOverlay('Generating timetable... This may take a few minutes.');
 }
 
 // Hide loading state
@@ -2377,6 +2386,231 @@ function hideLoadingState() {
         generateBtn.disabled = false;
         delete generateBtn.dataset.originalText;
     }
+
+    hideGenerationOverlay();
+}
+
+// Ensure generation overlay and styles are present
+function ensureGenerationOverlay() {
+    if (!document.getElementById('generation-overlay-styles')) {
+        const style = document.createElement('style');
+        style.id = 'generation-overlay-styles';
+        style.textContent = `
+            .generation-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.65); display: none; align-items: center; justify-content: center; z-index: 2000; }
+            .generation-overlay__card { background: rgba(20,20,20,0.85); border-radius: 12px; padding: 24px 28px; color: #fff; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.4); width: min(520px, 92vw); }
+            .generation-overlay__title { font-size: 1.1rem; margin-top: 12px; font-weight: 600; }
+            .generation-overlay__subtitle { font-size: .9rem; opacity: .85; margin-top: 6px; }
+            .generation-overlay__progress { height: 10px; border-radius: 6px; overflow: hidden; background: rgba(255,255,255,0.15); margin-top: 16px; }
+            .generation-overlay__bar { height: 100%; width: 40%; background: linear-gradient(90deg, #0d6efd, #20c997); animation: goIndef 1.6s infinite ease-in-out; border-radius: 6px; }
+            @keyframes goIndef { 0% { transform: translateX(-60%);} 50% { transform: translateX(40%);} 100% { transform: translateX(120%);} }
+            
+            /* Restart animation styles */
+            .generation-overlay.restarting .generation-overlay__card { 
+                animation: restartPulse 0.5s ease-in-out infinite alternate;
+                border: 2px solid #ffc107;
+            }
+            .generation-overlay.restarting .spinner-border { 
+                animation: restartSpin 0.3s linear infinite;
+                color: #ffc107 !important;
+            }
+            .generation-overlay.restarting .generation-overlay__bar { 
+                background: linear-gradient(90deg, #ffc107, #fd7e14);
+                animation: restartBar 0.8s ease-in-out infinite;
+            }
+            @keyframes restartPulse { 
+                0% { transform: scale(1); box-shadow: 0 10px 30px rgba(0,0,0,0.4); }
+                100% { transform: scale(1.02); box-shadow: 0 15px 40px rgba(255,193,7,0.3); }
+            }
+            @keyframes restartSpin { 
+                0% { transform: rotate(0deg); }
+                100% { transform: rotate(360deg); }
+            }
+            @keyframes restartBar { 
+                0% { transform: translateX(-60%) scaleX(1); }
+                50% { transform: translateX(40%) scaleX(1.2); }
+                100% { transform: translateX(120%) scaleX(1); }
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
+    if (!document.getElementById('generation-overlay')) {
+        const overlay = document.createElement('div');
+        overlay.id = 'generation-overlay';
+        overlay.className = 'generation-overlay';
+        overlay.innerHTML = `
+            <div class="generation-overlay__card">
+                <div class="d-flex justify-content-center">
+                    <div class="spinner-border text-light" style="width: 3rem; height: 3rem;" role="status" aria-hidden="true"></div>
+                </div>
+                <div class="generation-overlay__title">Generating Timetable</div>
+                <div class="generation-overlay__subtitle" id="generation-overlay-message">Preparing data, optimizing schedules, assigning rooms…</div>
+                <div class="generation-overlay__progress"><div class="generation-overlay__bar"></div></div>
+                <div class="generation-overlay__subtitle mt-2">Please keep this tab open.</div>
+            </div>`;
+        document.body.appendChild(overlay);
+    }
+}
+
+function showGenerationOverlay(message) {
+    const overlay = document.getElementById('generation-overlay');
+    if (overlay) {
+        overlay.style.display = 'flex';
+        const msg = document.getElementById('generation-overlay-message');
+        if (msg && message) msg.textContent = message;
+    }
+}
+
+function hideGenerationOverlay() {
+    const overlay = document.getElementById('generation-overlay');
+    if (overlay) overlay.style.display = 'none';
+}
+
+// Show restart animation
+function showRestartAnimation(reason, generation, bestFitness) {
+    const overlay = document.getElementById('generation-overlay');
+    if (overlay) {
+        const msg = document.getElementById('generation-overlay-message');
+        const title = document.querySelector('.generation-overlay__title');
+        
+        if (msg && title) {
+            // Update title and message for restart
+            title.textContent = 'Branch Restarting';
+            msg.textContent = `Restarting due to ${reason} at generation ${generation}. Best fitness: ${bestFitness.toFixed(3)}`;
+            
+            // Add restart animation class
+            overlay.classList.add('restarting');
+            
+            // Show restart animation for 2 seconds
+            setTimeout(() => {
+                overlay.classList.remove('restarting');
+                title.textContent = 'Generating Timetable';
+                msg.textContent = 'Preparing data, optimizing schedules, assigning rooms…';
+            }, 2000);
+        }
+    }
+}
+
+// Start polling for restart events
+function startRestartEventPolling(jobId) {
+    currentJobId = jobId;
+    restartEventPolling = setInterval(async () => {
+        try {
+            const response = await fetch(`api/get_job_events.php?job_id=${jobId}`);
+            const data = await response.json();
+            
+            if (data.success && data.events) {
+                // Check for new restart events
+                data.events.forEach(event => {
+                    if (event.event_type === 'restart' && event.event_data) {
+                        const restartData = event.event_data;
+                        showRestartAnimation(
+                            restartData.reason,
+                            restartData.generation,
+                            restartData.best_fitness
+                        );
+                    }
+                });
+            }
+        } catch (error) {
+            console.error('Error polling restart events:', error);
+        }
+    }, 1000); // Poll every second
+}
+
+// Stop polling for restart events
+function stopRestartEventPolling() {
+    if (restartEventPolling) {
+        clearInterval(restartEventPolling);
+        restartEventPolling = null;
+    }
+    currentJobId = null;
+}
+
+// Start generation via job queue
+async function startGenerationViaJobQueue() {
+    try {
+        const formData = new FormData(document.querySelector('form'));
+        const payload = {
+            stream_id: <?php echo $current_stream_id; ?>,
+            academic_year: '<?php echo $current_academic_year; ?>',
+            semester: parseInt(formData.get('semester')),
+            options: {
+                population_size: 100,
+                generations: 500,
+                mutation_rate: 0.1,
+                crossover_rate: 0.8,
+                max_runtime: 300
+            }
+        };
+        
+        const response = await fetch('api/enqueue_generation.php', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+        
+        const data = await response.json();
+        
+        if (data.success && data.job_id) {
+            // Start polling for restart events
+            startRestartEventPolling(data.job_id);
+            
+            // Start polling for job completion
+            pollJobCompletion(data.job_id);
+        } else {
+            throw new Error(data.message || 'Failed to start generation');
+        }
+    } catch (error) {
+        console.error('Error starting generation:', error);
+        hideLoadingState();
+        showErrorMessage('Failed to start generation: ' + error.message);
+    }
+}
+
+// Poll for job completion
+async function pollJobCompletion(jobId) {
+    const pollInterval = setInterval(async () => {
+        try {
+            const response = await fetch(`api/get_job_status.php?job_id=${jobId}`);
+            const data = await response.json();
+            
+            if (data.success) {
+                const job = data.job;
+                
+                if (job.status === 'completed') {
+                    clearInterval(pollInterval);
+                    stopRestartEventPolling();
+                    hideLoadingState();
+                    
+                    // Handle successful completion
+                    if (job.result) {
+                        const result = JSON.parse(job.result);
+                        showSuccessMessage('Timetable generated successfully!');
+                        // You can add more handling here for displaying results
+                    }
+                } else if (job.status === 'failed') {
+                    clearInterval(pollInterval);
+                    stopRestartEventPolling();
+                    hideLoadingState();
+                    showErrorMessage('Generation failed: ' + (job.error || 'Unknown error'));
+                } else if (job.status === 'running') {
+                    // Update progress if available
+                    if (job.result) {
+                        const result = JSON.parse(job.result);
+                        const msg = document.getElementById('generation-overlay-message');
+                        if (msg) {
+                            msg.textContent = `Generation ${result.percent || 0}% complete. Best fitness: ${result.best_fitness?.toFixed(3) || 'N/A'}`;
+                        }
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('Error polling job status:', error);
+        }
+    }, 2000); // Poll every 2 seconds
 }
 
 // Show success message

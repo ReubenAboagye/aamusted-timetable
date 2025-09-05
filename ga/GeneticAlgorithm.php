@@ -34,6 +34,9 @@ class GeneticAlgorithm {
     private $progressUpdateInterval = 5; // seconds
     private $lastProgressUpdateTime = 0;
     
+    // Restart callback for branch restarting events
+    private $restartCallback = null;
+    
     public function __construct(mysqli $conn, array $options = []) {
         $this->conn = $conn;
         $this->options = array_merge([
@@ -77,6 +80,14 @@ class GeneticAlgorithm {
     }
     
     /**
+     * Set a restart callback to receive notifications when branch restarting occurs.
+     * Callback will be called with a single array argument containing keys: reason, generation, best_fitness
+     */
+    public function setRestartCallback(callable $cb): void {
+        $this->restartCallback = $cb;
+    }
+    
+    /**
      * Run the genetic algorithm to generate an optimal timetable
      */
     public function run(): array {
@@ -92,6 +103,15 @@ class GeneticAlgorithm {
         for ($generation = 0; $generation < $this->generations; $generation++) {
             // Check runtime limit
             if (microtime(true) - $this->startTime > $this->options['max_runtime']) {
+                // Notify restart callback about branch restarting due to runtime limit
+                if ($this->restartCallback) {
+                    call_user_func($this->restartCallback, [
+                        'reason' => 'runtime_limit',
+                        'generation' => $generation,
+                        'best_fitness' => $currentBest['fitness']['total_score'] ?? 0,
+                        'runtime' => microtime(true) - $this->startTime
+                    ]);
+                }
                 break;
             }
             
@@ -118,6 +138,15 @@ class GeneticAlgorithm {
             }
             
             if ($stagnationCount >= $this->options['stagnation_limit']) {
+                // Notify restart callback about branch restarting due to stagnation
+                if ($this->restartCallback) {
+                    call_user_func($this->restartCallback, [
+                        'reason' => 'stagnation',
+                        'generation' => $generation,
+                        'best_fitness' => $currentBest['fitness']['total_score'],
+                        'stagnation_count' => $stagnationCount
+                    ]);
+                }
                 break;
             }
             

@@ -105,6 +105,15 @@ $q->consume(function($envelope, $queue) use ($conn, $ch) {
             $stmt->close();
         });
 
+        // Register restart callback to log restart events
+        $ga->setRestartCallback(function($restartData) use ($conn, $jobId) {
+            $stmt = $conn->prepare("INSERT INTO job_events (job_id, event_type, event_data, created_at) VALUES (?, 'restart', ?, NOW())");
+            $eventData = json_encode($restartData);
+            $stmt->bind_param('is', $jobId, $eventData);
+            $stmt->execute();
+            $stmt->close();
+        });
+
         $result = $ga->run();
 
         // Convert solution and save result summary
