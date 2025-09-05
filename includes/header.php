@@ -186,10 +186,12 @@ if ($__current_script !== 'rooms.php') {
     }
   }
 }
-// Include admin jobs modal so it's available across admin pages
-$adminJobsModal = __DIR__ . '/admin_jobs_modal.php';
-if (file_exists($adminJobsModal)) {
-    include_once $adminJobsModal;
+// Include admin jobs modal so it's available across admin pages (allow disabling)
+if (!isset($show_admin_jobs_modal) || $show_admin_jobs_modal !== false) {
+    $adminJobsModal = __DIR__ . '/admin_jobs_modal.php';
+    if (file_exists($adminJobsModal)) {
+        include_once $adminJobsModal;
+    }
 }
 
 // --- Helper function for counts (guard against redeclaration) ---
