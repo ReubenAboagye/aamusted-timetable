@@ -1959,10 +1959,11 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     } catch (e) { /* ignore */ }
     
-    // Add form submission listener for loading state
+    // Add form submission listener for loading state and splash overlay
     const form = document.querySelector('form');
     if (form) {
         form.addEventListener('submit', function() {
+            ensureGenerationOverlay();
             showLoadingState();
         });
     }
@@ -2234,6 +2235,8 @@ function showLoadingState() {
         // Store original text for restoration
         generateBtn.dataset.originalText = originalText;
     }
+
+    showGenerationOverlay('Generating timetable... This may take a few minutes.');
 }
 
 // Hide loading state
@@ -2244,6 +2247,57 @@ function hideLoadingState() {
         generateBtn.disabled = false;
         delete generateBtn.dataset.originalText;
     }
+
+    hideGenerationOverlay();
+}
+
+// Ensure generation overlay and styles are present
+function ensureGenerationOverlay() {
+    if (!document.getElementById('generation-overlay-styles')) {
+        const style = document.createElement('style');
+        style.id = 'generation-overlay-styles';
+        style.textContent = `
+            .generation-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.65); display: none; align-items: center; justify-content: center; z-index: 2000; }
+            .generation-overlay__card { background: rgba(20,20,20,0.85); border-radius: 12px; padding: 24px 28px; color: #fff; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.4); width: min(520px, 92vw); }
+            .generation-overlay__title { font-size: 1.1rem; margin-top: 12px; font-weight: 600; }
+            .generation-overlay__subtitle { font-size: .9rem; opacity: .85; margin-top: 6px; }
+            .generation-overlay__progress { height: 10px; border-radius: 6px; overflow: hidden; background: rgba(255,255,255,0.15); margin-top: 16px; }
+            .generation-overlay__bar { height: 100%; width: 40%; background: linear-gradient(90deg, #0d6efd, #20c997); animation: goIndef 1.6s infinite ease-in-out; border-radius: 6px; }
+            @keyframes goIndef { 0% { transform: translateX(-60%);} 50% { transform: translateX(40%);} 100% { transform: translateX(120%);} }
+        `;
+        document.head.appendChild(style);
+    }
+
+    if (!document.getElementById('generation-overlay')) {
+        const overlay = document.createElement('div');
+        overlay.id = 'generation-overlay';
+        overlay.className = 'generation-overlay';
+        overlay.innerHTML = `
+            <div class="generation-overlay__card">
+                <div class="d-flex justify-content-center">
+                    <div class="spinner-border text-light" style="width: 3rem; height: 3rem;" role="status" aria-hidden="true"></div>
+                </div>
+                <div class="generation-overlay__title">Generating Timetable</div>
+                <div class="generation-overlay__subtitle" id="generation-overlay-message">Preparing data, optimizing schedules, assigning rooms…</div>
+                <div class="generation-overlay__progress"><div class="generation-overlay__bar"></div></div>
+                <div class="generation-overlay__subtitle mt-2">Please keep this tab open.</div>
+            </div>`;
+        document.body.appendChild(overlay);
+    }
+}
+
+function showGenerationOverlay(message) {
+    const overlay = document.getElementById('generation-overlay');
+    if (overlay) {
+        overlay.style.display = 'flex';
+        const msg = document.getElementById('generation-overlay-message');
+        if (msg && message) msg.textContent = message;
+    }
+}
+
+function hideGenerationOverlay() {
+    const overlay = document.getElementById('generation-overlay');
+    if (overlay) overlay.style.display = 'none';
 }
 
 // Show success message

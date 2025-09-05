@@ -54,6 +54,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 session_start();
 // Normalize action early to avoid undefined index notices
 $action = $_POST['action'] ?? null;
+// Detect AJAX requests globally for POST handlers
+$isAjaxRequest = isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
 
 // Include database connection early
 include 'connect.php';
@@ -96,32 +98,88 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
     }
     exit;
 }
+// Provide list of buildings for client-side refresh
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['action'] === 'get_existing_buildings') {
+    if (ob_get_level()) ob_end_clean();
+    $rows = [];
+    $bsql = "SELECT id, name, code FROM buildings WHERE is_active = 1 ORDER BY name";
+    $bres = $conn->query($bsql);
+    if ($bres) {
+        while ($r = $bres->fetch_assoc()) $rows[] = $r;
+    }
+    header('Content-Type: application/json');
+    echo json_encode($rows);
+    exit;
+}
 
 // Handle form processing BEFORE any HTML output
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action) {
     // Building add
     if ($action === 'add_building') {
-        $name = trim($conn->real_escape_string($_POST['name']));
-        $code = trim($conn->real_escape_string($_POST['code']));
-        
+        // Support both legacy field names and modal names: building_name / building_code
+        $nameRaw = $_POST['building_name'] ?? $_POST['name'] ?? '';
+        $codeRaw = $_POST['building_code'] ?? $_POST['code'] ?? '';
+        $name = trim($conn->real_escape_string($nameRaw));
+        $code = trim($conn->real_escape_string($codeRaw));
+
+        // Detect AJAX requests
+        $isAjax = isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
+
+        // Ensure logs directory exists for debugging
+        $logDir = __DIR__ . '/logs';
+        if (!is_dir($logDir)) @mkdir($logDir, 0755, true);
+
+        // Write incoming request for debugging
+        @file_put_contents($logDir . '/building_add.log', "\n---\n" . date('c') . " REQUEST: " . json_encode($_POST) . "\n", FILE_APPEND | LOCK_EX);
+
         if (empty($name)) {
+            if ($isAjax) {
+                header('Content-Type: application/json');
+                echo json_encode(['success' => false, 'message' => 'Building name is required.']);
+                exit;
+            }
             $_SESSION['error_message'] = 'Building name is required.';
             header('Location: rooms.php'); exit;
         }
-        
+
         $sql = "INSERT INTO buildings (name, code) VALUES (?, ?)";
         $stmt = $conn->prepare($sql);
-        $stmt->bind_param("ss", $name, $code);
-        
-        if ($stmt->execute()) {
-            $stmt->close();
-            redirect_with_flash('rooms.php', 'success', 'Building added successfully!');
-        } else {
-            error_log("ERROR: Building Add - Insert failed: " . $stmt->error);
-            $_SESSION['error_message'] = "Error adding building: " . $stmt->error;
+        if (!$stmt) {
+            if ($isAjax) {
+                header('Content-Type: application/json');
+                echo json_encode(['success' => false, 'message' => 'Prepare failed: ' . $conn->error]);
+                exit;
+            }
+            error_log("ERROR: Building Add - Prepare failed: " . $conn->error);
+            $_SESSION['error_message'] = "Error preparing statement: " . $conn->error;
             header('Location: rooms.php'); exit;
         }
-        $stmt->close();
+
+        $stmt->bind_param("ss", $name, $code);
+
+        if ($stmt->execute()) {
+            $building_id = $stmt->insert_id;
+            $stmt->close();
+            @file_put_contents($logDir . '/building_add.log', "SUCCESS: inserted id={$building_id}\n", FILE_APPEND | LOCK_EX);
+            if ($isAjax) {
+                header('Content-Type: application/json');
+                echo json_encode(['success' => true, 'id' => $building_id, 'name' => $name, 'code' => $code]);
+                exit;
+            }
+            redirect_with_flash('rooms.php', 'success', 'Building added successfully!');
+        } else {
+            $err = $stmt->error;
+            $stmt->close();
+            @file_put_contents($logDir . '/building_add.log', "ERROR: " . $err . "\n", FILE_APPEND | LOCK_EX);
+            error_log("ERROR: Building Add - Insert failed: " . $err);
+            if ($isAjax) {
+                header('Content-Type: application/json');
+                echo json_encode(['success' => false, 'message' => 'Error adding building: ' . $err]);
+                exit;
+            }
+            $_SESSION['error_message'] = "Error adding building: " . $err;
+            header('Location: rooms.php'); exit;
+        }
     }
     
     // Import CSV
@@ -1790,5 +1848,124 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 
+// After multi-add/add, fetch updated buildings and clear add form fields when modal closes
+document.addEventListener('DOMContentLoaded', function() {
+    const addBuildingModalEl = document.getElementById('addBuildingModal');
+    const addBuildingForm = addBuildingModalEl ? addBuildingModalEl.querySelector('form') : null;
+
+    function clearAddBuildingForm() {
+        if (!addBuildingForm) return;
+        addBuildingForm.reset();
+    }
+
+    // When addBuilding modal hides, clear the form
+    if (addBuildingModalEl) {
+        if (typeof bootstrap !== 'undefined' && bootstrap.Modal) {
+            addBuildingModalEl.addEventListener('hidden.bs.modal', function() { clearAddBuildingForm(); });
+        } else {
+            // fallback: listen for clicks on close buttons
+            addBuildingModalEl.querySelectorAll('[data-bs-dismiss="modal"]').forEach(btn => btn.addEventListener('click', clearAddBuildingForm));
+        }
+    }
+
+    // Implement a function to fetch latest buildings and repopulate selects
+    function refreshBuildingSelects(selectors) {
+        fetch('rooms.php?action=get_existing_buildings', { method: 'GET', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+        .then(resp => resp.json())
+        .then(data => {
+            if (!Array.isArray(data)) return;
+            const targetSelectors = selectors || document.querySelectorAll('select[name="building_id"], #building_id, #edit_building_id');
+            targetSelectors.forEach(sel => {
+                // remember selected value
+                const prev = sel.value;
+                // clear options
+                sel.innerHTML = '<option value="">Select Building</option>';
+                data.forEach(b => {
+                    const opt = document.createElement('option'); opt.value = b.id; opt.textContent = b.name; if (b.code) opt.setAttribute('data-code', b.code); sel.appendChild(opt);
+                });
+                // try restore previous or leave empty
+                if (prev) sel.value = prev;
+            });
+        })
+        .catch(err => console.warn('Failed to refresh buildings', err));
+    }
+
+    // Expose refresh function globally for other scripts to call after multi-add
+    window.refreshBuildingSelects = refreshBuildingSelects;
+});
+
+// AJAX: submit Add Building form in background and update building selects without full reload
+document.addEventListener('DOMContentLoaded', function() {
+    const addBuildingForm = document.querySelector('#addBuildingModal form');
+    if (!addBuildingForm) return;
+
+    addBuildingForm.addEventListener('submit', function(e) {
+        e.preventDefault();
+        const form = this;
+        const formData = new FormData(form);
+        formData.set('action', 'add_building');
+
+        const submitBtn = form.querySelector('button[type="submit"]');
+        const origText = submitBtn ? submitBtn.innerHTML : null;
+        if (submitBtn) { submitBtn.disabled = true; submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Saving...'; }
+
+        fetch('rooms.php', {
+            method: 'POST',
+            body: formData,
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        })
+        .then(async response => {
+            const text = await response.text();
+            let data = null;
+            try { data = text ? JSON.parse(text) : null; } catch (e) { console.warn('Non-JSON response for add_building:', text); }
+            return { ok: response.ok, status: response.status, data: data, text: text };
+        })
+        .then(obj => {
+            if (submitBtn) { submitBtn.disabled = false; submitBtn.innerHTML = origText; }
+            if (!obj.ok) {
+                console.error('Add building failed', obj.status, obj.text);
+                const msg = (obj.data && obj.data.message) ? obj.data.message : obj.text || 'Server error';
+                alert('Error adding building: ' + msg);
+                return;
+            }
+            const data = obj.data;
+            if (!data) { alert('Unexpected server response when adding building'); return; }
+
+            if (data.success) {
+                const selectors = document.querySelectorAll('select[name="building_id"], #building_id, #edit_building_id');
+                selectors.forEach(sel => {
+                    try {
+                        const opt = document.createElement('option');
+                        opt.value = data.id;
+                        opt.textContent = data.name;
+                        if (data.code) opt.setAttribute('data-code', data.code);
+                        sel.appendChild(opt);
+                    } catch (e) { console.warn('Could not append building option', e); }
+                });
+
+                const bsel = document.getElementById('building_id'); if (bsel) bsel.value = data.id;
+                const ebsel = document.getElementById('edit_building_id'); if (ebsel) ebsel.value = data.id;
+
+                const modalEl = document.getElementById('addBuildingModal');
+                if (modalEl && typeof bootstrap !== 'undefined' && bootstrap.Modal) {
+                    try { bootstrap.Modal.getOrCreateInstance(modalEl).hide(); } catch(e){/*silent*/}
+                } else if (modalEl) {
+                    modalEl.classList.remove('show'); modalEl.style.display = 'none'; document.body.classList.remove('modal-open');
+                    const backdrop = document.querySelector('.modal-backdrop'); if (backdrop) backdrop.remove();
+                }
+
+                showSaveIndicator('success');
+            } else {
+                const msg = data.message || 'Failed to add building';
+                alert(msg);
+            }
+        })
+        .catch(err => {
+            if (submitBtn) { submitBtn.disabled = false; submitBtn.innerHTML = origText; }
+            console.error('Fetch error while adding building:', err);
+            alert('Error adding building: network or server error (see console)');
+        });
+    });
+});
 
 </script>

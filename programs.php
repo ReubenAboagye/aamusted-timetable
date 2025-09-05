@@ -6,8 +6,8 @@ try {
     include 'includes/sidebar.php';
     include 'includes/flash.php';
 
-    // Database connection
-    include 'connect.php';
+    // Database connection (header may already include this)
+    include_once 'connect.php';
     
     if (!$conn) {
         throw new Exception("Database connection failed");

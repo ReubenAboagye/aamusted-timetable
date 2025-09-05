@@ -34,6 +34,8 @@ class DBLoader {
             'streams' => $this->loadStreams(),
             'buildings' => $this->loadBuildings(),
             'room_types' => $this->loadRoomTypes(),
+            // Map of course_id => normalized room_type string (e.g., 'lecture_hall')
+            'course_room_types' => $this->loadCourseRoomTypes(),
             'levels' => $this->loadLevels(),
             'programs' => $this->loadPrograms($streamId),
             'departments' => $this->loadDepartments($streamId)
@@ -247,6 +249,26 @@ class DBLoader {
 
     private function loadRoomTypes() {
         return $this->fetchAll("SELECT id, name, description, is_active FROM room_types WHERE is_active = 1");
+    }
+
+    /**
+     * Load preferred room types for courses as a map of course_id => normalized room_type string
+     */
+    private function loadCourseRoomTypes(): array {
+        $map = [];
+        $sql = "SELECT crt.course_id, rt.name AS room_type_name
+                FROM course_room_types crt
+                JOIN room_types rt ON rt.id = crt.room_type_id
+                WHERE crt.is_active = 1";
+        $rows = $this->fetchAll($sql);
+        foreach ($rows as $row) {
+            $name = isset($row['room_type_name']) ? (string)$row['room_type_name'] : '';
+            if ($name !== '') {
+                $normalized = strtolower(str_replace(' ', '_', $name));
+                $map[(int)$row['course_id']] = $normalized;
+            }
+        }
+        return $map;
     }
 
     private function loadLevels() {

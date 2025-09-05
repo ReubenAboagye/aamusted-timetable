@@ -4,7 +4,7 @@ include 'includes/header.php';
 include 'includes/sidebar.php';
 
 // Database connection
-include 'connect.php';
+include_once 'connect.php';
 
 // Include stream manager early
 include 'includes/stream_manager.php';
@@ -531,7 +531,53 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $u_stmt->bind_param('siiii', $name, $total_capacity, $divisions_count, $stream_id, $id);
                     if ($u_stmt->execute()) {
                         $u_stmt->close();
-                        redirect_with_flash('classes.php', 'success', 'Class updated successfully!');
+
+                        // Rebuild class_divisions to reflect new totals/counts (if table exists)
+                        $divisionsSynced = false;
+                        $syncedCount = 0;
+                        $checkDivTable = $conn->query("SHOW TABLES LIKE 'class_divisions'");
+                        if ($checkDivTable && $checkDivTable->num_rows > 0) {
+                            $newDivCount = max(1, (int)$divisions_count);
+                            $newTotal = max(0, (int)$total_capacity);
+                            $base = intdiv($newTotal, $newDivCount);
+                            $remainder = $newTotal % $newDivCount;
+
+                            $conn->begin_transaction();
+                            try {
+                                $delDiv = $conn->prepare("DELETE FROM class_divisions WHERE class_id = ?");
+                                if ($delDiv) {
+                                    $delDiv->bind_param("i", $id);
+                                    $delDiv->execute();
+                                    $delDiv->close();
+                                }
+
+                                $insDiv = $conn->prepare("INSERT INTO class_divisions (class_id, division_label, capacity) VALUES (?, ?, ?)");
+                                if ($insDiv) {
+                                    for ($d = 0; $d < $newDivCount; $d++) {
+                                        $label = '';
+                                        $n = $d;
+                                        while (true) {
+                                            $label = chr(65 + ($n % 26)) . $label;
+                                            $n = intdiv($n, 26) - 1;
+                                            if ($n < 0) break;
+                                        }
+                                        $capPart = $base + ($d < $remainder ? 1 : 0);
+                                        $insDiv->bind_param("isi", $id, $label, $capPart);
+                                        if ($insDiv->execute()) { $syncedCount++; }
+                                    }
+                                    $insDiv->close();
+                                }
+
+                                $conn->commit();
+                                $divisionsSynced = true;
+                            } catch (Exception $e) {
+                                $conn->rollback();
+                            }
+                        }
+
+                        $msg = 'Class updated successfully!';
+                        if ($divisionsSynced) { $msg .= ' Updated ' . $syncedCount . ' division records.'; }
+                        redirect_with_flash('classes.php', 'success', $msg);
                     } else {
                         $error_message = 'Error updating class: ' . $u_stmt->error;
                         $u_stmt->close();
@@ -1388,72 +1434,4 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 </script>
 
-<script>
-// Ensure batch rows are serialized correctly before form submit
-document.addEventListener('DOMContentLoaded', function() {
-    // Find the form that contains classRows
-    var container = document.getElementById('classRows');
-    if (!container) return;
-    var theForm = container.closest('form');
-    if (!theForm) return;
-
-    theForm.addEventListener('submit', function(e) {
-        // Collect visible class rows
-        var rows = container.querySelectorAll('.class-row');
-        var programVals = [];
-        var levelVals = [];
-        var capVals = [];
-        var divVals = [];
-        var rowErrors = [];
-
-        rows.forEach(function(r, idx) {
-            var prog = r.querySelector('.program-select');
-            var lvl = r.querySelector('.level-select');
-            var cap = r.querySelector('.capacity-input');
-            var divc = r.querySelector('.divisions-count');
-            var p = prog ? (prog.value || '') : '';
-            var l = lvl ? (lvl.value || '') : '';
-            var c = cap ? (cap.value || '') : '';
-
-            // Skip entirely empty rows
-            if (!p && !l && (!c || c === '0')) return;
-
-            // Validate required
-            if (!p || !l || !c || parseInt(c) <= 0) {
-                rowErrors.push(idx+1);
-                return;
-            }
-
-            programVals.push(p);
-            levelVals.push(l);
-            capVals.push(c);
-            divVals.push(divc ? divc.value : Math.ceil(parseInt(c)/100));
-        });
-
-        if (rowErrors.length > 0) {
-            e.preventDefault();
-            alert('Please fill Program, Level and Number of Students for rows: ' + rowErrors.join(', '));
-            return false;
-        }
-
-        // Remove any existing batch hidden inputs we added earlier
-        Array.from(theForm.querySelectorAll('input.batch-hidden')).forEach(function(n){ n.remove(); });
-
-        // Inject hidden inputs for arrays so server receives them reliably
-        programVals.forEach(function(v){
-            var inp = document.createElement('input'); inp.type = 'hidden'; inp.name = 'program_code[]'; inp.value = v; inp.className = 'batch-hidden'; theForm.appendChild(inp);
-        });
-        levelVals.forEach(function(v){
-            var inp = document.createElement('input'); inp.type = 'hidden'; inp.name = 'level_id[]'; inp.value = v; inp.className = 'batch-hidden'; theForm.appendChild(inp);
-        });
-        capVals.forEach(function(v){
-            var inp = document.createElement('input'); inp.type = 'hidden'; inp.name = 'total_capacity[]'; inp.value = v; inp.className = 'batch-hidden'; theForm.appendChild(inp);
-        });
-        divVals.forEach(function(v){
-            var inp = document.createElement('input'); inp.type = 'hidden'; inp.name = 'divisions_count[]'; inp.value = v; inp.className = 'batch-hidden'; theForm.appendChild(inp);
-        });
-
-        // Allow normal submit to proceed; server will pick up the arrays from hidden inputs
-    });
-});
-</script>
+<!-- Removed client-side hidden input injection that duplicated form arrays and caused double-counting -->

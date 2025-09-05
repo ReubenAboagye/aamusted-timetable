@@ -11,6 +11,11 @@ class ConstraintChecker {
     private $options;
     private $constraintWeights;
     private $cache = []; // Add caching for repeated calculations
+    private $indexes = [
+        'roomsById' => [],
+        'timeSlotsById' => [],
+        'classCapacityByClassId' => []
+    ];
     
     public function __construct(array $data, array $options = []) {
         $this->data = $data;
@@ -26,7 +31,9 @@ class ConstraintChecker {
                 'invalid_time_slot' => 1000,
                 'invalid_day' => 1000,
                 'invalid_room' => 1000,
-                'duplicate_assignment' => 1000
+                'duplicate_assignment' => 1000,
+                'break_split' => 1000,
+                'room_type_mismatch' => 1000
             ],
             'soft' => [
                 'room_capacity' => 10,
@@ -34,9 +41,13 @@ class ConstraintChecker {
                 'class_preference' => 5,
                 'time_distribution' => 3,
                 'room_preference' => 2,
-                'day_distribution' => 2
+                'day_distribution' => 2,
+                'idle_gap' => 4,
+                'early_start' => -1
             ]
         ];
+        // Build static indexes for faster checks
+        $this->buildIndexes();
     }
     
     /**
@@ -44,6 +55,49 @@ class ConstraintChecker {
      */
     private function clearCache(): void {
         $this->cache = [];
+    }
+
+    /**
+     * Build fast indexes for rooms, time slots, and class capacities
+     */
+    private function buildIndexes(): void {
+        // Rooms by id
+        if (!empty($this->data['rooms'])) {
+            foreach ($this->data['rooms'] as $room) {
+                if (isset($room['id'])) {
+                    $this->indexes['roomsById'][(int)$room['id']] = $room;
+                }
+            }
+        }
+        // Time slots by id
+        if (!empty($this->data['time_slots'])) {
+            foreach ($this->data['time_slots'] as $ts) {
+                if (isset($ts['id'])) {
+                    $this->indexes['timeSlotsById'][(int)$ts['id']] = $ts;
+                }
+            }
+        }
+        // Class capacity by class id (prefer individual_capacity, fallback to total_capacity)
+        $byClass = [];
+        if (!empty($this->data['class_courses'])) {
+            foreach ($this->data['class_courses'] as $cc) {
+                if (!isset($cc['class_id'])) { continue; }
+                $cid = (int)$cc['class_id'];
+                if (isset($cc['individual_capacity'])) {
+                    $cap = (int)$cc['individual_capacity'];
+                    $byClass[$cid] = max($byClass[$cid] ?? 0, $cap);
+                }
+            }
+        }
+        if (!empty($this->data['classes'])) {
+            foreach ($this->data['classes'] as $c) {
+                if (!isset($c['id'])) { continue; }
+                $cid = (int)$c['id'];
+                $cap = (int)($c['total_capacity'] ?? 0);
+                $byClass[$cid] = max($byClass[$cid] ?? 0, $cap);
+            }
+        }
+        $this->indexes['classCapacityByClassId'] = $byClass;
     }
     
     /**
@@ -226,6 +280,18 @@ class ConstraintChecker {
                     'message' => 'Invalid room'
                 ];
             }
+
+            // Hard: room type must match preferred type if set
+            $roomTypeMismatch = $this->checkRoomTypeMismatch($gene);
+            if ($roomTypeMismatch) {
+                $violations['room_type_mismatch'][] = $roomTypeMismatch;
+            }
+
+            // Hard: break should not split a lecture across consecutive slots
+            $breakSplit = $this->checkBreakSplit($gene);
+            if ($breakSplit) {
+                $violations['break_split'][] = $breakSplit;
+            }
         }
         
         return $violations;
@@ -276,6 +342,22 @@ class ConstraintChecker {
             $dayDistributionViolation = $this->checkDayDistribution($gene, $individual);
             if ($dayDistributionViolation) {
                 $violations['day_distribution'][] = $dayDistributionViolation;
+            }
+
+            // Precompute per-day slots once per individual to avoid O(n^2)
+            if (!isset($this->cache['precomputed_day_slots'])) {
+                $this->cache['precomputed_day_slots'] = $this->precomputeDaySlots($individual);
+            }
+            // Idle gaps for lecturer and class in the same day
+            $idle = $this->checkIdleGaps($gene, $individual);
+            if ($idle) {
+                $violations['idle_gap'][] = $idle;
+            }
+
+            // Encourage 7:00 AM start (reward by negative penalty if starts at earliest slot)
+            $early = $this->checkEarlyStart($gene);
+            if ($early) {
+                $violations['early_start'][] = $early;
             }
         }
         
@@ -328,13 +410,131 @@ class ConstraintChecker {
         if (!isset($this->data['rooms']) || empty($this->data['rooms'])) {
             return false;
         }
-        
-        foreach ($this->data['rooms'] as $room) {
-            if ($room['id'] == $gene['room_id']) {
-                return true;
+        $rid = (int)$gene['room_id'];
+        return isset($this->indexes['roomsById'][$rid]);
+    }
+
+    /**
+     * Check if selected room's type matches preferred type for the course if configured
+     */
+    private function checkRoomTypeMismatch(array $gene): ?array {
+        if (empty($this->data['course_room_types'])) { return null; }
+        $courseId = $gene['course_id'] ?? null;
+        if (!$courseId) { return null; }
+        $preferred = $this->data['course_room_types'][$courseId] ?? null;
+        if (!$preferred) { return null; }
+        $roomType = null;
+        $room = $this->indexes['roomsById'][(int)$gene['room_id']] ?? null;
+        if ($room) { $roomType = strtolower((string)($room['room_type'] ?? '')); }
+        if ($roomType && $roomType !== $preferred) {
+            return [
+                'class_course_id' => $gene['class_course_id'],
+                'course_id' => $courseId,
+                'room_id' => $gene['room_id'],
+                'room_type' => $roomType,
+                'preferred' => $preferred
+            ];
+        }
+        return null;
+    }
+
+    /**
+     * Check whether a multi-hour lecture crosses a break slot
+     */
+    private function checkBreakSplit(array $gene): ?array {
+        $duration = (int)($gene['course_duration'] ?? 1);
+        if ($duration <= 1) { return null; }
+        $startId = (int)$gene['time_slot_id'];
+        $slotMap = $this->indexes['timeSlotsById'];
+        for ($i = 0; $i < $duration; $i++) {
+            $sid = $startId + $i;
+            if (!isset($slotMap[$sid])) { return ['class_course_id' => $gene['class_course_id'], 'time_slot_id' => $sid, 'message' => 'Consecutive slot missing']; }
+            if (!empty($slotMap[$sid]['is_break'])) {
+                return [
+                    'class_course_id' => $gene['class_course_id'],
+                    'time_slot_id' => $sid,
+                    'message' => 'Lecture crosses a break period'
+                ];
             }
         }
-        return false;
+        return null;
+    }
+
+    /**
+     * Penalize large idle gaps for lecturers and classes within a day
+     */
+    private function checkIdleGaps(array $gene, array $individual): ?array {
+        $classId = $gene['class_id'];
+        $dayId = $gene['day_id'];
+        $timeSlotId = (int)$gene['time_slot_id'];
+        $lecturerKey = $gene['lecturer_course_id'] ?? $gene['lecturer_id'] ?? null;
+        $pre = $this->cache['precomputed_day_slots'] ?? ['class'=>[], 'lect'=>[]];
+        $classSlots = $pre['class'][$classId][$dayId] ?? [];
+        $lectSlots = $lecturerKey ? ($pre['lect'][$lecturerKey][$dayId] ?? []) : [];
+        $gap = function(array $slots, int $id) {
+            if (empty($slots)) return 0;
+            $prev = null; $next = null;
+            foreach ($slots as $s) {
+                if ($s < $id) { $prev = $s; }
+                if ($s > $id && $next === null) { $next = $s; break; }
+            }
+            $gap = 0;
+            if ($prev !== null) { $gap = max($gap, $id - $prev - 1); }
+            if ($next !== null) { $gap = max($gap, $next - $id - 1); }
+            return $gap;
+        };
+        $classGap = $gap($classSlots, $timeSlotId);
+        $lectGap = $gap($lectSlots, $timeSlotId);
+        $maxGap = max($classGap, $lectGap);
+        if ($maxGap >= 2) { // two or more empty slots around
+            return [
+                'class_course_id' => $gene['class_course_id'],
+                'gap_slots' => $maxGap,
+                'message' => 'Idle gap around this class/lecturer'];
+        }
+        return null;
+    }
+
+    /**
+     * Precompute per-day time slots for classes and lecturers
+     */
+    private function precomputeDaySlots(array $individual): array {
+        $classDaySlots = [];
+        $lectDaySlots = [];
+        foreach ($individual as $g) {
+            $day = $g['day_id'] ?? null;
+            $slot = $g['time_slot_id'] ?? null;
+            if (!$day || !$slot) { continue; }
+            $cid = $g['class_id'] ?? null;
+            if ($cid) {
+                $classDaySlots[$cid][$day][] = (int)$slot;
+            }
+            $lid = $g['lecturer_course_id'] ?? ($g['lecturer_id'] ?? null);
+            if ($lid) {
+                $lectDaySlots[$lid][$day][] = (int)$slot;
+            }
+        }
+        foreach ($classDaySlots as $cid => $byDay) {
+            foreach ($byDay as $day => $arr) { sort($classDaySlots[$cid][$day]); }
+        }
+        foreach ($lectDaySlots as $lid => $byDay) {
+            foreach ($byDay as $day => $arr) { sort($lectDaySlots[$lid][$day]); }
+        }
+        return ['class' => $classDaySlots, 'lect' => $lectDaySlots];
+    }
+
+    /**
+     * Reward early starts (7:00 AM) by emitting a negative-weight violation entry
+     */
+    private function checkEarlyStart(array $gene): ?array {
+        $slotMap = $this->indexes['timeSlotsById'];
+        $sid = (int)$gene['time_slot_id'];
+        if (!isset($slotMap[$sid])) return null;
+        $start = $slotMap[$sid]['start_time'] ?? '';
+        if ($start === '07:00:00') {
+            return [ 'class_course_id' => $gene['class_course_id'] ];
+        }
+        return null;
     }
     
     /**
@@ -356,16 +556,8 @@ class ConstraintChecker {
                 $totalClassCapacity += $classCourse['individual_capacity'] ?? 0;
             }
             
-            // Find room capacity
-            $roomCapacity = 0;
-            if (isset($this->data['rooms'])) {
-                foreach ($this->data['rooms'] as $room) {
-                    if ($room['id'] == $roomId) {
-                        $roomCapacity = $room['capacity'] ?? 0;
-                        break;
-                    }
-                }
-            }
+            // Find room capacity (indexed)
+            $roomCapacity = (int)($this->indexes['roomsById'][(int)$roomId]['capacity'] ?? 0);
             
             if ($roomCapacity < $totalClassCapacity) {
                 return [
@@ -381,38 +573,11 @@ class ConstraintChecker {
             // Handle individual assignment
             $classId = $gene['class_id'];
             
-            // Find class capacity from expanded class data
-            $classCapacity = 0;
-            if (isset($this->data['class_courses'])) {
-                foreach ($this->data['class_courses'] as $classCourse) {
-                    if ($classCourse['class_id'] == $classId && 
-                        isset($classCourse['individual_capacity'])) {
-                        $classCapacity = $classCourse['individual_capacity'];
-                        break;
-                    }
-                }
-            }
+            // Class capacity (indexed)
+            $classCapacity = (int)($this->indexes['classCapacityByClassId'][(int)$classId] ?? 0);
             
-            // Fallback to total_capacity if individual_capacity not found
-            if ($classCapacity == 0 && isset($this->data['classes'])) {
-                foreach ($this->data['classes'] as $class) {
-                    if ($class['id'] == $classId) {
-                        $classCapacity = $class['total_capacity'] ?? 0;
-                        break;
-                    }
-                }
-            }
-            
-            // Find room capacity
-            $roomCapacity = 0;
-            if (isset($this->data['rooms'])) {
-                foreach ($this->data['rooms'] as $room) {
-                    if ($room['id'] == $roomId) {
-                        $roomCapacity = $room['capacity'] ?? 0;
-                        break;
-                    }
-                }
-            }
+            // Find room capacity (indexed)
+            $roomCapacity = (int)($this->indexes['roomsById'][(int)$roomId]['capacity'] ?? 0);
             
             if ($roomCapacity < $classCapacity) {
                 return [

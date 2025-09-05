@@ -56,6 +56,20 @@ class TimetableRepresentation {
         $assignments = [];
         $courseDuration = $classCourse['hours_per_week'] ?? 1;
         
+        // Filter rooms by preferred room type if available
+        $roomsForCourse = $data['rooms'];
+        if (!empty($data['course_room_types']) && isset($classCourse['course_id'])) {
+            $preferredType = $data['course_room_types'][$classCourse['course_id']] ?? null;
+            if ($preferredType) {
+                $filtered = array_values(array_filter($roomsForCourse, function($room) use ($preferredType) {
+                    return isset($room['room_type']) && strtolower((string)$room['room_type']) === $preferredType;
+                }));
+                if (!empty($filtered)) {
+                    $roomsForCourse = $filtered;
+                }
+            }
+        }
+        
         // Create multiple genes for courses with duration > 1
         for ($i = 0; $i < $courseDuration; $i++) {
             $geneKey = $classCourse['id'] . '_' . $i; // Unique key for each slot
@@ -63,7 +77,7 @@ class TimetableRepresentation {
                 $classCourse,
                 $data['days'],
                 $data['time_slots'],
-                $data['rooms'],
+                $roomsForCourse,
                 $data['lecturer_courses'],
                 $i // Slot index within the course
             );
@@ -85,10 +99,26 @@ class TimetableRepresentation {
             $totalStudents += $classCourse['individual_capacity'] ?? self::getClassSize($classCourse['class_id']);
         }
         
-        // Find a room that can accommodate all students
+        // Find rooms that can accommodate all students
         $suitableRooms = array_filter($data['rooms'], function($room) use ($totalStudents) {
-            return $room['capacity'] >= $totalStudents;
+            return ($room['capacity'] ?? 0) >= $totalStudents;
         });
+        
+        // Further filter by preferred room type if available for this course
+        if (!empty($data['course_room_types'])) {
+            $baseCourseId = $classCourses[0]['course_id'] ?? null;
+            if ($baseCourseId) {
+                $preferredType = $data['course_room_types'][$baseCourseId] ?? null;
+                if ($preferredType) {
+                    $filtered = array_values(array_filter($suitableRooms, function($room) use ($preferredType) {
+                        return isset($room['room_type']) && strtolower((string)$room['room_type']) === $preferredType;
+                    }));
+                    if (!empty($filtered)) {
+                        $suitableRooms = $filtered;
+                    }
+                }
+            }
+        }
         
         if (empty($suitableRooms)) {
             // No suitable room found for combination
@@ -155,20 +185,33 @@ class TimetableRepresentation {
         }
         
         // Get random time slot with proper error checking
-        // For consecutive slots, we need to ensure we don't go beyond available time slots
+        // For consecutive slots, ensure we don't cross break slots
         $courseDuration = $classCourse['hours_per_week'] ?? 1;
         $maxStartIndex = count($timeSlots) - $courseDuration;
-        
         if ($maxStartIndex < 0) {
             throw new Exception("Not enough time slots available for course duration $courseDuration");
         }
         
-        // If this is the first slot of a multi-slot course, choose a random start position
+        // Build list of valid start indices where none of the consecutive slots are break slots
+        $validStartIndices = [];
+        for ($idx = 0; $idx <= $maxStartIndex; $idx++) {
+            $ok = true;
+            for ($k = 0; $k < $courseDuration; $k++) {
+                $slot = $timeSlots[$idx + $k];
+                if (!empty($slot['is_break'])) { $ok = false; break; }
+            }
+            if ($ok) { $validStartIndices[] = $idx; }
+        }
+        if (empty($validStartIndices)) {
+            // Fallback: if no continuous non-break window exists, allow any start
+            $validStartIndices = range(0, $maxStartIndex);
+        }
+        
         if ($slotIndex === 0) {
-            $randomTimeSlotIndex = rand(0, $maxStartIndex);
+            // Choose a valid start index
+            $randomTimeSlotIndex = $validStartIndices[array_rand($validStartIndices)];
         } else {
-            // For subsequent slots, use the next consecutive time slot
-            // This will be handled by the genetic algorithm to ensure consecutive slots
+            // Subsequent slots are not used directly in final conversion; keep random to maintain diversity
             $randomTimeSlotIndex = array_rand($timeSlots);
         }
         

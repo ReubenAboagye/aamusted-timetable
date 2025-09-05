@@ -2,7 +2,6 @@
 $pageTitle = 'Map Courses to Lecturers';
 include 'includes/header.php';
 include 'includes/sidebar.php';
-include 'connect.php';
 
 $success_message = '';
 $error_message = '';
