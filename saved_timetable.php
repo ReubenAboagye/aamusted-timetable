@@ -75,6 +75,7 @@ $main_query = "
         COUNT(DISTINCT co.id) as total_courses,
         COUNT(DISTINCT l.id) as total_lecturers,
         COUNT(DISTINCT r.id) as total_rooms,
+        MAX(COALESCE(t.academic_year, '')) as academic_year,
         MAX(t.created_at) as last_updated
     FROM timetable t
     " . $class_join . "
@@ -267,7 +268,7 @@ $error_message = $_GET['error'] ?? '';
                                             <strong><?php echo htmlspecialchars($timetable['stream_name']); ?></strong>
                                         </td>
                                         <td>
-                                            <span class="badge bg-info"><?php echo htmlspecialchars($timetable['academic_year']); ?></span>
+                                            <span class="badge bg-info"><?php echo htmlspecialchars($timetable['academic_year'] ?? '—'); ?></span>
                                         </td>
                                         <td>
                                             <?php 
