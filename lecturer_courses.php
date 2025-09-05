@@ -107,6 +107,11 @@ if (!empty($params)) {
     <div class="table-container">
         <div class="table-header d-flex justify-content-between align-items-center">
             <h4><i class="fas fa-user-plus me-2"></i>Map Courses to Lecturers</h4>
+            <div>
+                <a href="download_lecturer_courses.php?department_id=<?php echo $selected_department; ?>&search_name=<?php echo urlencode($search_name); ?>" class="btn btn-outline-success btn-sm">
+                    <i class="fas fa-download me-1"></i> Download Records
+                </a>
+            </div>
         </div>
 
         <?php if ($success_message): ?>
