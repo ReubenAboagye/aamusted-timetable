@@ -194,13 +194,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $error_message = 'Timetable generation failed: ' . $e->getMessage();
             }
         }
-    } elseif ($action === 'generate_exams_timetable') {
-        // Placeholder: exams timetable generation not implemented yet
-        if (function_exists('redirect_with_flash')) {
-            redirect_with_flash('generate_timetable.php', 'danger', 'Exams timetable generation is not implemented yet.');
-        } else {
-            $error_message = 'Exams timetable generation is not implemented yet.';
-        }
     }
 }
 
@@ -502,9 +495,6 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                                 <div class="d-flex gap-2 align-items-center">
                                     <button type="submit" class="btn btn-primary btn-lg" id="generate-btn">
                                         <i class="fas fa-magic me-2"></i>Generate Lecture Timetable
-                                    </button>
-                                    <button type="button" class="btn btn-outline-primary btn-lg" onclick="generateExamsTimetable()">
-                                        <i class="fas fa-file-alt me-2"></i>Generate Exams Timetable
                                     </button>
                                     <button type="button" class="btn btn-success btn-lg" onclick="saveToSavedTimetables()" id="save-timetable-btn" style="display: none;">
                                         <i class="fas fa-save me-2"></i>Save Timetable
@@ -821,6 +811,8 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
         $template_days = [];
         $template_time_slots = [];
         $template_rooms = [];
+        // If exams weeks were set by POST earlier, use that to repeat skeletons
+        $exam_weeks_to_render = isset($generated_exam_weeks) ? intval($generated_exam_weeks) : 0;
         
         // Get days for this stream
         if (!empty($current_stream_id)) {
@@ -995,6 +987,134 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
             }
         }
 
+        // If exam generation was requested, proceed to generate exam timetable entries
+        if (!empty($exam_weeks_to_render)) {
+            // Load active class_course records grouped by program and course
+            $class_courses_sql = "SELECT cc.id AS cc_id, cc.class_id, cc.course_id, cc.lecturer_id, c.name AS class_name, c.program_id, co.code AS course_code, co.name AS course_name
+                                   FROM class_courses cc
+                                   JOIN classes c ON cc.class_id = c.id
+                                   JOIN courses co ON cc.course_id = co.id
+                                   WHERE cc.is_active = 1
+                                   ORDER BY c.program_id, co.code";
+            $cc_rs = $conn->query($class_courses_sql);
+            // Group by course: all classes offering the same course must sit the exam together
+            $groups = [];
+            if ($cc_rs) {
+                while ($r = $cc_rs->fetch_assoc()) {
+                    $course = $r['course_id'];
+                    if (!isset($groups[$course])) $groups[$course] = [];
+                    $groups[$course][] = $r;
+                }
+            }
+
+            // Map course_id -> an available lecturer_course id(s) to satisfy FK
+            $lect_map = [];
+            $lec_rs = $conn->query("SELECT id, course_id, lecturer_id FROM lecturer_courses WHERE is_active = 1");
+            if ($lec_rs) {
+                while ($lr = $lec_rs->fetch_assoc()) {
+                    $cid = $lr['course_id'];
+                    $lid = $lr['id'];
+                    $lect_map[$cid][] = ['id' => $lid, 'lecturer_id' => $lr['lecturer_id']];
+                }
+            }
+
+            // Build available time slots across weeks (skip break slots)
+            $slots = [];
+            for ($wk = 1; $wk <= $exam_weeks_to_render; $wk++) {
+                foreach ($template_days as $day) {
+                    foreach ($template_time_slots as $ts) {
+                        if (isset($ts['is_break']) && $ts['is_break']) continue;
+                        $slots[] = [
+                            'week' => $wk,
+                            'day_id' => $day['id'],
+                            'time_slot_id' => $ts['id']
+                        ];
+                    }
+                }
+            }
+
+            $room_ids = array_map(function($r){ return $r['id']; }, $template_rooms);
+            $room_ids = array_values($room_ids);
+
+            $roomOccupied = []; // slot_index => array of room ids used
+            $classOccupied = []; // class_id => slot_index
+            $exam_entries = [];
+            $unscheduled_groups = [];
+
+            // Greedy scheduling: for each course, find first slot where none of the classes have conflicts and enough rooms available
+            foreach ($groups as $courseId => $items) {
+                // items are class_course rows for this course across all classes/programs
+                $scheduled = false;
+                $needed_rooms = count($items);
+                for ($sidx = 0; $sidx < count($slots); $sidx++) {
+                    $slot = $slots[$sidx];
+                    $used_rooms = $roomOccupied[$sidx] ?? [];
+
+                    // check class conflicts: no class should already have an exam in this same slot
+                    $conflict = false;
+                    foreach ($items as $it) {
+                        if (isset($classOccupied[$it['class_id']]) && $classOccupied[$it['class_id']] == $sidx) { $conflict = true; break; }
+                    }
+                    if ($conflict) continue;
+
+                    // check room availability
+                    $available_rooms = array_values(array_diff($room_ids, $used_rooms));
+                    if (count($available_rooms) < $needed_rooms) continue;
+
+                    // assign each class to a room in this slot
+                    for ($i = 0; $i < $needed_rooms; $i++) {
+                        $room_id = $available_rooms[$i];
+                        $it = $items[$i];
+                        $lec_id = null;
+                        if (isset($lect_map[$it['course_id']]) && count($lect_map[$it['course_id']]) > 0) {
+                            // Prefer a lecturer_course with matching lecturer_id if class has lecturer_id
+                            if (!empty($it['lecturer_id'])) {
+                                foreach ($lect_map[$it['course_id']] as $lc) {
+                                    if ($lc['lecturer_id'] == $it['lecturer_id']) { $lec_id = $lc['id']; break; }
+                                }
+                            }
+                            // fallback to first available
+                            if ($lec_id === null) $lec_id = $lect_map[$it['course_id']][0]['id'];
+                        }
+                        $exam_entries[] = [
+                            'class_course_id' => $it['cc_id'],
+                            'lecturer_course_id' => $lec_id,
+                            'day_id' => $slot['day_id'],
+                            'time_slot_id' => $slot['time_slot_id'],
+                            'room_id' => $room_id,
+                            'division_label' => '',
+                            'semester' => $current_semester
+                        ];
+                        $used_rooms[] = $room_id;
+                        $classOccupied[$it['class_id']] = $sidx;
+                    }
+
+                    $roomOccupied[$sidx] = $used_rooms;
+                    $scheduled = true;
+                    break;
+                }
+
+                if (!$scheduled) {
+                    $unscheduled_groups[] = ['course_id' => $courseId];
+                }
+            }
+
+            // Insert generated exam entries into database
+            if (!empty($exam_entries)) {
+                $inserted = insertTimetableEntries($conn, $exam_entries);
+                if ($inserted > 0) {
+                    $success_message = "Generated exams timetable: $inserted entries created for $exam_weeks_to_render week(s).";
+                } else {
+                    $error_message = 'Exam generation completed but no entries were inserted (possible duplicates or DB constraint).';
+                }
+            }
+
+            if (!empty($unscheduled_groups)) {
+                error_log('Some exam groups could not be scheduled due to insufficient slots/rooms: ' . json_encode($unscheduled_groups));
+                if (empty($error_message)) $error_message = 'Some exams could not be scheduled automatically; check available rooms/time slots.';
+            }
+        }
+
         // Fetch actual timetable data for the current stream and semester
         $timetable_data = [];
         $course_spans = []; // Track which cells should be spanned
@@ -1114,12 +1234,19 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
 
         <!-- Timetable Template Preview -->
         <?php if (!empty($template_days) && !empty($template_time_slots) && !empty($template_rooms)): ?>
+        <?php
+            $weeks_to_loop = $exam_weeks_to_render > 0 ? $exam_weeks_to_render : 1;
+            for ($w = 1; $w <= $weeks_to_loop; $w++):
+        ?>
         <div class="row m-3">
             <div class="col-12">
                 <div class="card mt-3">
                     <div class="card-header">
                         <h6 class="mb-0">
                             <i class="fas fa-table me-2"></i>Timetable Preview
+                            <?php if ($weeks_to_loop > 1): ?>
+                                <span class="badge bg-secondary ms-2">Week <?php echo $w; ?> / <?php echo $weeks_to_loop; ?></span>
+                            <?php endif; ?>
                             <?php if (!empty($timetable_data)): ?>
                                 <span class="badge bg-success ms-2">Generated Data</span>
                                 <span class="badge bg-primary ms-1"><?php 
@@ -1484,6 +1611,7 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                             Unable to generate template preview. Please ensure you have active days, time slots, and rooms configured.
                         </div>
                         <?php endif; ?>
+                        <?php endfor; ?>
                     </div>
                 </div>
             </div>
@@ -1972,15 +2100,20 @@ document.addEventListener('DOMContentLoaded', function () {
 
 // Generate exams timetable function
 function generateExamsTimetable() {
-    const timetableName = document.querySelector('input[name="timetable_name"]').value;
-    const semester = document.querySelector('select[name="semester"]').value;
-    
-    if (!timetableName || !semester) {
-        alert('Please fill in both Timetable Name and Semester fields.');
+    // Prompt the user for number of weeks (1-3)
+    let weeks = prompt('Enter number of exam weeks (1-3):', '1');
+    if (weeks === null) return; // user cancelled
+    weeks = parseInt(weeks, 10);
+    if (isNaN(weeks) || weeks < 1 || weeks > 3) {
+        alert('Please enter a valid number of weeks between 1 and 3.');
         return;
     }
-    
-    showErrorMessage('Exams timetable generation is not implemented yet.');
+    // Redirect to dedicated exams page with weeks and semester as query params
+    const semesterSelect = document.querySelector('select[name="semester"]');
+    const url = new URL('generate_exams.php', window.location.origin);
+    url.searchParams.set('exam_weeks', weeks);
+    if (semesterSelect && semesterSelect.value) url.searchParams.set('semester', semesterSelect.value);
+    window.location.href = url.toString();
 }
 
 // Fetch generated timetable data from the database
