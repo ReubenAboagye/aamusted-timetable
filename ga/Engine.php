@@ -4,7 +4,7 @@
  * This is a minimal, synchronous implementation intended as a starting point.
  */
 require_once __DIR__ . '/DBLoader.php';
-require_once __DIR__ . '/Representation.php';
+require_once __DIR__ . '/TimetableRepresentation.php';
 require_once __DIR__ . '/Fitness.php';
 
 class Engine {
@@ -36,13 +36,10 @@ class Engine {
 
         // initialize population
         $population = [];
-        $templateGenome = Representation::emptyGenome($classCourses);
+        // Use TimetableRepresentation to create random individuals
         for ($i = 0; $i < $populationSize; $i++) {
-            $genome = [];
-            foreach ($templateGenome as $gid => $gtemp) {
-                $genome[$gid] = Representation::randomGene($gtemp, $days, $timeSlots, $rooms);
-            }
-            $population[] = $genome;
+            $individual = TimetableRepresentation::createRandomIndividual($this->data);
+            $population[] = $individual;
         }
 
         $best = null;
@@ -82,7 +79,7 @@ class Engine {
                 $mutCount = max(1, (int)round(count($genes) * 0.01));
                 for ($m = 0; $m < $mutCount; $m++) {
                     $g = $genes[array_rand($genes)];
-                    $child[$g] = Representation::randomGene($child[$g], $days, $timeSlots, $rooms);
+                    $child[$g] = TimetableRepresentation::cloneGeneWithNewAssignment($child[$g], $days, $timeSlots, $rooms);
                 }
                 $next[] = $child;
             }

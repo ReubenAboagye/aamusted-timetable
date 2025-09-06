@@ -55,6 +55,10 @@ class ConstraintChecker {
      */
     private function clearCache(): void {
         $this->cache = [];
+        // Force garbage collection to free memory
+        if (function_exists('gc_collect_cycles')) {
+            gc_collect_cycles();
+        }
     }
 
     /**
@@ -112,7 +116,7 @@ class ConstraintChecker {
         $totalHardScore = $this->calculateHardScore($hardViolations);
         $totalSoftScore = $this->calculateSoftScore($softViolations);
         
-        return [
+        $result = [
             'hard_violations' => $hardViolations,
             'soft_violations' => $softViolations,
             'hard_score' => $totalHardScore,
@@ -120,6 +124,13 @@ class ConstraintChecker {
             'total_score' => $totalHardScore + $totalSoftScore,
             'is_feasible' => empty($hardViolations)
         ];
+        
+        // Force garbage collection after evaluation
+        if (function_exists('gc_collect_cycles')) {
+            gc_collect_cycles();
+        }
+        
+        return $result;
     }
     
     /**
@@ -129,14 +140,25 @@ class ConstraintChecker {
     private function checkHardConstraints(array $individual): array {
         $violations = [];
         
-        // Track conflicts
+        // Track conflicts with limited memory usage
         $roomSlots = [];
         $lecturerSlots = [];
         $classSlots = [];
         $classCourseTimeSlots = []; // Track unique class-course-time combinations
         $processedGenes = []; // Track processed genes to avoid double-counting
         
+        // Limit the size of tracking arrays to prevent memory exhaustion
+        $maxTrackingSize = 10000;
+        
+        $geneCount = 0;
         foreach ($individual as $classCourseId => $gene) {
+            $geneCount++;
+            
+            // Periodic memory cleanup for large individuals
+            if ($geneCount % 100 === 0 && function_exists('gc_collect_cycles')) {
+                gc_collect_cycles();
+            }
+            
             // Check for missing assignments
             if (!$this->isValidAssignment($gene)) {
                 $violations['missing_assignment'][] = [
@@ -151,7 +173,11 @@ class ConstraintChecker {
             if (isset($processedGenes[$geneId])) {
                 continue; // Skip if we've already processed this gene
             }
-            $processedGenes[$geneId] = true;
+            
+            // Prevent tracking arrays from growing too large
+            if (count($processedGenes) < $maxTrackingSize) {
+                $processedGenes[$geneId] = true;
+            }
             
             // Check for duplicate class-course-time combinations
             $classCourseTimeKey = $classCourseId . '|' . $gene['day_id'] . '|' . $gene['time_slot_id'];
@@ -177,7 +203,9 @@ class ConstraintChecker {
                     $classId = $classCourse['class_id'];
                     
                     // Check class conflicts for each class in the combination
+                    $divLabel = $classCourse['division_label'] ?? ($gene['division_label'] ?? '');
                     $classKey = $classId . '|' . $gene['day_id'] . '|' . $gene['time_slot_id'];
+                    if (!empty($divLabel)) { $classKey .= '|' . $divLabel; }
                     if (isset($classSlots[$classKey])) {
                         $violations['class_conflict'][] = [
                             'class_course_id' => $classCourseId,
@@ -245,6 +273,7 @@ class ConstraintChecker {
                 
                 // Check class conflicts
                 $classKey = $gene['class_id'] . '|' . $gene['day_id'] . '|' . $gene['time_slot_id'];
+                if (!empty($gene['division_label'])) { $classKey .= '|' . $gene['division_label']; }
                 if (isset($classSlots[$classKey])) {
                     $violations['class_conflict'][] = [
                         'class_course_id' => $classCourseId,

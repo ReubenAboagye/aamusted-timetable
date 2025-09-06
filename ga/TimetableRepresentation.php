@@ -28,8 +28,25 @@ class TimetableRepresentation {
         
         // Process each course group
         foreach ($courseGroups as $courseId => $classCourses) {
-            if (count($classCourses) > 1) {
-                // Multiple class divisions offering the same course - can be combined
+            // Check if these are divisions of the same class
+            $parentClassId = null;
+            $isSameClass = true;
+            foreach ($classCourses as $cc) {
+                if ($parentClassId === null) {
+                    $parentClassId = $cc['class_id'] ?? null;
+                } elseif ($cc['class_id'] !== $parentClassId) {
+                    $isSameClass = false;
+                    break;
+                }
+            }
+
+            if (count($classCourses) > 1 && $isSameClass) {
+                // Divisions of same class: schedule independently, do not combine
+                foreach ($classCourses as $classCourse) {
+                    $individual = array_merge($individual, self::createIndividualAssignment($classCourse, $data));
+                }
+            } elseif (count($classCourses) > 1) {
+                // Different classes: attempt to combine
                 $combinedAssignment = self::createCombinedAssignment($classCourses, $data);
                 if ($combinedAssignment) {
                     $individual = array_merge($individual, $combinedAssignment);
@@ -239,7 +256,9 @@ class TimetableRepresentation {
         }
         
         return [
-            'class_course_id' => (int)($classCourse['id'] ?? $classCourse['class_course_id']),
+            // Preserve DB class_course id for FK while keeping a unique division key
+            'class_course_id' => (int)($classCourse['original_class_course_id'] ?? $classCourse['class_course_id'] ?? (is_numeric($classCourse['id'] ?? null) ? $classCourse['id'] : 0)),
+            'division_key' => (string)($classCourse['id'] ?? ($classCourse['class_course_id'] ?? '')),
             'class_id' => (int)$classCourse['class_id'],
             'course_id' => (int)$classCourse['course_id'],
             'lecturer_id' => isset($classCourse['lecturer_id']) ? (int)$classCourse['lecturer_id'] : null,
@@ -458,7 +477,17 @@ class TimetableRepresentation {
             
             // Class conflict (same class cannot have multiple courses at same time)
             if ($gene1['class_id'] == $gene2['class_id']) {
-                return true;
+                $div1 = isset($gene1['division_label']) ? (string)$gene1['division_label'] : '';
+                $div2 = isset($gene2['division_label']) ? (string)$gene2['division_label'] : '';
+                // If both have no division label, they conflict
+                if ($div1 === '' && $div2 === '') {
+                    return true;
+                }
+                // If both have division labels and they're equal, they conflict
+                if ($div1 !== '' && $div2 !== '' && $div1 === $div2) {
+                    return true;
+                }
+                // If division labels differ, they are different divisions and do not conflict
             }
         }
         

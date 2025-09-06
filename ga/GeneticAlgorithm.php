@@ -133,6 +133,11 @@ class GeneticAlgorithm {
                 'soft_violations' => $currentBest['fitness']['soft_violations']
             ];
             
+            // Periodic memory cleanup
+            if ($generation % 10 === 0 && function_exists('gc_collect_cycles')) {
+                gc_collect_cycles();
+            }
+            
             // Check for convergence
             if ($currentBest['fitness']['total_score'] <= $this->options['fitness_threshold']) {
                 break;
@@ -185,6 +190,7 @@ class GeneticAlgorithm {
      */
     private function evaluatePopulation(array $population): array {
         $evaluated = [];
+        $count = 0;
         
         foreach ($population as $individual) {
             $fitness = $this->constraints->evaluateFitness($individual);
@@ -192,6 +198,12 @@ class GeneticAlgorithm {
                 'individual' => $individual,
                 'fitness' => $fitness
             ];
+            
+            // Periodic memory cleanup
+            $count++;
+            if ($count % 10 === 0 && function_exists('gc_collect_cycles')) {
+                gc_collect_cycles();
+            }
         }
         
         return $evaluated;
@@ -308,26 +320,30 @@ class GeneticAlgorithm {
         foreach ($geneGroups as $classCourseId => $genes) {
             if (mt_rand() / mt_getrandmax() < $this->mutationRate) {
                 try {
-                    // Mutate the first gene (base position) and update all related genes
+                    // Mutate only assignment (day/time/room) while preserving per-division attributes
                     $baseGene = $genes[0];
-                    $newBaseGene = TimetableRepresentation::createRandomGene(
-                        $baseGene, 
-                        $this->data['days'], 
-                        $this->data['time_slots'], 
-                        $this->data['rooms'],
-                        [],
-                        $baseGene['slot_index']
+                    $newAssignment = TimetableRepresentation::cloneGeneWithNewAssignment(
+                        $baseGene,
+                        $this->data['days'],
+                        $this->data['time_slots'],
+                        $this->data['rooms']
                     );
-                    
-                    // Update all genes for this class-course
+
                     foreach ($genes as $gene) {
+                        $updated = $gene;
+                        $updated['day_id'] = $newAssignment['day_id'];
+                        $updated['time_slot_id'] = $newAssignment['time_slot_id'];
+                        $updated['room_id'] = $newAssignment['room_id'];
+                        if (isset($newAssignment['lecturer_course_id'])) {
+                            $updated['lecturer_course_id'] = $newAssignment['lecturer_course_id'];
+                        }
+                        // Keep division_label untouched so divisions remain distinct
                         $geneKey = $classCourseId . '_' . $gene['slot_index'];
-                        $mutated[$geneKey] = $newBaseGene;
+                        $mutated[$geneKey] = $updated;
                     }
                 } catch (Exception $e) {
                     // Log the error but continue with the original genes
                     error_log("Mutation error for class course $classCourseId: " . $e->getMessage());
-                    // Keep the original genes unchanged
                 }
             }
         }
@@ -434,37 +450,44 @@ class GeneticAlgorithm {
                     }
                 }
             } else {
-                // Handle individual assignment
+                // Handle individual assignment - ensure each division gene in the group is emitted
                 $courseDuration = $genes[0]['course_duration'] ?? 1;
-                $baseTimeSlotId = $genes[0]['time_slot_id'];
-                $baseDayId = $genes[0]['day_id'];
-                $baseRoomId = $genes[0]['room_id'];
-                
-                for ($i = 0; $i < $courseDuration; $i++) {
-                    $timeSlotId = $baseTimeSlotId + $i;
-                    $divisionLabel = $genes[0]['division_label'];
-                    
-                    // Create unique key to prevent duplicates
-                    $uniqueKey = $classCourseId . '-' . $baseDayId . '-' . $timeSlotId . '-' . $divisionLabel;
-                    
-                    if (!in_array($uniqueKey, $uniqueKeys)) {
-                        $uniqueKeys[] = $uniqueKey;
-                        
-                        $timetableEntries[] = [
-                            'class_course_id' => $classCourseId,
-                            'lecturer_course_id' => $genes[0]['lecturer_course_id'],
-                            'day_id' => $baseDayId,
-                            'time_slot_id' => $timeSlotId,
-                            'room_id' => $baseRoomId,
-                            'division_label' => $divisionLabel,
-                            'semester' => $this->options['semester'],
-                            'academic_year' => $this->options['academic_year'],
-                            'timetable_type' => 'lecture',
-                            'is_active' => 1
-                        ];
-                    } else {
-                        // Log duplicate for debugging
-                        error_log("Duplicate detected in individual assignment: " . $uniqueKey);
+
+                // For each gene (which may represent a division of the parent class_course), emit entries
+                foreach ($genes as $gene) {
+                    $baseTimeSlotId = $gene['time_slot_id'];
+                    $baseDayId = $gene['day_id'];
+                    $baseRoomId = $gene['room_id'];
+                    $divisionLabel = $gene['division_label'] ?? '';
+
+                    // Resolve original class_course id to use as FK
+                    $actualClassCourseId = $gene['original_class_course_id'] ?? $gene['class_course_id'] ?? $classCourseId;
+
+                    for ($i = 0; $i < $courseDuration; $i++) {
+                        $timeSlotId = $baseTimeSlotId + $i;
+
+                        // Create unique key to prevent duplicates
+                        $uniqueKey = $actualClassCourseId . '-' . $baseDayId . '-' . $timeSlotId . '-' . $divisionLabel;
+
+                        if (!in_array($uniqueKey, $uniqueKeys)) {
+                            $uniqueKeys[] = $uniqueKey;
+
+                            $timetableEntries[] = [
+                                'class_course_id' => $actualClassCourseId,
+                                'lecturer_course_id' => $gene['lecturer_course_id'],
+                                'day_id' => $baseDayId,
+                                'time_slot_id' => $timeSlotId,
+                                'room_id' => $baseRoomId,
+                                'division_label' => $divisionLabel,
+                                'semester' => $this->options['semester'],
+                                'academic_year' => $this->options['academic_year'],
+                                'timetable_type' => 'lecture',
+                                'is_active' => 1
+                            ];
+                        } else {
+                            // Log duplicate for debugging
+                            error_log("Duplicate detected in individual assignment: " . $uniqueKey);
+                        }
                     }
                 }
             }

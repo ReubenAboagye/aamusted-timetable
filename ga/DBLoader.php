@@ -30,7 +30,7 @@ class DBLoader {
             'lecturers' => $this->loadLecturers($streamId),
             'rooms' => $this->loadRooms($streamId),
             'time_slots' => $this->loadTimeSlots($streamId),
-            'days' => $this->loadDays(),
+            'days' => $this->loadDays($streamId),
             'streams' => $this->loadStreams(),
             'buildings' => $this->loadBuildings(),
             'room_types' => $this->loadRoomTypes(),
@@ -129,8 +129,50 @@ class DBLoader {
                 $expandedResults[] = $expandedRow;
             }
         }
+
+        // Duplicate courses across all divisions of a class
+        $classToCourses = [];
+        $expandedWithCourses = [];
         
-        return $expandedResults;
+        // Group original courses by parent class
+        foreach ($expandedResults as $row) {
+            $parentClassId = (int)($row['class_id'] ?? 0);
+            $divisionLabel = $row['division_label'] ?? '';
+            
+            if ($divisionLabel === '') { // Original non-division row
+                if (!isset($classToCourses[$parentClassId])) {
+                    $classToCourses[$parentClassId] = [];
+                }
+                $classToCourses[$parentClassId][] = $row;
+            }
+        }
+
+        // For each expanded division, duplicate all courses from its parent class
+        foreach ($expandedResults as $row) {
+            $parentClassId = (int)($row['class_id'] ?? 0);
+            $divisionLabel = $row['division_label'] ?? '';
+            
+            if ($divisionLabel !== '' && isset($classToCourses[$parentClassId])) {
+                // This is a division - duplicate all courses from parent class
+                foreach ($classToCourses[$parentClassId] as $parentCourse) {
+                    $dup = $row;
+                    $dup['course_id'] = $parentCourse['course_id'];
+                    $dup['course_code'] = $parentCourse['course_code'];
+                    $dup['course_name'] = $parentCourse['course_name'];
+                    $dup['hours_per_week'] = $parentCourse['hours_per_week'];
+                    $dup['lecturer_id'] = $parentCourse['lecturer_id'];
+                    $dup['semester'] = $parentCourse['semester'];
+                    $dup['academic_year'] = $parentCourse['academic_year'];
+                    $dup['id'] = $parentCourse['id'] . '_' . $divisionLabel; // Unique per course+division
+                    $expandedWithCourses[] = $dup;
+                }
+            } else {
+                // This is the original non-division row
+                $expandedWithCourses[] = $row;
+            }
+        }
+        
+        return $expandedWithCourses;
     }
     
     /**
@@ -235,7 +277,59 @@ class DBLoader {
                                FROM time_slots WHERE is_mandatory = 1 ORDER BY start_time");
     }
 
-    private function loadDays() {
+    private function loadDays($streamId = null) {
+        if ($streamId) {
+            // Get stream-specific active days
+            $streamSql = "SELECT active_days FROM streams WHERE id = ?";
+            $stmt = $this->conn->prepare($streamSql);
+            $stmt->bind_param("i", $streamId);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            
+            if ($streamRow = $result->fetch_assoc()) {
+                $activeDaysJson = $streamRow['active_days'];
+                if (!empty($activeDaysJson)) {
+                    $activeDaysArray = json_decode($activeDaysJson, true);
+                    if (is_array($activeDaysArray) && count($activeDaysArray) > 0) {
+                        // Validate day names exist in database
+                        $validDays = [];
+                        foreach ($activeDaysArray as $dayName) {
+                            $checkSql = "SELECT id FROM days WHERE name = ? AND is_active = 1";
+                            $checkStmt = $this->conn->prepare($checkSql);
+                            $checkStmt->bind_param("s", $dayName);
+                            $checkStmt->execute();
+                            if ($checkStmt->get_result()->num_rows > 0) {
+                                $validDays[] = $dayName;
+                            }
+                            $checkStmt->close();
+                        }
+                        
+                        if (!empty($validDays)) {
+                            // Use stream-specific days
+                            $placeholders = str_repeat('?,', count($validDays) - 1) . '?';
+                            $sql = "SELECT id, name, is_active FROM days WHERE is_active = 1 AND name IN ($placeholders) ORDER BY id";
+                            $stmt = $this->conn->prepare($sql);
+                            $stmt->bind_param(str_repeat('s', count($validDays)), ...$validDays);
+                            $stmt->execute();
+                            $result = $stmt->get_result();
+                            $days = [];
+                            while ($row = $result->fetch_assoc()) {
+                                $days[] = $row;
+                            }
+                            $stmt->close();
+                            error_log("GA DBLoader using stream-specific days for stream $streamId: " . implode(', ', $validDays));
+                            return $days;
+                        }
+                    }
+                }
+            }
+            $stmt->close();
+        }
+        
+        // Fallback to all active days
+        if ($streamId) {
+            error_log("GA DBLoader falling back to all days for stream $streamId");
+        }
         return $this->fetchAll("SELECT id, name, is_active FROM days WHERE is_active = 1 ORDER BY id");
     }
 
