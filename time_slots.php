@@ -15,7 +15,6 @@ $current_stream_id = $streamManager->getCurrentStreamId();
 	$action = $_POST['action'];
 			if ($action === 'add') {
 		$start_time = $conn->real_escape_string($_POST['start_time']);
-		$end_time = $conn->real_escape_string($_POST['end_time']);
 		$duration = (int)$_POST['duration'];
 		$is_break = isset($_POST['is_break']) ? 1 : 0;
 		$is_mandatory = isset($_POST['is_mandatory']) ? 1 : 0;
@@ -25,15 +24,14 @@ $current_stream_id = $streamManager->getCurrentStreamId();
 		if ($start_minutes !== 0) {
 			$error_message = 'Start time must be on the hour (XX:00 format).';
 		} else {
-			// Calculate end time as start time + 60 minutes
+			// Calculate end time as start time + duration minutes
 			$start_obj = new DateTime($start_time);
 			$end_obj = clone $start_obj;
-			$end_obj->add(new DateInterval('PT60M'));
+			$end_obj->add(new DateInterval('PT' . $duration . 'M'));
 			$calculated_end_time = $end_obj->format('H:i:s');
 			
-			// Override user-provided end time and duration
+			// Use calculated end time
 			$end_time = $calculated_end_time;
-			$duration = 60;
 
 			$stmt = $conn->prepare("INSERT INTO time_slots (start_time, end_time, duration, is_break, is_mandatory) VALUES (?, ?, ?, ?, ?)");
 			$stmt->bind_param('ssiii', $start_time, $end_time, $duration, $is_break, $is_mandatory);
@@ -47,6 +45,7 @@ $current_stream_id = $streamManager->getCurrentStreamId();
 	} elseif ($action === 'add_multiple') {
 		$base_start_time = $conn->real_escape_string($_POST['base_start_time']);
 		$num_slots = (int)$_POST['num_slots'];
+		$duration = (int)$_POST['duration'];
 		$is_break = isset($_POST['is_break']) ? 1 : 0;
 		$is_mandatory = isset($_POST['is_mandatory']) ? 1 : 0;
 
@@ -64,15 +63,13 @@ $current_stream_id = $streamManager->getCurrentStreamId();
 			for ($i = 0; $i < $num_slots; $i++) {
 				// Calculate start time for this slot (XX:00 format)
 				$start_time_obj = new DateTime($base_start_time);
-				$start_time_obj->add(new DateInterval('PT' . ($i * 60) . 'M')); // 60-minute intervals
+				$start_time_obj->add(new DateInterval('PT' . ($i * $duration) . 'M')); // Use flexible duration intervals
 				$start_time = $start_time_obj->format('H:i:s');
 
-				// Calculate end time as start time + 60 minutes
+				// Calculate end time as start time + duration minutes
 				$end_time_obj = clone $start_time_obj;
-				$end_time_obj->add(new DateInterval('PT60M'));
+				$end_time_obj->add(new DateInterval('PT' . $duration . 'M'));
 				$end_time = $end_time_obj->format('H:i:s');
-
-				$duration = 60; // Fixed 60-minute duration
 
 				if ($stmt->execute()) {
 					$success_count++;
@@ -163,7 +160,13 @@ $assigned_map = array_flip($assigned_time_slot_ids);
 						<td><?php echo substr($ts['start_time'],0,5); ?></td>
 						<td><?php echo substr($ts['end_time'],0,5); ?></td>
 						<td><?php echo htmlspecialchars($ts['duration']); ?></td>
-						<td><?php echo $ts['is_break'] ? 'Yes' : 'No'; ?></td>
+						<td>
+							<?php if ($ts['is_break']): ?>
+								<span class="badge bg-warning text-dark">Break</span>
+							<?php else: ?>
+								<span class="badge bg-success">Regular</span>
+							<?php endif; ?>
+						</td>
 						<td><?php echo $ts['is_mandatory'] ? 'Yes' : 'No'; ?></td>
 						<td class="assigned-cell"><?php echo isset($assigned_map[$ts['id']]) ? 'Yes' : '-'; ?></td>
 						<td>
@@ -216,17 +219,17 @@ $assigned_map = array_flip($assigned_time_slot_ids);
 					<div class="mb-3">
 						<label class="form-label">Start Time</label>
 						<input type="time" name="start_time" class="form-control" step="3600" required>
-						<small class="form-text text-muted">Must be on the hour (XX:00). Duration will be 60 minutes.</small>
+						<small class="form-text text-muted">Must be on the hour (XX:00).</small>
+					</div>
+					<div class="mb-3">
+						<label class="form-label">Duration (minutes)</label>
+						<input type="number" name="duration" class="form-control" value="180" min="30" max="480" required>
+						<small class="form-text text-muted">Duration in minutes (default: 180 minutes = 3 hours)</small>
 					</div>
 					<div class="mb-3">
 						<label class="form-label">End Time</label>
 						<input type="time" name="end_time" class="form-control" step="3600" readonly>
-						<small class="form-text text-muted">Automatically calculated as start time + 60 minutes</small>
-					</div>
-					<div class="mb-3">
-						<label class="form-label">Duration (minutes)</label>
-						<input type="number" name="duration" class="form-control" value="60" readonly>
-						<small class="form-text text-muted">Fixed at 60 minutes</small>
+						<small class="form-text text-muted">Automatically calculated as start time + duration</small>
 					</div>
 					<div class="form-check mb-3">
 						<input type="checkbox" name="is_break" class="form-check-input" id="add_ts_break">
@@ -259,14 +262,21 @@ $assigned_map = array_flip($assigned_time_slot_ids);
 					<input type="hidden" name="action" value="add_multiple">
 					
 					<div class="row">
-						<div class="col-md-6">
+						<div class="col-md-4">
 							<div class="mb-3">
 								<label class="form-label">Base Start Time</label>
 								<input type="time" name="base_start_time" class="form-control" step="3600" required>
-								<small class="form-text text-muted">Must be on the hour (XX:00). Each slot will be 60 minutes.</small>
+								<small class="form-text text-muted">Must be on the hour (XX:00).</small>
 							</div>
 						</div>
-						<div class="col-md-6">
+						<div class="col-md-4">
+							<div class="mb-3">
+								<label class="form-label">Duration (minutes)</label>
+								<input type="number" name="duration" class="form-control" value="180" min="30" max="480" required>
+								<small class="form-text text-muted">Duration per slot (default: 180 min = 3 hours)</small>
+							</div>
+						</div>
+						<div class="col-md-4">
 							<div class="mb-3">
 								<label class="form-label">Number of Slots</label>
 								<input type="number" name="num_slots" class="form-control" min="1" max="20" value="5" required>
@@ -276,8 +286,8 @@ $assigned_map = array_flip($assigned_time_slot_ids);
 					</div>
 					
 					<div class="alert alert-info">
-						<strong>Format:</strong> Each time slot will be exactly 60 minutes, starting on the hour (XX:00).<br>
-						<strong>Example:</strong> If you start at 08:00 and create 5 slots, you'll get: 08:00-09:00, 09:00-10:00, 10:00-11:00, 11:00-12:00, 12:00-13:00
+						<strong>Format:</strong> Each time slot will have the specified duration, starting on the hour (XX:00).<br>
+						<strong>Example:</strong> If you start at 08:00 with 180-minute duration and create 3 slots, you'll get: 08:00-11:00, 11:00-14:00, 14:00-17:00
 					</div>
 					
 					<div class="form-check mb-3">
@@ -305,24 +315,33 @@ $assigned_map = array_flip($assigned_time_slot_ids);
 <!-- Assigned slots are rendered server-side based on the current stream in the header/session -->
 
 <script>
-// Auto-calculate end time when start time changes
+// Auto-calculate end time when start time or duration changes
 document.addEventListener('DOMContentLoaded', function() {
     const startTimeInput = document.querySelector('input[name="start_time"]');
     const endTimeInput = document.querySelector('input[name="end_time"]');
+    const durationInput = document.querySelector('input[name="duration"]');
     
-    if (startTimeInput && endTimeInput) {
-        startTimeInput.addEventListener('change', function() {
-            const startTime = this.value;
-            if (startTime) {
-                // Create a Date object with the start time
-                const startDate = new Date('2000-01-01T' + startTime + ':00');
-                // Add 60 minutes
-                startDate.setMinutes(startDate.getMinutes() + 60);
-                // Format as HH:MM
-                const endTime = startDate.toTimeString().slice(0, 5);
-                endTimeInput.value = endTime;
-            }
-        });
+    function calculateEndTime() {
+        const startTime = startTimeInput ? startTimeInput.value : '';
+        const duration = durationInput ? parseInt(durationInput.value) || 180 : 180;
+        
+        if (startTime && endTimeInput) {
+            // Create a Date object with the start time
+            const startDate = new Date('2000-01-01T' + startTime + ':00');
+            // Add duration minutes
+            startDate.setMinutes(startDate.getMinutes() + duration);
+            // Format as HH:MM
+            const endTime = startDate.toTimeString().slice(0, 5);
+            endTimeInput.value = endTime;
+        }
+    }
+    
+    if (startTimeInput) {
+        startTimeInput.addEventListener('change', calculateEndTime);
+    }
+    
+    if (durationInput) {
+        durationInput.addEventListener('input', calculateEndTime);
     }
 });
 </script>

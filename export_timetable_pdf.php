@@ -42,6 +42,7 @@ $select_parts = [
     "ts.start_time",
     "ts.end_time",
     "c.name AS class_name",
+    "t.division_label",
     "co.code AS course_code",
     "co.name AS course_name",
     "IFNULL(l.name, '') AS lecturer_name",
@@ -70,6 +71,9 @@ $joins[] = "JOIN days d ON t.day_id = d.id";
 $joins[] = "JOIN time_slots ts ON t.time_slot_id = ts.id";
 $joins[] = "JOIN rooms r ON t.room_id = r.id";
 
+// support optional division filter
+$division_label = isset($_GET['division_label']) ? $_GET['division_label'] : '';
+
 $where = ["c.stream_id = ?", "t.semester = ?"];
 $params = [$selected_stream, $selected_semester];
 $types = 'ii';
@@ -78,6 +82,12 @@ if ($role === 'class' && $class_id > 0) {
     $where[] = "c.id = ?";
     $params[] = $class_id;
     $types .= 'i';
+}
+// apply division filter when provided
+if ($role === 'class' && !empty($division_label)) {
+    $where[] = "t.division_label = ?";
+    $params[] = $division_label;
+    $types .= 's';
 }
 if ($role === 'department' && $department_id > 0) {
     $joins[] = "JOIN programs p ON c.program_id = p.id";
@@ -127,30 +137,31 @@ $safeRole = htmlspecialchars($role_title, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 $safeFilter = htmlspecialchars($filter_value !== '' ? $filter_value : 'All', ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 $safeSemester = htmlspecialchars((string)$selected_semester, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 
+// Build rows grouped by day but render day only on the first row of each day
 $rowsHtml = '';
-// Group by day to calculate rowspans
 $dayToRows = [];
 foreach ($rows as $r) {
     $dayToRows[$r['day_name']][] = $r;
 }
-
 foreach ($dayToRows as $dayName => $dayRows) {
-    $rowspan = count($dayRows);
     $first = true;
     foreach ($dayRows as $r) {
         $rowsHtml .= '<tr>';
-        if ($first) {
-            $rowsHtml .= '<td rowspan="' . intval($rowspan) . '">' . htmlspecialchars($dayName) . '</td>';
-            $first = false;
-        }
+        // show day only for the first row of the day to achieve merged appearance
+        $dayCell = $first ? htmlspecialchars($dayName) : '';
+        // Format period as "7:00 AM - 10:00 AM"
+        $startFmt = !empty($r['start_time']) ? date('g:i A', strtotime($r['start_time'])) : '';
+        $endFmt = !empty($r['end_time']) ? date('g:i A', strtotime($r['end_time'])) : '';
+        $period = trim($startFmt . ($endFmt ? ' - ' . $endFmt : ''));
         $rowsHtml
-            .= '<td>' . htmlspecialchars($r['start_time']) . '</td>'
-            . '<td>' . htmlspecialchars($r['end_time']) . '</td>'
-            . '<td><strong>' . htmlspecialchars($r['class_name']) . '</strong></td>'
+            .= '<td>' . $dayCell . '</td>'
+            . '<td>' . htmlspecialchars($period) . '</td>'
+            . '<td><strong>' . htmlspecialchars($r['class_name'] . (isset($r['division_label']) && $r['division_label'] ? ' ' . $r['division_label'] : '')) . '</strong></td>'
             . '<td>' . htmlspecialchars(($r['course_code'] ? ($r['course_code'] . ' - ') : '') . $r['course_name']) . '</td>'
             . '<td>' . htmlspecialchars($r['lecturer_name']) . '</td>'
             . '<td>' . htmlspecialchars($r['room_name']) . '</td>'
             . '</tr>';
+        $first = false;
     }
 }
 
@@ -162,8 +173,14 @@ $html = '<html><head><meta charset="UTF-8"><style>
     .subtitle { margin:4px 0 0; color:#444; font-size:12px; text-align:center; }
     .meta { margin:10px 0 14px; font-size:12px; text-align:center; }
     .meta span { display:inline-block; margin:0 10px; }
-    table { width:100%; border-collapse:collapse; }
-    th, td { border:1px solid #ddd; padding:6px 8px; }
+    table { width:100%; border-collapse:collapse; table-layout: fixed; }
+    col.day { width:12%; }
+    col.period { width:16%; }
+    col.class { width:16%; }
+    col.course { width:36%; }
+    col.lecturer { width:12%; }
+    col.room { width:10%; }
+    th, td { border:1px solid #ddd; padding:6px 8px; word-wrap:break-word; }
     thead th { background:#f2f2f2; font-weight:600; }
     </style></head><body>'
     . '<div class="header">'
@@ -172,7 +189,7 @@ $html = '<html><head><meta charset="UTF-8"><style>
     . '<div class="subtitle">Timetable - ' . $safeTitle . ' | Semester ' . $safeSemester . '</div>'
     . '</div>'
     . '<div class="meta"><span><strong>Role:</strong> ' . $safeRole . '</span><span><strong>Filter:</strong> ' . $safeFilter . '</span><span><strong>Generated:</strong> ' . htmlspecialchars(date('Y-m-d H:i')) . '</span></div>'
-    . '<table><thead><tr><th>Day</th><th>Start</th><th>End</th><th>Class</th><th>Course</th><th>Lecturer</th><th>Room</th></tr></thead><tbody>'
+    . '<table><colgroup><col class="day" /><col class="period" /><col class="class" /><col class="course" /><col class="lecturer" /><col class="room" /></colgroup><thead><tr><th>Day</th><th>Period</th><th>Class</th><th>Course</th><th>Lecturer</th><th>Room</th></tr></thead><tbody>'
     . $rowsHtml
     . '</tbody></table></body></html>';
 

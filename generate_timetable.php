@@ -1,7 +1,7 @@
 <?php
 // Set higher limits for genetic algorithm processing
 ini_set('max_execution_time', 300); // 5 minutes
-ini_set('memory_limit', '512M');    // 512MB memory limit
+ini_set('memory_limit', '1024M');   // 1GB memory limit
 set_time_limit(300);                // Alternative way to set execution time
 
 include 'connect.php';
@@ -108,8 +108,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $current_semester = $semester_int;
         
         // GA parameters (with sensible defaults - hidden from user)
-        $population_size = 100;
-        $generations = 500;
+        $population_size = 50;  // Reduced from 100 to save memory
+        $generations = 300;     // Reduced from 500 to save time
         $mutation_rate = 0.1;
         $crossover_rate = 0.8;
         $max_runtime = 300;
@@ -122,6 +122,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 clearExistingTimetable($conn, $semester_int, $stream_id);
                 
                 // Initialize genetic algorithm
+                // Determine academic year from stream manager if available
+                $academic_year = null;
+                if (isset($streamManager) && method_exists($streamManager, 'getCurrentAcademicYear')) {
+                    $academic_year = $streamManager->getCurrentAcademicYear();
+                }
+
                 $gaOptions = [
                     'population_size' => $population_size,
                     'generations' => $generations,
@@ -129,7 +135,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'crossover_rate' => $crossover_rate,
                     'max_runtime' => $max_runtime,
                     'stream_id' => $stream_id,
-                    'semester' => $semester_int
+                    'semester' => $semester_int,
+                    'academic_year' => $academic_year
                 ];
                 
                 $ga = new GeneticAlgorithm($conn, $gaOptions);
@@ -202,6 +209,22 @@ function clearExistingTimetable($conn, $semester, $stream_id) {
     // Check if timetable table has the new schema
     $has_class_course = $conn->query("SHOW COLUMNS FROM timetable LIKE 'class_course_id'")->num_rows > 0;
     
+    // Determine if timetable.semester is enum('first','second',...) or numeric and normalize input
+    $semTypeRes = $conn->query("SHOW COLUMNS FROM timetable LIKE 'semester'");
+    $semester_param = $semester;
+    if ($semTypeRes && $semTypeRow = $semTypeRes->fetch_assoc()) {
+        $semType = strtolower($semTypeRow['Type'] ?? '');
+        $isEnum = strpos($semType, 'enum(') !== false;
+        if ($isEnum) {
+            // Map various inputs to enum values
+            $sv = is_string($semester) ? strtolower(trim($semester)) : $semester;
+            if ($sv === 1 || $sv === '1' || $sv === 'first' || $sv === 'semester 1') { $semester_param = 'first'; }
+            elseif ($sv === 2 || $sv === '2' || $sv === 'second' || $sv === 'semester 2') { $semester_param = 'second'; }
+            elseif ($sv === 'summer') { $semester_param = 'summer'; }
+        }
+    }
+    if ($semTypeRes) { $semTypeRes->close(); }
+
     if ($has_class_course) {
         // New schema: clear via class_courses -> classes -> stream
         $sql = "DELETE t FROM timetable t 
@@ -209,14 +232,14 @@ function clearExistingTimetable($conn, $semester, $stream_id) {
                 JOIN classes c ON cc.class_id = c.id 
                 WHERE t.semester = ? AND c.stream_id = ?";
         $stmt = $conn->prepare($sql);
-        $stmt->bind_param("si", $semester, $stream_id);
+        $stmt->bind_param("si", $semester_param, $stream_id);
         $stmt->execute();
         $stmt->close();
         
         // Also clear any entries with the same semester to be safe
         $sql = "DELETE FROM timetable WHERE semester = ?";
         $stmt = $conn->prepare($sql);
-        $stmt->bind_param("s", $semester);
+        $stmt->bind_param("s", $semester_param);
         $stmt->execute();
         $stmt->close();
     } else {
@@ -225,14 +248,14 @@ function clearExistingTimetable($conn, $semester, $stream_id) {
                 JOIN classes c ON t.class_id = c.id 
                 WHERE t.semester = ? AND c.stream_id = ?";
         $stmt = $conn->prepare($sql);
-        $stmt->bind_param("si", $semester, $stream_id);
+        $stmt->bind_param("si", $semester_param, $stream_id);
         $stmt->execute();
         $stmt->close();
         
         // Also clear any entries with the same semester to be safe
         $sql = "DELETE FROM timetable WHERE semester = ?";
         $stmt = $conn->prepare($sql);
-        $stmt->bind_param("s", $semester);
+        $stmt->bind_param("s", $semester_param);
         $stmt->execute();
         $stmt->close();
     }
@@ -266,25 +289,126 @@ function insertTimetableEntries($conn, $entries) {
     
     $inserted_count = 0;
     $db_duplicate_keys = []; // Track duplicate keys for debugging
+    $occupiedSlotKeys = [];  // Track room-day-time occupied slots to avoid uq_timetable_slot violations
+    
+    // Prepare caches to validate FK references and repair lecturer_course_id when needed
+    $lecturerCourseIds = [];
+    $lecturerCourseByCourse = [];
+    $res = $conn->query("SELECT id, course_id FROM lecturer_courses WHERE is_active = 1");
+    if ($res) {
+        while ($row = $res->fetch_assoc()) {
+            $lecturerCourseIds[(int)$row['id']] = true;
+            $cid = (int)$row['course_id'];
+            if (!isset($lecturerCourseByCourse[$cid])) { $lecturerCourseByCourse[$cid] = (int)$row['id']; }
+        }
+        $res->close();
+    }
+    // Map class_course_id -> course_id for fallback resolution
+    $classCourseToCourse = [];
+    $res2 = $conn->query("SELECT id, course_id FROM class_courses WHERE is_active = 1");
+    if ($res2) {
+        while ($row = $res2->fetch_assoc()) {
+            $classCourseToCourse[(int)$row['id']] = (int)$row['course_id'];
+        }
+        $res2->close();
+    }
+    // Build FK existence maps to avoid FK constraint errors during insert
+    $validClassCourses = [];
+    $res3 = $conn->query("SELECT id FROM class_courses WHERE is_active = 1");
+    if ($res3) {
+        while ($row = $res3->fetch_assoc()) { $validClassCourses[(int)$row['id']] = true; }
+        $res3->close();
+    }
+    $validDays = [];
+    $res4 = $conn->query("SELECT id FROM days WHERE is_active = 1");
+    if ($res4) {
+        while ($row = $res4->fetch_assoc()) { $validDays[(int)$row['id']] = true; }
+        $res4->close();
+    }
+    $validTimeSlots = [];
+    $res5 = $conn->query("SELECT id FROM time_slots");
+    if ($res5) {
+        while ($row = $res5->fetch_assoc()) { $validTimeSlots[(int)$row['id']] = true; }
+        $res5->close();
+    }
+    $validRooms = [];
+    $res6 = $conn->query("SELECT id FROM rooms WHERE is_active = 1");
+    if ($res6) {
+        while ($row = $res6->fetch_assoc()) { $validRooms[(int)$row['id']] = true; }
+        $res6->close();
+    }
+    $skipped_invalid_fk = 0;
     
     foreach ($uniqueEntries as $entry) {
-        $sql = "INSERT INTO timetable (class_course_id, lecturer_course_id, day_id, time_slot_id, room_id, division_label, semester) 
-                VALUES (?, ?, ?, ?, ?, ?, ?)";
+        // Normalize semester for enum schemas: map numeric to names if needed
+        $semesterVal = $entry['semester'] ?? '';
+        if (is_numeric($semesterVal)) {
+            $semesterVal = ((int)$semesterVal === 1) ? 'first' : (((int)$semesterVal === 2) ? 'second' : (string)$semesterVal);
+        } else {
+            $sv = strtolower((string)$semesterVal);
+            if ($sv === '1' || $sv === 'first' || $sv === 'semester 1') { $semesterVal = 'first'; }
+            elseif ($sv === '2' || $sv === 'second' || $sv === 'semester 2') { $semesterVal = 'second'; }
+        }
+        
+        $lecturerCourseId = $entry['lecturer_course_id'] ?? null;
+        if (!$lecturerCourseId || !isset($lecturerCourseIds[(int)$lecturerCourseId])) {
+            // Attempt to find a valid lecturer_course for this class_course's course
+            $classCourseId = (int)$entry['class_course_id'];
+            $courseId = $classCourseToCourse[$classCourseId] ?? null;
+            if ($courseId !== null && isset($lecturerCourseByCourse[$courseId])) {
+                $lecturerCourseId = $lecturerCourseByCourse[$courseId];
+            } else {
+                // Skip entry to avoid FK violation
+                error_log("Skipping entry due to missing lecturer_course_id mapping for class_course_id=$classCourseId (course_id=" . ($courseId ?? 'null') . ")");
+                continue;
+            }
+        }
+        // Ensure academic_year is set; if missing compute default like "2025/2026"
+        $academicYearVal = $entry['academic_year'] ?? null;
+        if (empty($academicYearVal)) {
+            $m = (int)date('n');
+            $y = (int)date('Y');
+            if ($m >= 8) {
+                $academicYearVal = $y . '/' . ($y + 1);
+            } else {
+                $academicYearVal = ($y - 1) . '/' . $y;
+            }
+        }
+
+        // Validate FK presence before attempting insert
+        if (!isset($validClassCourses[(int)$entry['class_course_id']]) ||
+            !isset($validDays[(int)$entry['day_id']]) ||
+            !isset($validTimeSlots[(int)$entry['time_slot_id']]) ||
+            !isset($validRooms[(int)$entry['room_id']])) {
+            $skipped_invalid_fk++;
+            error_log("Skipping entry due to invalid FK(s): " . json_encode($entry));
+            continue;
+        }
+        // Prevent duplicate room/day/time slot collisions (uq_timetable_slot)
+        $slotKey = $entry['room_id'] . '-' . $entry['day_id'] . '-' . $entry['time_slot_id'] . '-' . $semesterVal . '-' . $academicYearVal . '-lecture';
+        if (isset($occupiedSlotKeys[$slotKey])) {
+            error_log("Skipping entry due to occupied slot (room/day/time): " . $slotKey . " entry=" . json_encode($entry));
+            continue;
+        }
+        $sql = "INSERT INTO timetable (class_course_id, lecturer_course_id, day_id, time_slot_id, room_id, division_label, semester, academic_year) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
         
         $stmt = $conn->prepare($sql);
         if ($stmt) {
-            $stmt->bind_param("iiiiiss", 
+            $stmt->bind_param("iiiiisss", 
                 $entry['class_course_id'],
-                $entry['lecturer_course_id'],
+                $lecturerCourseId,
                 $entry['day_id'],
                 $entry['time_slot_id'],
                 $entry['room_id'],
                 $entry['division_label'],
-                $entry['semester']
+                $semesterVal,
+                $academicYearVal
             );
             
             if ($stmt->execute()) {
                 $inserted_count++;
+                $occupiedSlotKeys[$slotKey] = true;
             } else {
                 // Check if it's a duplicate key error
                 if ($stmt->errno == 1062) { // MySQL duplicate key error
@@ -293,6 +417,8 @@ function insertTimetableEntries($conn, $entries) {
                     
                     // Log the duplicate for debugging
                     error_log("Database duplicate key error: " . $duplicate_key . " for entry: " . json_encode($entry));
+                } elseif ($stmt->errno == 1452) { // FK constraint fails
+                    error_log("Foreign key constraint failed for entry: " . json_encode($entry) . "; resolved_lecturer_course_id=" . $lecturerCourseId);
                 } else {
                     error_log("Database insertion error: " . $stmt->error . " for entry: " . json_encode($entry));
                 }
@@ -308,6 +434,9 @@ function insertTimetableEntries($conn, $entries) {
         error_log("Database duplicate keys found: " . implode(', ', $db_duplicate_keys));
     }
     
+    if ($skipped_invalid_fk > 0) {
+        error_log("Skipped entries due to invalid FKs: " . $skipped_invalid_fk);
+    }
     error_log("Successfully inserted " . $inserted_count . " out of " . count($uniqueEntries) . " unique entries");
     
     return $inserted_count;
@@ -363,16 +492,41 @@ function validateTimetableEntries($entries) {
 }
 
 /**
- * Format time to HH:MM format for display
+ * Format time to HH:MM AM/PM format for display
  * @param string $time Time string in HH:MM:SS or HH:MM format
- * @return string Formatted time in HH:MM
+ * @return string Formatted time in HH:MM AM/PM
  */
 function formatTimeForDisplay($time) {
     if (empty($time)) {
         return '';
     }
-    // Remove seconds if present and return HH:MM format
-    return substr($time, 0, 5);
+    // Remove seconds if present
+    $time = substr($time, 0, 5);
+    
+    // Convert to 12-hour format with AM/PM
+    $time_obj = DateTime::createFromFormat('H:i', $time);
+    if ($time_obj) {
+        return $time_obj->format('g:i A');
+    }
+    
+    return $time; // Fallback to original format
+}
+
+/**
+ * Format time range for display (start - end)
+ * @param string $start_time Start time
+ * @param string $end_time End time
+ * @return string Formatted time range
+ */
+function formatTimeRangeForDisplay($start_time, $end_time) {
+    if (empty($start_time) || empty($end_time)) {
+        return '';
+    }
+    
+    $start_formatted = formatTimeForDisplay($start_time);
+    $end_formatted = formatTimeForDisplay($end_time);
+    
+    return $start_formatted . ' - ' . $end_formatted;
 }
 
 /**
@@ -572,24 +726,62 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
         // Check if timetable has been generated
         $has_timetable = $total_timetable_entries > 0;
         
+        // Helper function to validate stream active days
+        function validateStreamDays($conn, $streamId) {
+            $streamSql = "SELECT active_days FROM streams WHERE id = ?";
+            $stmt = $conn->prepare($streamSql);
+            $stmt->bind_param("i", $streamId);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            
+            if ($streamRow = $result->fetch_assoc()) {
+                $activeDaysJson = $streamRow['active_days'];
+                if (!empty($activeDaysJson)) {
+                    $activeDaysArray = json_decode($activeDaysJson, true);
+                    if (is_array($activeDaysArray) && count($activeDaysArray) > 0) {
+                        // Validate each day name exists in database
+                        $validDays = [];
+                        foreach ($activeDaysArray as $dayName) {
+                            $checkSql = "SELECT id FROM days WHERE name = ? AND is_active = 1";
+                            $checkStmt = $conn->prepare($checkSql);
+                            $checkStmt->bind_param("s", $dayName);
+                            $checkStmt->execute();
+                            if ($checkStmt->get_result()->num_rows > 0) {
+                                $validDays[] = $dayName;
+                            }
+                            $checkStmt->close();
+                        }
+                        $stmt->close();
+                        return $validDays;
+                    }
+                }
+            }
+            $stmt->close();
+            return [];
+        }
+
         // Get readiness conditions for pre-generation
         $total_rooms = $conn->query("SELECT COUNT(*) as count FROM rooms WHERE is_active = 1")->fetch_assoc()['count'];
         
         // Get days count - consider stream-specific days if available
         $total_days = 0;
+        $stream_days_used = false;
         if (!empty($current_stream_id)) {
-            // Check if stream has specific active days
-            $stream_days_check = $conn->query("SELECT active_days FROM streams WHERE id = " . intval($current_stream_id));
-            if ($stream_days_row = $stream_days_check->fetch_assoc()) {
-                $active_days_json = $stream_days_row['active_days'];
-                if (!empty($active_days_json)) {
-                    $active_days_array = json_decode($active_days_json, true);
-                    if (is_array($active_days_array) && count($active_days_array) > 0) {
-                        // Count stream-specific active days
-                        $stream_days_sql = "SELECT COUNT(*) as count FROM days WHERE is_active = 1 AND name IN ('" . implode("','", $active_days_array) . "')";
-                        $total_days = $conn->query($stream_days_sql)->fetch_assoc()['count'];
-                    }
-                }
+            // Validate and get stream-specific active days
+            $valid_stream_days = validateStreamDays($conn, $current_stream_id);
+            if (!empty($valid_stream_days)) {
+                // Count stream-specific active days using prepared statement
+                $placeholders = str_repeat('?,', count($valid_stream_days) - 1) . '?';
+                $stream_days_sql = "SELECT COUNT(*) as count FROM days WHERE is_active = 1 AND name IN ($placeholders)";
+                $stmt = $conn->prepare($stream_days_sql);
+                $stmt->bind_param(str_repeat('s', count($valid_stream_days)), ...$valid_stream_days);
+                $stmt->execute();
+                $total_days = $stmt->get_result()->fetch_assoc()['count'];
+                $stmt->close();
+                $stream_days_used = true;
+                error_log("Stream ID $current_stream_id using specific days: " . implode(', ', $valid_stream_days) . " (count: $total_days)");
+            } else {
+                error_log("Stream ID $current_stream_id has no valid active days, falling back to all days");
             }
         }
         if ($total_days == 0) {
@@ -632,7 +824,25 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                         
                         while ($current_time < $end_time) {
                             $slot_start = $current_time->format('H:i');
-                            $current_time->add(new DateInterval('PT1H')); // Add 1 hour
+                            
+                            // Try to get duration from existing time slots, default to 1 hour
+                            $slot_duration = 60; // Default 60 minutes
+                            
+                            // Check if there's a matching time slot in the database
+                            $existing_slot_sql = "SELECT duration, is_break FROM time_slots WHERE start_time = ? AND is_active = 1 LIMIT 1";
+                            $existing_slot_stmt = $conn->prepare($existing_slot_sql);
+                            $existing_slot_stmt->bind_param('s', $slot_start);
+                            $existing_slot_stmt->execute();
+                            $existing_slot_result = $existing_slot_stmt->get_result();
+                            
+                            $is_break_from_db = false;
+                            if ($existing_slot_row = $existing_slot_result->fetch_assoc()) {
+                                $slot_duration = (int)$existing_slot_row['duration'];
+                                $is_break_from_db = (bool)$existing_slot_row['is_break'];
+                            }
+                            $existing_slot_stmt->close();
+                            
+                            $current_time->add(new DateInterval('PT' . $slot_duration . 'M')); // Add duration minutes
                             $slot_end = $current_time->format('H:i');
                             
                             // Don't count a slot that goes beyond the period end
@@ -640,10 +850,10 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                                 $slot_end = $end_time->format('H:i');
                             }
                             
-                            // Check if this slot overlaps with break time
-                            $is_break = false;
+                            // Check if this slot overlaps with break time OR is marked as break in database
+                            $is_break = $is_break_from_db;
                             
-                            if (!empty($break_start) && !empty($break_end)) {
+                            if (!$is_break_from_db && !empty($break_start) && !empty($break_end)) {
                                 $break_start_time = new DateTime($break_start);
                                 $break_end_time = new DateTime($break_end);
                                 $slot_start_time = new DateTime($slot_start);
@@ -816,28 +1026,24 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
         
         // Get days for this stream
         if (!empty($current_stream_id)) {
-            // Get stream's active days preference
-            $stream_days_sql = "SELECT active_days FROM streams WHERE id = ?";
-            $stream_active_days_stmt = $conn->prepare($stream_days_sql);
-            $stream_active_days_stmt->bind_param('i', $current_stream_id);
-            $stream_active_days_stmt->execute();
-            $stream_result = $stream_active_days_stmt->get_result();
-            
-            if ($stream_row = $stream_result->fetch_assoc()) {
-                $active_days_json = $stream_row['active_days'];
-                if (!empty($active_days_json)) {
-                    $active_days_array = json_decode($active_days_json, true);
-                    if (is_array($active_days_array) && count($active_days_array) > 0) {
-                        // Get stream-specific days
-                        $stream_days_sql = "SELECT id, name FROM days WHERE is_active = 1 AND name IN ('" . implode("','", $active_days_array) . "') ORDER BY id";
-                        $template_days_result = $conn->query($stream_days_sql);
-                        while ($day = $template_days_result->fetch_assoc()) {
-                            $template_days[] = $day;
-                        }
-                    }
+            // Validate and get stream-specific active days
+            $valid_stream_days = validateStreamDays($conn, $current_stream_id);
+            if (!empty($valid_stream_days)) {
+                // Get stream-specific days using prepared statement
+                $placeholders = str_repeat('?,', count($valid_stream_days) - 1) . '?';
+                $stream_days_sql = "SELECT id, name FROM days WHERE is_active = 1 AND name IN ($placeholders) ORDER BY id";
+                $stmt = $conn->prepare($stream_days_sql);
+                $stmt->bind_param(str_repeat('s', count($valid_stream_days)), ...$valid_stream_days);
+                $stmt->execute();
+                $template_days_result = $stmt->get_result();
+                while ($day = $template_days_result->fetch_assoc()) {
+                    $template_days[] = $day;
                 }
+                $stmt->close();
+                error_log("Template generation using stream-specific days for stream $current_stream_id: " . implode(', ', $valid_stream_days));
+            } else {
+                error_log("Template generation falling back to all days for stream $current_stream_id");
             }
-            $stream_active_days_stmt->close();
         }
         
         // Fallback to all active days if no stream-specific days
@@ -854,12 +1060,12 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
             // First try to get stream-specific time slots from stream_time_slots mapping
             $sts_exists = $conn->query("SHOW TABLES LIKE 'stream_time_slots'");
             if ($sts_exists && $sts_exists->num_rows > 0) {
-                $ts_rs = $conn->query("SELECT ts.id, ts.start_time, ts.end_time FROM stream_time_slots sts JOIN time_slots ts ON ts.id = sts.time_slot_id WHERE sts.stream_id = " . intval($current_stream_id) . " AND sts.is_active = 1 ORDER BY ts.start_time");
+                $ts_rs = $conn->query("SELECT ts.id, ts.start_time, ts.end_time, ts.duration, ts.is_break FROM stream_time_slots sts JOIN time_slots ts ON ts.id = sts.time_slot_id WHERE sts.stream_id = " . intval($current_stream_id) . " AND sts.is_active = 1 ORDER BY ts.start_time");
                 if ($ts_rs && $ts_rs->num_rows > 0) {
                     while ($slot = $ts_rs->fetch_assoc()) {
-                        // Add is_break and break_type fields to ensure consistency
-                        $slot['is_break'] = false;
-                        $slot['break_type'] = '';
+                        // Ensure is_break is properly set from database
+                        $slot['is_break'] = (bool)$slot['is_break'];
+                        $slot['break_type'] = $slot['is_break'] ? 'break' : '';
                         $template_time_slots[] = $slot;
                     }
                 }
@@ -890,7 +1096,25 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                         
                         while ($current_time < $end_time) {
                             $slot_start = $current_time->format('H:i');
-                            $current_time->add(new DateInterval('PT1H')); // Add 1 hour
+                            
+                            // Try to get duration from existing time slots, default to 1 hour
+                            $slot_duration = 60; // Default 60 minutes
+                            
+                            // Check if there's a matching time slot in the database
+                            $existing_slot_sql = "SELECT duration, is_break FROM time_slots WHERE start_time = ? AND is_active = 1 LIMIT 1";
+                            $existing_slot_stmt = $conn->prepare($existing_slot_sql);
+                            $existing_slot_stmt->bind_param('s', $slot_start);
+                            $existing_slot_stmt->execute();
+                            $existing_slot_result = $existing_slot_stmt->get_result();
+                            
+                            $is_break_from_db = false;
+                            if ($existing_slot_row = $existing_slot_result->fetch_assoc()) {
+                                $slot_duration = (int)$existing_slot_row['duration'];
+                                $is_break_from_db = (bool)$existing_slot_row['is_break'];
+                            }
+                            $existing_slot_stmt->close();
+                            
+                            $current_time->add(new DateInterval('PT' . $slot_duration . 'M')); // Add duration minutes
                             $slot_end = $current_time->format('H:i');
                             
                             // Don't create a slot that goes beyond the period end
@@ -920,7 +1144,7 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                                 'start_time' => $slot_start,
                                 'end_time' => $slot_end,
                                 'is_break' => $is_break,
-                                'break_type' => $break_type
+                                'break_type' => $is_break ? 'break' : ''
                             ];
                             
                             $slot_id++;
@@ -944,13 +1168,34 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
             
             for ($hour = $start_hour; $hour < $end_hour; $hour++) {
                 $start_time = sprintf('%02d:00', $hour);
-                $end_time = sprintf('%02d:00', $hour + 1);
                 
-                // Define break periods (lunch break and tea break)
-                $is_break = false;
+                // Try to get duration from existing time slots, default to 1 hour
+                $slot_duration = 60; // Default 60 minutes
+                
+                // Check if there's a matching time slot in the database
+                $existing_slot_sql = "SELECT duration FROM time_slots WHERE start_time = ? AND is_active = 1 LIMIT 1";
+                $existing_slot_stmt = $conn->prepare($existing_slot_sql);
+                $existing_slot_stmt->bind_param('s', $start_time);
+                $existing_slot_stmt->execute();
+                $existing_slot_result = $existing_slot_stmt->get_result();
+                
+                if ($existing_slot_row = $existing_slot_result->fetch_assoc()) {
+                    $slot_duration = (int)$existing_slot_row['duration'];
+                }
+                $existing_slot_stmt->close();
+                
+                // Calculate end time based on duration
+                $start_time_obj = new DateTime($start_time);
+                $start_time_obj->add(new DateInterval('PT' . $slot_duration . 'M'));
+                $end_time = $start_time_obj->format('H:i');
+                
+                // Check if this slot is marked as break in database, or define default break periods
+                $is_break = $is_break_from_db;
                 $break_type = '';
                 
-                if ($hour == 12) {
+                if ($is_break_from_db) {
+                    $break_type = 'break';
+                } elseif ($hour == 12) {
                     $is_break = true;
                     $break_type = 'break';
                     $end_time = '13:00'; // Break is 12:00-13:00
@@ -1003,7 +1248,23 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                 while ($r = $cc_rs->fetch_assoc()) {
                     $course = $r['course_id'];
                     if (!isset($groups[$course])) $groups[$course] = [];
-                    $groups[$course][] = $r;
+
+                    // Expand class divisions: create one item per division so each division is scheduled separately
+                    $divisionsCount = max(1, (int)($r['divisions_count'] ?? 1));
+                    for ($di = 0; $di < $divisionsCount; $di++) {
+                        $label = '';
+                        $n = $di;
+                        while (true) {
+                            $label = chr(65 + ($n % 26)) . $label;
+                            $n = intdiv($n, 26) - 1;
+                            if ($n < 0) break;
+                        }
+
+                        $copy = $r;
+                        $copy['division_label'] = $label;
+                        // keep cc_id as original class_course id (used later when inserting timetable rows)
+                        $groups[$course][] = $copy;
+                    }
                 }
             }
 
@@ -1172,61 +1433,27 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
             $timetable_stmt->execute();
             $timetable_result = $timetable_stmt->get_result();
 
-            // Group entries by class_course_id to handle multi-hour courses
-            $grouped_entries = [];
+            // Process entries directly - no more spanning logic needed with flexible duration slots
             while ($row = $timetable_result->fetch_assoc()) {
-                $class_course_id = $row['class_course_id'];
-                if (!isset($grouped_entries[$class_course_id])) {
-                    $grouped_entries[$class_course_id] = [];
-                }
-                $grouped_entries[$class_course_id][] = $row;
-            }
-
-            // Process grouped entries to create proper spans
-            foreach ($grouped_entries as $class_course_id => $entries) {
-                if (empty($entries)) continue;
+                $day_id = $row['day_id'];
+                $time_slot_id = $row['time_slot_id'];
+                $room_id = $row['room_id'];
                 
-                // Sort entries by time_slot_id to ensure proper order
-                usort($entries, function($a, $b) {
-                    return $a['time_slot_id'] - $b['time_slot_id'];
-                });
-                
-                $first_entry = $entries[0];
-                $course_duration = $first_entry['hours_per_week'] ?? 1;
-                $day_id = $first_entry['day_id'];
-                $room_id = $first_entry['room_id'];
-                $start_time_slot_id = $first_entry['time_slot_id'];
-                
-                // Store the main entry (first slot)
-                $timetable_data[$day_id][$start_time_slot_id][$room_id] = [
-                    'id' => $first_entry['id'],
-                    'class_name' => $first_entry['class_name'],
-                    'course_code' => $first_entry['course_code'],
-                    'course_name' => $first_entry['course_name'],
-                    'lecturer_name' => $first_entry['lecturer_name'],
-                    'division_label' => $first_entry['division_label'],
-                    'hours_per_week' => $course_duration,
+                // Store the entry directly in its slot (no spanning needed)
+                $timetable_data[$day_id][$time_slot_id][$room_id] = [
+                    'id' => $row['id'],
+                    'class_name' => $row['class_name'],
+                    'course_code' => $row['course_code'],
+                    'course_name' => $row['course_name'],
+                    'lecturer_name' => $row['lecturer_name'],
+                    'division_label' => $row['division_label'],
+                    'hours_per_week' => $row['hours_per_week'] ?? 1,
                     'day_id' => $day_id,
-                    'time_slot_id' => $start_time_slot_id,
+                    'time_slot_id' => $time_slot_id,
                     'room_id' => $room_id,
-                    'is_spanned' => false, // This is the main cell
-                    'span_count' => $course_duration
+                    'is_spanned' => false, // No spanning with flexible duration slots
+                    'span_count' => 1 // Always 1 since courses fit in single slots
                 ];
-                
-                // Mark subsequent cells as spanned (they will be hidden)
-                for ($i = 1; $i < $course_duration; $i++) {
-                    $next_time_slot_id = $start_time_slot_id + $i;
-                    if (isset($timetable_data[$day_id][$next_time_slot_id][$room_id])) {
-                        // If there's already an entry here, mark it as spanned
-                        $timetable_data[$day_id][$next_time_slot_id][$room_id]['is_spanned'] = true;
-                    } else {
-                        // Create a placeholder entry to mark as spanned
-                        $timetable_data[$day_id][$next_time_slot_id][$room_id] = [
-                            'is_spanned' => true,
-                            'span_count' => 0
-                        ];
-                    }
-                }
             }
             $timetable_stmt->close();
         }
@@ -1324,11 +1551,11 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                                                     }
                                                     $current_break_span = $break_duration;
                                                     ?>
-                                                    <th class="break-period-header text-center" colspan="<?php echo $break_duration; ?>" style="min-width: <?php echo $break_duration * 100; ?>px;">
+                                                    <th class="break-period-header text-center" colspan="<?php echo $break_duration; ?>" style="min-width: <?php echo $break_duration * 120; ?>px;">
                                                         <div class="break-info">
-                                                            <span class="break-label">Break</span>
+                                                            <span class="break-label">Break Period</span>
                                                             <div class="break-time">
-                                                                <?php echo htmlspecialchars(formatTimeForDisplay($time_slot['start_time'])); ?> - <?php echo htmlspecialchars(formatTimeForDisplay($time_slot['end_time'])); ?>
+                                                                <?php echo htmlspecialchars(formatTimeRangeForDisplay($time_slot['start_time'], $time_slot['end_time'])); ?>
                                                             </div>
                                                         </div>
                                                     </th>
@@ -1339,9 +1566,9 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                                                 }
                                             } else {
                                                 ?>
-                                                <th class="time-period-header text-center" style="min-width: 100px;">
+                                                <th class="time-period-header text-center" style="min-width: 120px;">
                                                     <div class="period-time">
-                                                        <?php echo htmlspecialchars(formatTimeForDisplay($time_slot['start_time'])); ?>
+                                                        <?php echo htmlspecialchars(formatTimeRangeForDisplay($time_slot['start_time'], $time_slot['end_time'])); ?>
                                                     </div>
                                                 </th>
                                                 <?php
@@ -1399,7 +1626,11 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                                                             ?>
                                                             <td class="break-cell" colspan="<?php echo $break_duration; ?>" data-break-type="<?php echo $time_slot['break_type']; ?>">
                                                                 <div class="break-placeholder">
-                                                                    <small class="d-block text-muted">Break</small>
+                                                                    <i class="fas fa-coffee text-muted mb-1"></i>
+                                                                    <small class="d-block text-muted fw-bold">Break</small>
+                                                                    <small class="d-block text-muted" style="font-size: 0.7em;">
+                                                                        <?php echo htmlspecialchars(formatTimeRangeForDisplay($time_slot['start_time'], $time_slot['end_time'])); ?>
+                                                                    </small>
                                                                 </div>
                                                             </td>
                                                             <?php
@@ -1414,32 +1645,22 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                                                         $time_slot_id = $time_slot['id'];
                                                         $room_id = $room['id'];
                                                         
-                                                        // Check if this cell should be spanned (hidden)
-                                                        $is_spanned = false;
-                                                        $span_count = 1;
+                                                        // Check if this cell has an entry
                                                         $entry = null;
                                                         
                                                         if (isset($timetable_data[$day_id][$time_slot_id][$room_id])) {
                                                             $entry = $timetable_data[$day_id][$time_slot_id][$room_id];
-                                                            $is_spanned = $entry['is_spanned'] ?? false;
-                                                            $span_count = $entry['span_count'] ?? 1;
-                                                        }
-                                                        
-                                                        // Skip rendering if this cell is spanned (will be covered by colspan)
-                                                        if ($is_spanned) {
-                                                            continue;
                                                         }
                                                         ?>
                                                         <td class="template-cell" 
                                                             data-period="<?php echo htmlspecialchars(formatTimeForDisplay($time_slot['start_time'])); ?>" 
                                                             data-room="<?php echo htmlspecialchars($room['name']); ?>" 
-                                                            data-day="<?php echo htmlspecialchars($day['name']); ?>"
-                                                            <?php if ($span_count > 1): ?>colspan="<?php echo $span_count; ?>"<?php endif; ?>>
+                                                            data-day="<?php echo htmlspecialchars($day['name']); ?>">
                                                             <?php 
                                                             if ($entry) {
                                                                 ?>
                                                                 <div class="course-block editable-course" 
-                                                                     style="background-color: #e3f2fd; border: 2px solid #2196f3; border-radius: 4px; padding: 4px; margin: 2px; height: 100%; display: flex; flex-direction: column; justify-content: center; overflow: hidden; cursor: pointer; min-width: <?php echo $span_count * 100; ?>px;"
+                                                                     style="background-color: #e3f2fd; border: 2px solid #2196f3; border-radius: 4px; padding: 4px; margin: 2px; height: 100%; display: flex; flex-direction: column; justify-content: center; overflow: hidden; cursor: pointer;"
                                                                      data-entry-id="<?php echo $entry['id']; ?>"
                                                                      data-day-id="<?php echo $entry['day_id']; ?>"
                                                                      data-time-slot-id="<?php echo $entry['time_slot_id']; ?>"
@@ -1452,9 +1673,6 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                                                                     <div class="fw-bold text-primary" style="font-size: 0.8em;">
                                                                         <?php echo htmlspecialchars($entry['course_code']); ?>
                                                                         <span class="badge bg-warning ms-1" style="font-size: 0.6em;"><?php echo $entry['hours_per_week']; ?>h</span>
-                                                                        <?php if ($span_count > 1): ?>
-                                                                            <span class="badge bg-info ms-1" style="font-size: 0.6em;">Spans <?php echo $span_count; ?> periods</span>
-                                                                        <?php endif; ?>
                                                                     </div>
                                                                     <div style="font-size: 0.7em;">
                                                                         <strong>Class:</strong> <?php 
@@ -1500,17 +1718,17 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                                 Sample Course Blocks (for demonstration)
                             </h6>
                             <div class="sample-blocks">
-                                <div class="sample-block sample-1h" style="width: 100px; height: 60px; background-color: #28a745; color: white; display: inline-flex; align-items: center; justify-content: center; margin: 5px; border-radius: 4px; font-size: 0.8rem; font-weight: bold;">
-                                    1h Course
+                                <div class="sample-block sample-1h" style="width: 120px; height: 60px; background-color: #28a745; color: white; display: inline-flex; align-items: center; justify-content: center; margin: 5px; border-radius: 4px; font-size: 0.8rem; font-weight: bold;">
+                                    1h Course<br><small>Fits in 1h slot</small>
                                 </div>
-                                <div class="sample-block sample-2h" style="width: 200px; height: 60px; background-color: #007bff; color: white; display: inline-flex; align-items: center; justify-content: center; margin: 5px; border-radius: 4px; font-size: 0.8rem; font-weight: bold;">
-                                    2h Course
+                                <div class="sample-block sample-2h" style="width: 120px; height: 60px; background-color: #007bff; color: white; display: inline-flex; align-items: center; justify-content: center; margin: 5px; border-radius: 4px; font-size: 0.8rem; font-weight: bold;">
+                                    2h Course<br><small>Fits in 2h slot</small>
                                 </div>
-                                <div class="sample-block sample-3h" style="width: 300px; height: 60px; background-color: #dc3545; color: white; display: inline-flex; align-items: center; justify-content: center; margin: 5px; border-radius: 4px; font-size: 0.8rem; font-weight: bold;">
-                                    3h Course
+                                <div class="sample-block sample-3h" style="width: 120px; height: 60px; background-color: #dc3545; color: white; display: inline-flex; align-items: center; justify-content: center; margin: 5px; border-radius: 4px; font-size: 0.8rem; font-weight: bold;">
+                                    3h Course<br><small>Fits in 3h slot</small>
                                 </div>
-                                <div class="sample-block sample-4h" style="width: 400px; height: 60px; background-color: #6f42c1; color: white; display: inline-flex; align-items: center; justify-content: center; margin: 5px; border-radius: 4px; font-size: 0.8rem; font-weight: bold;">
-                                    4h Course
+                                <div class="sample-block sample-4h" style="width: 120px; height: 60px; background-color: #6f42c1; color: white; display: inline-flex; align-items: center; justify-content: center; margin: 5px; border-radius: 4px; font-size: 0.8rem; font-weight: bold;">
+                                    4h Course<br><small>Fits in 4h slot</small>
                                 </div>
                             </div>
                             <small class="text-muted">
@@ -1547,9 +1765,9 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                                     echo "Default period range: 07:00 - 20:00 (13 hours). Break periods: 12:00-13:00 and 15:00-16:00. ";
                                 }
                                 ?>
-                                <strong>NEW:</strong> Courses now properly span multiple periods based on their duration. 
-                                A 3-hour course will visually span 3 consecutive time slots using colspan. 
-                                Time display has been improved to show HH:MM format only.
+                                <strong>NEW:</strong> Courses now fit perfectly into single time slots based on their duration. 
+                                A 3-hour course will fit into a 3-hour time slot (e.g., "7:00 AM - 10:00 AM"). 
+                                Time display shows full time ranges and break periods are clearly marked.
                             </small>
                         </div>
                         
@@ -1830,15 +2048,16 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
     color: #495057;
     font-weight: 600;
     text-align: center;
-    min-width: 100px;
+    min-width: 120px;
     border-bottom: 2px solid #e9ecef;
     border-right: 1px solid #dee2e6;
 }
 
 .period-time {
     font-weight: 600;
-    font-size: 0.9rem;
+    font-size: 0.85rem;
     color: #495057;
+    line-height: 1.2;
 }
 
 /* Break Period Headers */
@@ -1856,14 +2075,15 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
 
 .break-label {
     font-weight: 600;
-    font-size: 0.9rem;
+    font-size: 0.85rem;
     display: block;
+    margin-bottom: 0.25rem;
 }
 
 .break-time {
-    font-size: 0.8rem;
-    opacity: 0.8;
-    margin-top: 0.25rem;
+    font-size: 0.75rem;
+    opacity: 0.9;
+    font-weight: 500;
 }
 
 /* Break Cells */
@@ -1886,11 +2106,16 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
     align-items: center;
 }
 
-
+.break-placeholder i {
+    font-size: 1.2rem;
+    margin-bottom: 0.25rem;
+    opacity: 0.7;
+}
 
 .break-placeholder small {
     font-size: 0.75rem;
     opacity: 0.8;
+    line-height: 1.2;
 }
 
 /* Template Cells */
@@ -2035,27 +2260,19 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
     padding: 0.2em 0.4em;
 }
 
-/* Spanned course styling */
-.template-cell[colspan] {
-    background-color: #f8f9fa;
-    border: 2px solid #dee2e6;
+/* Course block styling for single-slot courses */
+.course-block {
+    transition: all 0.2s ease;
 }
 
-.template-cell[colspan] .course-block {
-    border-left: 4px solid #28a745;
-    border-right: 4px solid #28a745;
+.course-block:hover {
+    transform: scale(1.02);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.15);
 }
 
-/* Multi-period course indicators */
-.course-block .badge.bg-info {
-    background-color: #17a2b8 !important;
-    color: white;
-}
-
-/* Responsive adjustments for spanned courses */
+/* Responsive adjustments for course blocks */
 @media (max-width: 768px) {
-    .template-cell[colspan] .course-block {
-        min-width: auto !important;
+    .course-block {
         font-size: 0.7em;
     }
     

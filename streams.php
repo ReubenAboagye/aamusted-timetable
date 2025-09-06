@@ -199,6 +199,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             }
 
             // Check for foreign key constraints
+            // Check if stream is referenced in classes (if stream_id column exists)
+            $classes_count = 0;
+            $col_check = $conn->query("SHOW COLUMNS FROM classes LIKE 'stream_id'");
+            if ($col_check && $col_check->num_rows > 0) {
+                $check_classes = $conn->prepare("SELECT COUNT(*) as count FROM classes WHERE stream_id = ?");
+                $check_classes->bind_param("i", $id);
+                $check_classes->execute();
+                $classes_result = $check_classes->get_result();
+                $classes_count = $classes_result->fetch_assoc()['count'];
+                $check_classes->close();
+            }
+            
+            if ($classes_count > 0) {
+                throw new Exception("Cannot delete stream. It is referenced by $classes_count classes. Please reassign or delete the classes first.");
+            }
+            
             // Check if stream is referenced in stream_time_slots
             $check_time_slots = $conn->prepare("SELECT COUNT(*) as count FROM stream_time_slots WHERE stream_id = ?");
             $check_time_slots->bind_param("i", $id);
@@ -238,6 +254,51 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     }
 
     // No regenerate action needed with mapping model
+}
+
+// -------------------- MIGRATE EXISTING STREAM DAYS --------------------
+// Convert short day names to full day names for existing streams
+$migration_sql = "SELECT id, active_days FROM streams WHERE active_days IS NOT NULL AND active_days != ''";
+$migration_result = $conn->query($migration_sql);
+
+if ($migration_result && $migration_result->num_rows > 0) {
+    $day_mapping = [
+        'Mon' => 'Monday',
+        'Tue' => 'Tuesday', 
+        'Wed' => 'Wednesday',
+        'Thu' => 'Thursday',
+        'Fri' => 'Friday',
+        'Sat' => 'Saturday',
+        'Sun' => 'Sunday'
+    ];
+    
+    while ($migration_row = $migration_result->fetch_assoc()) {
+        $active_days_json = $migration_row['active_days'];
+        $active_days_array = json_decode($active_days_json, true);
+        
+        if (is_array($active_days_array)) {
+            $needs_update = false;
+            $updated_days = [];
+            
+            foreach ($active_days_array as $day) {
+                if (isset($day_mapping[$day])) {
+                    $updated_days[] = $day_mapping[$day];
+                    $needs_update = true;
+                } else {
+                    $updated_days[] = $day;
+                }
+            }
+            
+            if ($needs_update) {
+                $updated_json = json_encode($updated_days);
+                $update_sql = "UPDATE streams SET active_days = ? WHERE id = ?";
+                $update_stmt = $conn->prepare($update_sql);
+                $update_stmt->bind_param("si", $updated_json, $migration_row['id']);
+                $update_stmt->execute();
+                $update_stmt->close();
+            }
+        }
+    }
 }
 
 // -------------------- FETCH ALL STREAMS --------------------
@@ -287,7 +348,7 @@ $result = $conn->query("SELECT * FROM streams ORDER BY created_at DESC");
 
         <div class="mb-3">
             <label class="form-label">Active Days</label><br>
-            <?php foreach (['Mon','Tue','Wed','Thu','Fri','Sat','Sun'] as $day): ?>
+            <?php foreach (['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'] as $day): ?>
                 <label class="me-2"><input type="checkbox" name="active_days[]" value="<?= $day; ?>"> <?= $day; ?></label>
             <?php endforeach; ?>
         </div>
@@ -418,7 +479,7 @@ $result = $conn->query("SELECT * FROM streams ORDER BY created_at DESC");
                         </div>
                         <div class="mb-3">
                             <label class="form-label">Active Days</label><br>
-                            <?php foreach (['Mon','Tue','Wed','Thu','Fri','Sat','Sun'] as $day): ?>
+                            <?php foreach (['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'] as $day): ?>
                                 <label class="me-2">
                                     <input type="checkbox" name="active_days[]" value="<?= $day; ?>" class="edit-active-days"> <?= $day; ?>
                                 </label>

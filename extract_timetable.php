@@ -21,6 +21,7 @@ $role = isset($_GET['role']) ? $_GET['role'] : '';
 $class_id = isset($_GET['class_id']) ? intval($_GET['class_id']) : 0;
 $department_id = isset($_GET['department_id']) ? intval($_GET['department_id']) : 0;
 $lecturer_id = isset($_GET['lecturer_id']) ? intval($_GET['lecturer_id']) : 0;
+$division_label = isset($_GET['division_label']) ? $_GET['division_label'] : '';
 
 // Export handling
 $do_export = isset($_GET['export']) && $_GET['export'] === '1';
@@ -81,6 +82,7 @@ if ($can_query) {
 		"ts.start_time",
 		"ts.end_time",
 		"c.name AS class_name",
+		"t.division_label",
 		"co.code AS course_code",
 		"co.name AS course_name",
 		"IFNULL(l.name, '') AS lecturer_name",
@@ -117,6 +119,13 @@ if ($can_query) {
 		$where[] = "c.id = ?";
 		$params[] = $class_id;
 		$types .= "i";
+		
+		// Add division filter if specified
+		if (!empty($division_label)) {
+			$where[] = "t.division_label = ?";
+			$params[] = $division_label;
+			$types .= "s";
+		}
 	}
 
 	if ($role === 'department' && $department_id > 0) {
@@ -133,7 +142,8 @@ if ($can_query) {
 		$types .= "i";
 	}
 
-	$sql = "SELECT " . implode(",\n\t\t", $select_parts) . "\nFROM timetable t\n\t" . implode("\n\t", $joins) . "\nWHERE " . implode(" AND ", $where) . "\nORDER BY d.id, ts.start_time, c.name, co.code";
+	// Order by day, start time, class name, division label, then course code so divisions appear grouped
+	$sql = "SELECT " . implode(",\n\t\t", $select_parts) . "\nFROM timetable t\n\t" . implode("\n\t", $joins) . "\nWHERE " . implode(" AND ", $where) . "\nORDER BY d.id, ts.start_time, c.name, t.division_label, co.code";
 
 	$stmt = $conn->prepare($sql);
 	if ($stmt) {
@@ -152,17 +162,23 @@ if ($can_query) {
 	if ($do_export && !empty($timetable_rows)) {
 		if ($export_format === 'csv') {
 			header('Content-Type: text/csv; charset=utf-8');
-			header('Content-Disposition: attachment; filename="timetable_export.csv"');
+			$filename = 'timetable_export';
+			if ($role === 'class' && !empty($division_label)) {
+				$filename .= '_division_' . $division_label;
+			}
+			header('Content-Disposition: attachment; filename="' . $filename . '.csv"');
 			$out = fopen('php://output', 'w');
-			fputcsv($out, ['Day', 'Start', 'End', 'Class', 'Course Code', 'Course Name', 'Lecturer', 'Room', 'Capacity']);
+			fputcsv($out, ['Day', 'Start', 'End', 'Class', 'Division', 'Course Code', 'Course Name', 'Lecturer', 'Room', 'Capacity']);
 			$lastDay = null;
 			foreach ($timetable_rows as $r) {
 				$dayCell = ($r['day_name'] !== $lastDay) ? $r['day_name'] : '';
+				$classWithDivision = $r['class_name'] . ($r['division_label'] ? ' ' . $r['division_label'] : '');
 				fputcsv($out, [
 					$dayCell,
 					$r['start_time'],
 					$r['end_time'],
 					$r['class_name'],
+					$r['division_label'] ?: '',
 					$r['course_code'],
 					$r['course_name'],
 					$r['lecturer_name'],
@@ -182,6 +198,26 @@ if ($can_query) {
 /* Make content full-width since we have no sidebar here */
 #mainContent { margin-left: 0 !important; }
 #footer { left: 0 !important; }
+
+/* Division header styling */
+.division-header {
+	background: linear-gradient(135deg, #007bff, #0056b3) !important;
+	color: white !important;
+	font-weight: bold;
+	text-align: center;
+	padding: 12px !important;
+}
+
+.division-separator {
+	background-color: #f8f9fa !important;
+	height: 2px !important;
+	padding: 0 !important;
+}
+
+.division-badge {
+	font-size: 0.9em;
+	padding: 4px 8px;
+}
 </style>
 
 <div class="main-content" id="mainContent">
@@ -228,16 +264,52 @@ if ($can_query) {
 					<div class="row g-3">
 						<div class="col-md-6 role-block role-class" style="display: <?php echo ($role==='class')?'block':'none'; ?>;">
 							<label for="class_id" class="form-label">Class</label>
-							<select name="class_id" id="class_id" class="form-select" <?php echo ($role==='class')?'required':''; ?>>
-								<option value="">Select class</option>
-								<?php if ($classes_result && $classes_result->num_rows > 0): ?>
-									<?php while ($c = $classes_result->fetch_assoc()): ?>
-										<option value="<?php echo $c['id']; ?>" <?php echo ($class_id == $c['id']) ? 'selected' : ''; ?>><?php echo htmlspecialchars($c['name']); ?></option>
-									<?php endwhile; ?>
-								<?php elseif ($selected_stream > 0): ?>
-									<option value="">No classes found for this stream</option>
-								<?php endif; ?>
-							</select>
+							<div class="position-relative">
+								<select name="class_id" id="class_id" class="form-select" <?php echo ($role==='class')?'required':''; ?>>
+									<option value="">Select class</option>
+									<?php if ($classes_result && $classes_result->num_rows > 0): ?>
+										<?php while ($c = $classes_result->fetch_assoc()): ?>
+											<option value="<?php echo $c['id']; ?>" <?php echo ($class_id == $c['id']) ? 'selected' : ''; ?>><?php echo htmlspecialchars($c['name']); ?></option>
+										<?php endwhile; ?>
+									<?php elseif ($selected_stream > 0): ?>
+										<option value="">No classes found for this stream</option>
+									<?php endif; ?>
+								</select>
+								<div id="class-loading" class="position-absolute top-50 end-0 translate-middle-y me-3" style="display: none;">
+									<div class="spinner-border spinner-border-sm text-primary" role="status">
+										<span class="visually-hidden">Loading...</span>
+									</div>
+								</div>
+							</div>
+						</div>
+						<div class="col-md-6 role-block role-class" style="display: <?php echo ($role==='class')?'block':'none'; ?>;">
+							<label for="division_label" class="form-label">Division (Optional)</label>
+							<div class="position-relative">
+								<select name="division_label" id="division_label" class="form-select">
+									<option value="">All divisions</option>
+									<?php if ($class_id > 0): ?>
+										<?php
+										// Get available divisions for the selected class
+										$div_stmt = $conn->prepare("SELECT DISTINCT t.division_label FROM timetable t JOIN class_courses cc ON t.class_course_id = cc.id WHERE cc.class_id = ? AND t.division_label IS NOT NULL ORDER BY t.division_label");
+										if ($div_stmt) {
+											$div_stmt->bind_param('i', $class_id);
+											$div_stmt->execute();
+											$div_result = $div_stmt->get_result();
+											while ($div_row = $div_result->fetch_assoc()) {
+												$selected = ($division_label == $div_row['division_label']) ? 'selected' : '';
+												echo '<option value="' . htmlspecialchars($div_row['division_label']) . '" ' . $selected . '>' . htmlspecialchars($div_row['division_label']) . '</option>';
+											}
+											$div_stmt->close();
+										}
+										?>
+									<?php endif; ?>
+								</select>
+								<div id="division-loading" class="position-absolute top-50 end-0 translate-middle-y me-3" style="display: none;">
+									<div class="spinner-border spinner-border-sm text-primary" role="status">
+										<span class="visually-hidden">Loading...</span>
+									</div>
+								</div>
+							</div>
 						</div>
 						<div class="col-md-6 role-block role-department" style="display: <?php echo ($role==='department')?'block':'none'; ?>;">
 							<label for="department_id" class="form-label">Department</label>
@@ -274,7 +346,12 @@ if ($can_query) {
 	<?php if ($can_query): ?>
 		<div class="table-container mt-3">
 			<div class="table-header d-flex justify-content-between align-items-center">
-				<h5 class="m-0">Results</h5>
+				<h5 class="m-0">
+					Results
+					<?php if ($role === 'class' && !empty($division_label)): ?>
+						<span class="badge bg-primary ms-2">Division <?php echo htmlspecialchars($division_label); ?></span>
+					<?php endif; ?>
+				</h5>
 				<div>
 					<?php if (!empty($timetable_rows)): ?>
 						<a class="btn btn-sm btn-outline-success me-2" href="<?php echo htmlspecialchars($_SERVER['REQUEST_URI'] . (strpos($_SERVER['REQUEST_URI'], '?') !== false ? '&' : '?') . 'export=1&format=csv'); ?>" target="_blank"><i class="fas fa-file-csv me-2"></i>Export CSV</a>
@@ -295,6 +372,7 @@ if ($can_query) {
 							<th>Start</th>
 							<th>End</th>
 							<th>Class</th>
+							<th>Division</th>
 							<th>Course</th>
 							<th>Lecturer</th>
 							<th>Room</th>
@@ -302,20 +380,68 @@ if ($can_query) {
 					</thead>
 					<tbody>
 						<?php if (!empty($timetable_rows)): ?>
-							<?php foreach ($timetable_rows as $row): ?>
-								<tr>
-									<td><?php echo htmlspecialchars($row['day_name']); ?></td>
-									<td><?php echo htmlspecialchars($row['start_time']); ?></td>
-									<td><?php echo htmlspecialchars($row['end_time']); ?></td>
-									<td><strong><?php echo htmlspecialchars($row['class_name']); ?></strong></td>
-									<td><?php echo htmlspecialchars(($row['course_code'] ? ($row['course_code'] . ' - ') : '') . $row['course_name']); ?></td>
-									<td><?php echo htmlspecialchars($row['lecturer_name']); ?></td>
-									<td><?php echo htmlspecialchars($row['room_name']); ?></td>
+							<?php
+							// Group entries by numeric level (e.g., 100,200,300...) then by division
+							$levels = [];
+							foreach ($timetable_rows as $row) {
+								// Extract numeric part from class name (e.g., 'ADT 100' -> 100)
+								$levelText = $row['class_name'] ?? '';
+								$levelNum = 0;
+								if (preg_match('/(\d{2,3})/', $levelText, $m)) {
+									$raw = (int)$m[1];
+									$levelNum = ($raw > 0 && $raw < 10) ? $raw * 100 : $raw;
+								} else {
+									// Fallback to a high number so unknown levels appear last
+									$levelNum = 9999;
+								}
+								$division = $row['division_label'] ?: 'No Division';
+								if (!isset($levels[$levelNum])) $levels[$levelNum] = [];
+								if (!isset($levels[$levelNum][$division])) $levels[$levelNum][$division] = [];
+								$levels[$levelNum][$division][] = $row;
+							}
+							// Sort levels ascending (100,200,...)
+							ksort($levels);
+							$is_first_level = true;
+							foreach ($levels as $levelNum => $divisions):
+								// Render level header
+								if (!$is_first_level) {
+									// separator between levels
+									?>
+									<tr><td colspan="8" class="division-separator"></td></tr>
+									<?php
+								}
+								?>
+								<tr class="division-header">
+									<td colspan="8"><i class="fas fa-layer-group me-2"></i>Level <?php echo htmlspecialchars($levelNum); ?></td>
 								</tr>
-							<?php endforeach; ?>
+								<?php
+								// Sort divisions alphabetically
+								ksort($divisions);
+								foreach ($divisions as $division => $rows):
+									// division header
+									?>
+									<tr class="division-header">
+										<td colspan="8"><i class="fas fa-users me-2"></i><?php echo htmlspecialchars($rows[0]['class_name']); ?> - Division <?php echo htmlspecialchars($division); ?></td>
+									</tr>
+									<?php foreach ($rows as $row): ?>
+										<tr>
+											<td><?php echo htmlspecialchars($row['day_name']); ?></td>
+											<td><?php echo htmlspecialchars($row['start_time']); ?></td>
+											<td><?php echo htmlspecialchars($row['end_time']); ?></td>
+											<td><strong><?php echo htmlspecialchars($row['class_name']); ?></strong></td>
+											<td><span class="badge bg-primary division-badge"><?php echo htmlspecialchars($division); ?></span></td>
+											<td><?php echo htmlspecialchars(($row['course_code'] ? ($row['course_code'] . ' - ') : '') . $row['course_name']); ?></td>
+											<td><?php echo htmlspecialchars($row['lecturer_name']); ?></td>
+											<td><?php echo htmlspecialchars($row['room_name']); ?></td>
+										</tr>
+									<?php endforeach; ?>
+								<?php
+								$is_first_level = false;
+								endforeach;
+							endforeach; ?>
 						<?php else: ?>
 							<tr>
-								<td colspan="7" class="empty-state">
+								<td colspan="8" class="empty-state">
 									<i class="fas fa-info-circle"></i>
 									<p>No timetable entries found for the selected filters.</p>
 								</td>
@@ -344,11 +470,105 @@ document.addEventListener('DOMContentLoaded', function() {
 	});
 	updateRoleBlocks();
 
-	// When stream changes, clear class selection (since classes are stream-specific)
+	// When stream changes, dynamically load classes for that stream
 	var streamSelect = document.getElementById('stream_id');
 	if (streamSelect) {
 		streamSelect.addEventListener('change', function(){
-			var cls = document.getElementById('class_id'); if (cls) { cls.selectedIndex = 0; }
+			var streamId = this.value;
+			var classSelect = document.getElementById('class_id');
+			
+			if (classSelect) {
+				// Clear existing options except the first one
+				classSelect.innerHTML = '<option value="">Select class</option>';
+				
+				if (streamId) {
+					// Show loading state
+					classSelect.innerHTML = '<option value="">Loading classes...</option>';
+					classSelect.disabled = true;
+					document.getElementById('class-loading').style.display = 'block';
+					
+					// Fetch classes for the selected stream
+					fetch('get_filtered_classes.php?stream_id=' + streamId)
+						.then(response => response.json())
+						.then(data => {
+							classSelect.innerHTML = '<option value="">Select class</option>';
+							if (data.success && data.classes.length > 0) {
+								data.classes.forEach(function(cls) {
+									var option = document.createElement('option');
+									option.value = cls.id;
+									option.textContent = cls.name;
+									classSelect.appendChild(option);
+								});
+							} else {
+								var option = document.createElement('option');
+								option.value = '';
+								option.textContent = 'No classes found for this stream';
+								classSelect.appendChild(option);
+							}
+							classSelect.disabled = false;
+							document.getElementById('class-loading').style.display = 'none';
+						})
+						.catch(error => {
+							console.error('Error loading classes:', error);
+							classSelect.innerHTML = '<option value="">Error loading classes</option>';
+							classSelect.disabled = false;
+							document.getElementById('class-loading').style.display = 'none';
+						});
+				} else {
+					document.getElementById('class-loading').style.display = 'none';
+				}
+			}
+		});
+	}
+	
+	// When class changes, dynamically load divisions for that class
+	var classSelect = document.getElementById('class_id');
+	if (classSelect) {
+		classSelect.addEventListener('change', function(){
+			var classId = this.value;
+			var divisionSelect = document.getElementById('division_label');
+			
+			if (divisionSelect) {
+				// Clear existing options except the first one
+				divisionSelect.innerHTML = '<option value="">All divisions</option>';
+				
+				if (classId) {
+					// Show loading state
+					divisionSelect.innerHTML = '<option value="">Loading divisions...</option>';
+					divisionSelect.disabled = true;
+					document.getElementById('division-loading').style.display = 'block';
+					
+					// Fetch divisions for the selected class
+					fetch('get_class_divisions.php?class_id=' + classId)
+						.then(response => response.json())
+						.then(data => {
+							divisionSelect.innerHTML = '<option value="">All divisions</option>';
+							if (data.success && data.divisions.length > 0) {
+								data.divisions.forEach(function(division) {
+									var option = document.createElement('option');
+									option.value = division;
+									option.textContent = division;
+									divisionSelect.appendChild(option);
+								});
+							} else {
+								var option = document.createElement('option');
+								option.value = '';
+								option.textContent = 'No divisions found for this class';
+								divisionSelect.appendChild(option);
+							}
+							divisionSelect.disabled = false;
+							document.getElementById('division-loading').style.display = 'none';
+						})
+						.catch(error => {
+							console.error('Error loading divisions:', error);
+							divisionSelect.innerHTML = '<option value="">Error loading divisions</option>';
+							divisionSelect.disabled = false;
+							document.getElementById('division-loading').style.display = 'none';
+						});
+				} else {
+					document.getElementById('division-loading').style.display = 'none';
+				}
+			}
 		});
 	}
 });

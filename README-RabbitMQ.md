@@ -22,3 +22,11 @@ Notes:
 - Worker currently requires ext-amqp. If unavailable, enqueue API will still create a job row and return the job id; run the worker in polling mode or install the extension.
 
 
+
+SELECT c.id, c.name, t.division_label, COUNT() AS cnt
+FROM timetable t
+JOIN class_courses cc ON t.class_course_id = cc.id
+JOIN classes c ON cc.class_id = c.id
+WHERE c.stream_id = 3
+GROUP BY c.id, t.division_label
+ORDER BY c.name, t.division_label;

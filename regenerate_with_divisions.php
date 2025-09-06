@@ -56,6 +56,27 @@ require_once 'ga/GeneticAlgorithm.php';
 
 echo "<p>✓ Genetic algorithm files loaded</p>";
 
+// Include stream manager to pick the currently selected stream from application headers
+if (file_exists(__DIR__ . '/includes/stream_manager.php')) {
+    require_once __DIR__ . '/includes/stream_manager.php';
+    $streamManager = getStreamManager();
+    $stream_id = $streamManager->getCurrentStreamId();
+} else {
+    // Fallback: use stream id 1 if stream manager is not available
+    $stream_id = 1;
+}
+echo "<p>Using stream id: " . htmlspecialchars($stream_id) . "</p>";
+// Determine academic year from stream manager if available
+if (isset($streamManager) && method_exists($streamManager, 'getCurrentAcademicYear')) {
+    $academic_year = $streamManager->getCurrentAcademicYear();
+} else {
+    // Compute a default academic year
+    $m = (int)date('n');
+    $y = (int)date('Y');
+    $academic_year = ($m >= 8) ? ($y . '/' . ($y + 1)) : (($y - 1) . '/' . $y);
+}
+echo "<p>Using academic year: " . htmlspecialchars($academic_year) . "</p>";
+
 // Step 4: Generate new timetable
 echo "<h3>Step 4: Generating New Timetable</h3>";
 
@@ -69,8 +90,9 @@ try {
         'generations' => 100,
         'mutation_rate' => 0.1,
         'crossover_rate' => 0.8,
-        'stream_id' => 1, // Assuming stream ID 1
-        'semester' => 2   // Second semester
+        'stream_id' => $stream_id,
+        'semester' => 2,  // Second semester
+        'academic_year' => $academic_year
     ];
     
     $geneticAlgorithm = new GeneticAlgorithm($conn, $gaOptions);
@@ -104,14 +126,22 @@ try {
     echo "<p>Unique entries after deduplication: " . count($unique_entries) . "</p>";
     
     foreach ($unique_entries as $entry) {
+        // Ensure academic_year is populated
+        $academic_year = $entry['academic_year'] ?? null;
+        if (empty($academic_year)) {
+            $m = (int)date('n');
+            $y = (int)date('Y');
+            $academic_year = ($m >= 8) ? ($y . '/' . ($y + 1)) : (($y - 1) . '/' . $y);
+        }
+
         $sql = "INSERT IGNORE INTO timetable (
             class_course_id, lecturer_course_id, day_id, time_slot_id, 
             room_id, division_label, semester, academic_year, 
             timetable_type, is_active, created_at, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
-        
+
         $stmt = $conn->prepare($sql);
-        
+
         $class_course_id = $entry['class_course_id'];
         $lecturer_course_id = $entry['lecturer_course_id'];
         $day_id = $entry['day_id'];
@@ -119,10 +149,9 @@ try {
         $room_id = $entry['room_id'];
         $division_label = $entry['division_label'];
         $semester = $entry['semester'];
-        $academic_year = $entry['academic_year'];
         $timetable_type = $entry['timetable_type'] ?? 'lecture';
         $is_active = $entry['is_active'] ?? 1;
-        
+
         $stmt->bind_param(
             "iiiiissssi",
             $class_course_id,

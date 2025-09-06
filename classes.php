@@ -993,9 +993,11 @@ $level_result = $conn->query($level_sql);
                                     // Reset streams_result for dropdown
                                     if ($streams_result) {
                                         $streams_result->data_seek(0);
+                                        $current_stream_id = $streamManager->getCurrentStreamId();
                                         while ($stream = $streams_result->fetch_assoc()) {
+                                            $selected = ($stream['id'] == $current_stream_id) ? 'selected' : '';
                                     ?>
-                                        <option value="<?php echo $stream['id']; ?>">
+                                        <option value="<?php echo $stream['id']; ?>" <?php echo $selected; ?>>
                                             <?php echo htmlspecialchars($stream['name']); ?>
                                         </option>
                                     <?php 
@@ -1070,9 +1072,12 @@ $level_result = $conn->query($level_sql);
                             // Fetch streams fresh for the edit dropdown - show all streams
                             $edit_streams_sql = "SELECT id, name, code, is_active FROM streams ORDER BY name";
                             $edit_streams_result = $conn->query($edit_streams_sql);
+                            $current_stream_id = $streamManager->getCurrentStreamId();
                             if ($edit_streams_result && $edit_streams_result->num_rows > 0): ?>
-                                <?php while ($stream = $edit_streams_result->fetch_assoc()): ?>
-                                    <option value="<?php echo $stream['id']; ?>">
+                                <?php while ($stream = $edit_streams_result->fetch_assoc()): 
+                                    $selected = ($stream['id'] == $current_stream_id) ? 'selected' : '';
+                                ?>
+                                    <option value="<?php echo $stream['id']; ?>" <?php echo $selected; ?>>
                                         <?php echo htmlspecialchars($stream['name']); ?>
                                         <?php echo $stream['is_active'] ? ' (Active)' : ' (Inactive)'; ?>
                                     </option>
@@ -1221,8 +1226,16 @@ function editClass(btn) {
         
         // Set the selected stream in the dropdown
         var streamSelect = document.getElementById('edit_stream_id');
-        if (streamSelect && stream) {
-            streamSelect.value = stream;
+        if (streamSelect) {
+            if (stream) {
+                streamSelect.value = stream;
+            } else {
+                // If no stream data, default to current stream (first option that's not empty)
+                var currentStreamOption = streamSelect.querySelector('option[selected]');
+                if (currentStreamOption) {
+                    streamSelect.value = currentStreamOption.value;
+                }
+            }
         }
 
         // Show the modal

@@ -1,47 +1,52 @@
 <?php
 header('Content-Type: application/json');
+
 include 'connect.php';
 
-$department_id = isset($_GET['department_id']) ? (int)$_GET['department_id'] : 0;
-$level = isset($_GET['level']) ? $_GET['level'] : '';
+$stream_id = isset($_GET['stream_id']) ? intval($_GET['stream_id']) : 0;
 
-$query = "SELECT id, name FROM classes WHERE is_active = 1";
-$params = [];
-$types = '';
-
-if ($department_id > 0) {
-    $query .= " AND department_id = ?";
-    $params[] = $department_id;
-    $types .= 'i';
+if ($stream_id <= 0) {
+    echo json_encode([
+        'success' => false,
+        'message' => 'Invalid stream ID',
+        'classes' => []
+    ]);
+    exit;
 }
 
-if ($level) {
-    $query .= " AND level = ?";
-    $params[] = $level;
-    $types .= 's';
-}
-
-$query .= " ORDER BY name";
-
-$stmt = $conn->prepare($query);
-if ($stmt) {
-    if (!empty($params)) {
-        $stmt->bind_param($types, ...$params);
+try {
+    $stmt = $conn->prepare("SELECT id, name FROM classes WHERE is_active = 1 AND stream_id = ? ORDER BY name");
+    if (!$stmt) {
+        throw new Exception('Failed to prepare statement: ' . $conn->error);
     }
+    
+    $stmt->bind_param('i', $stream_id);
     $stmt->execute();
     $result = $stmt->get_result();
     
     $classes = [];
     while ($row = $result->fetch_assoc()) {
         $classes[] = [
-            'id' => $row['id'],
-            'name' => htmlspecialchars($row['name'])
+            'id' => (int)$row['id'],
+            'name' => $row['name']
         ];
     }
+    
     $stmt->close();
     
-    echo json_encode($classes);
-} else {
-    echo json_encode([]);
+    echo json_encode([
+        'success' => true,
+        'message' => 'Classes loaded successfully',
+        'classes' => $classes
+    ]);
+    
+} catch (Exception $e) {
+    echo json_encode([
+        'success' => false,
+        'message' => 'Error: ' . $e->getMessage(),
+        'classes' => []
+    ]);
 }
+
+$conn->close();
 ?>
