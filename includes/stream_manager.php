@@ -8,6 +8,7 @@ class StreamManager {
     private $conn;
     private $current_stream_id;
     private $current_stream_name;
+    private $current_academic_year;
     
     public function __construct($conn) {
         $this->conn = $conn;
@@ -57,6 +58,31 @@ class StreamManager {
         
         // Get stream name
         $this->loadStreamName();
+        // Initialize academic year from session or compute default
+        $this->initializeAcademicYear();
+    }
+
+    /**
+     * Initialize academic year from session or compute default
+     */
+    private function initializeAcademicYear() {
+        if (session_status() == PHP_SESSION_NONE) {
+            session_start();
+        }
+
+        if (isset($_SESSION['academic_year']) && !empty($_SESSION['academic_year'])) {
+            $this->current_academic_year = $_SESSION['academic_year'];
+        } else {
+            // Compute default academic year: if month >= Aug then current/(current+1) else (current-1)/current
+            $m = (int)date('n');
+            $y = (int)date('Y');
+            if ($m >= 8) {
+                $this->current_academic_year = $y . '/' . ($y + 1);
+            } else {
+                $this->current_academic_year = ($y - 1) . '/' . $y;
+            }
+            $_SESSION['academic_year'] = $this->current_academic_year;
+        }
     }
     
     /**
@@ -98,6 +124,13 @@ class StreamManager {
      */
     public function getCurrentStreamName() {
         return $this->current_stream_name;
+    }
+
+    /**
+     * Get current academic year
+     */
+    public function getCurrentAcademicYear() {
+        return $this->current_academic_year;
     }
     
     /**

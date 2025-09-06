@@ -32,16 +32,26 @@ if (!defined('CUSTOM_ERROR_HANDLER_LOADED')) {
             echo "<link rel=\"stylesheet\" href=\"https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.2/css/bootstrap.min.css\">";
             echo "</head><body style=\"padding:20px;font-family:Arial,Helvetica,sans-serif\">";
             echo "<div style=\"max-width:900px;margin:40px auto;border:1px solid #f5c6cb;background:#f8d7da;color:#721c24;padding:20px;border-radius:6px\">";
-            // Try to embed logo so it displays even on fatal errors
+            // Try to embed logo so it displays even on fatal errors (skip if memory exhausted)
             $logoData = '';
-            $p = __DIR__ . '/../images/aamusted-logo.png';
-            $f = __DIR__ . '/../images/aamustedLog.png';
-            if (file_exists($p)) {
-                $b = @file_get_contents($p);
-                if ($b !== false) $logoData = 'data:image/png;base64,' . base64_encode($b);
-            } elseif (file_exists($f)) {
-                $b = @file_get_contents($f);
-                if ($b !== false) $logoData = 'data:image/png;base64,' . base64_encode($b);
+            $isMemoryExhausted = isset($error['message']) && stripos($error['message'], 'Allowed memory size') !== false;
+            if (!$isMemoryExhausted) {
+                $p = __DIR__ . '/../images/aamusted-logo.png';
+                $f = __DIR__ . '/../images/aamustedLog.png';
+                // Avoid loading very large images in error context
+                $maxBytes = 1048576; // 1 MB
+                $candidate = null;
+                if (file_exists($p)) { $candidate = $p; }
+                elseif (file_exists($f)) { $candidate = $f; }
+                if ($candidate) {
+                    $sizeOk = true;
+                    $fs = @filesize($candidate);
+                    if ($fs !== false && $fs > $maxBytes) { $sizeOk = false; }
+                    if ($sizeOk) {
+                        $b = @file_get_contents($candidate);
+                        if ($b !== false) { $logoData = 'data:image/png;base64,' . base64_encode($b); }
+                    }
+                }
             }
             if ($logoData !== '') {
                 $img = htmlspecialchars($logoData, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
