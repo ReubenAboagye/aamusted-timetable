@@ -335,8 +335,8 @@ try {
                 throw new Exception('Invalid session');
             }
             
-            // Get classes for this session
-            $stmt = $conn->prepare("SELECT id, name FROM classes WHERE session_id = ? AND is_active = 1");
+            // Get classes for this session (include stream for stream-day filtering and divisions)
+            $stmt = $conn->prepare("SELECT id, name, stream_id, divisions_count FROM classes WHERE session_id = ? AND is_active = 1");
             $stmt->bind_param("i", $session_id);
             $stmt->execute();
             $classes_result = $stmt->get_result();
@@ -390,8 +390,8 @@ try {
                 $time_slots[] = $row;
             }
             
-            // Generate timetable data using genetic algorithm or simple assignment
-            $timetable_data = generateTimetableData($classes, $courses, $lecturers, $rooms, $days, $time_slots, $exclusions);
+            // Generate timetable data using simple assignment (respecting stream days and once-per-week rules)
+            $timetable_data = generateTimetableData($classes, $courses, $lecturers, $rooms, $days, $time_slots, $exclusions, $semester);
             
             $response['success'] = true;
             $response['data'] = $timetable_data;
@@ -572,7 +572,7 @@ echo json_encode($response);
 $conn->close();
 
 // Function to generate timetable data
-function generateTimetableData($classes, $courses, $lecturers, $rooms, $days, $time_slots, $exclusions) {
+function generateTimetableData($classes, $courses, $lecturers, $rooms, $days, $time_slots, $exclusions, $semester) {
     $timetable_data = [];
     
     // Convert days to lowercase for consistency
@@ -631,59 +631,168 @@ function generateTimetableData($classes, $courses, $lecturers, $rooms, $days, $t
         }
     }
     
-    // Simple course assignment (in a real system, this would use the genetic algorithm)
-    $course_index = 0;
-    $lecturer_index = 0;
-    
-    foreach ($classes as $class) {
-        // Assign 2-3 courses per class
-        $courses_per_class = rand(2, 3);
-        
-        for ($i = 0; $i < $courses_per_class && $course_index < count($courses); $i++) {
-            $course = $courses[$course_index];
-            $lecturer = $lecturers[$lecturer_index % count($lecturers)];
-            
-            // Random day and room
-            $day = $day_names[array_rand($day_names)];
-            $room = $rooms[array_rand($rooms)];
-            
-            // Random time slot
-            $time_slot = $time_hours[array_rand($time_hours)];
-            
-            // Check if slot is available (not excluded)
-            $is_excluded = false;
-            foreach ($timetable_data[$day][$room['name']] as $existing) {
-                if ($existing['start_time'] == $time_slot['start_hour']) {
-                    $is_excluded = true;
-                    break;
+    // Business rules enforcement for auto-generation (simplified heuristic):
+    // - Stream days only per class
+    // - Each assigned course occurs once per class division per week
+    // - Per-division weekly cap equals number of assigned courses (N)
+
+    global $conn;
+
+    // Helper: determine if course code belongs to a semester (fallback if cc.semester not usable)
+    $belongsToSemester = function($courseCode, $sem) {
+        if (preg_match('/(\d{3})/', $courseCode, $m)) {
+            $second = (int)substr($m[1], 1, 1);
+            return $sem == 1 ? ($second % 2 === 1) : ($second % 2 === 0);
+        }
+        return true;
+    };
+
+    // Map allowed day names per class from stream.active_days
+    $allowed_days_by_class = [];
+    $all_day_names = $day_names; // fallback
+    $stream_ids = [];
+    foreach ($classes as $c) {
+        if (!empty($c['stream_id'])) { $stream_ids[(int)$c['stream_id']] = true; }
+    }
+    if (!empty($stream_ids)) {
+        $ids = implode(',', array_map('intval', array_keys($stream_ids)));
+        $sql = "SELECT id, active_days FROM streams WHERE id IN ($ids)";
+        if ($res = $conn->query($sql)) {
+            $stream_days = [];
+            while ($r = $res->fetch_assoc()) {
+                $arr = [];
+                if (!empty($r['active_days'])) {
+                    $decoded = json_decode($r['active_days'], true);
+                    if (is_array($decoded)) { foreach ($decoded as $nm) { $arr[] = strtolower($nm); } }
+                }
+                $stream_days[(int)$r['id']] = !empty($arr) ? $arr : $all_day_names;
+            }
+            foreach ($classes as $c) {
+                $allowed_days_by_class[(int)$c['id']] = $stream_days[(int)($c['stream_id'] ?? 0)] ?? $all_day_names;
+            }
+            $res->close();
+        }
+    } else {
+        foreach ($classes as $c) { $allowed_days_by_class[(int)$c['id']] = $all_day_names; }
+    }
+
+    // Load assigned courses per class for the semester
+    $class_ids = array_map(function($c){ return (int)$c['id']; }, $classes);
+    $class_ids = array_values(array_unique(array_filter($class_ids)));
+    $assigned_by_class = [];
+    if (!empty($class_ids)) {
+        $in = implode(',', array_map('intval', $class_ids));
+        $sql = "SELECT cc.class_id, cc.course_id, co.code, co.name, cc.semester
+                FROM class_courses cc
+                JOIN courses co ON co.id = cc.course_id
+                WHERE cc.is_active = 1 AND cc.class_id IN ($in)";
+        if ($res = $conn->query($sql)) {
+            while ($row = $res->fetch_assoc()) {
+                $cid = (int)$row['class_id'];
+                $ok = true;
+                if (!empty($row['semester'])) {
+                    $ok = ((int)$row['semester'] === (int)$semester);
+                } else {
+                    $ok = $belongsToSemester((string)$row['code'], (int)$semester);
+                }
+                if ($ok) {
+                    if (!isset($assigned_by_class[$cid])) { $assigned_by_class[$cid] = []; }
+                    $assigned_by_class[$cid][] = [
+                        'id' => (int)$row['course_id'],
+                        'code' => $row['code'],
+                        'name' => $row['name']
+                    ];
                 }
             }
-            
-            if (!$is_excluded) {
-                $duration = rand(1, 3); // 1-3 hours
-                $color_classes = ['bg-blue-100 text-blue-800', 'bg-green-100 text-green-800', 'bg-purple-100 text-purple-800', 'bg-yellow-100 text-yellow-800', 'bg-red-100 text-red-800', 'bg-indigo-100 text-indigo-800'];
-                $color = $color_classes[array_rand($color_classes)];
-                
-                $timetable_data[$day][$room['name']][] = [
-                    'course' => [
-                        'id' => $course['id'],
-                        'code' => $course['code'],
-                        'name' => $course['name'],
-                        'duration' => $duration,
-                        'color' => $color,
-                        'lecturerName' => $lecturer['name'],
-                        'classes' => [$class['name']]
-                    ],
-                    'start_time' => $time_slot['start_hour'],
-                    'spans' => $duration
-                ];
-            }
-            
-            $course_index++;
-            $lecturer_index++;
+            $res->close();
         }
     }
-    
+
+    // Build quick maps for occupancy to avoid conflicts
+    $room_occupied = []; // $room_occupied[day][room_name][start_hour] = true
+    $division_occupied = []; // $division_occupied[class_id][division_label][day][start_hour] = true
+
+    // Use divisions_count per class; default to 1
+    $makeDivisionLabels = function(int $count): array {
+        if ($count <= 1) { return ['']; }
+        $labels = [];
+        for ($i=0; $i<$count; $i++) {
+            // A..Z, AA.. etc.
+            $n = $i; $label = '';
+            while (true) { $label = chr(65 + ($n % 26)) . $label; $n = intdiv($n, 26) - 1; if ($n < 0) break; }
+            $labels[] = $label;
+        }
+        return $labels;
+    };
+
+    // Lecturer round-robin for display purposes only
+    $lecturer_index = 0;
+    $color_classes = ['bg-blue-100 text-blue-800', 'bg-green-100 text-green-800', 'bg-purple-100 text-purple-800', 'bg-yellow-100 text-yellow-800', 'bg-red-100 text-red-800', 'bg-indigo-100 text-indigo-800'];
+
+    foreach ($classes as $class) {
+        $class_id = (int)$class['id'];
+        $divisions_count = max(1, (int)($class['divisions_count'] ?? 1));
+        $divisions = $makeDivisionLabels($divisions_count);
+        $allowed_days = $allowed_days_by_class[$class_id] ?? $all_day_names;
+
+        $assigned_courses = $assigned_by_class[$class_id] ?? [];
+        if (empty($assigned_courses)) { continue; }
+
+        foreach ($divisions as $divLabel) {
+            $scheduled_courses = [];
+            foreach ($assigned_courses as $course) {
+                // ensure once per week per division per course
+                $course_key = $course['id'];
+                if (isset($scheduled_courses[$course_key])) { continue; }
+
+                $placed = false;
+                for ($attempt = 0; $attempt < 100 && !$placed; $attempt++) {
+                    $day = $allowed_days[array_rand($allowed_days)];
+                    $room = $rooms[array_rand($rooms)];
+                    $slot = $time_hours[array_rand($time_hours)];
+                    $start_hour = $slot['start_hour'];
+
+                    // Check exclusion/room occupancy
+                    $occupied = false;
+                    foreach ($timetable_data[$day][$room['name']] as $existing) {
+                        if ($existing['start_time'] == $start_hour) { $occupied = true; break; }
+                    }
+                    if (!$occupied && ($room_occupied[$day][$room['name']][$start_hour] ?? false)) { $occupied = true; }
+
+                    // Check class division occupancy
+                    if (!$occupied && ($division_occupied[$class_id][$divLabel][$day][$start_hour] ?? false)) { $occupied = true; }
+
+                    if ($occupied) { continue; }
+
+                    // Place
+                    $lecturer = $lecturers[$lecturer_index % max(1, count($lecturers))];
+                    $lecturer_index++;
+                    $color = $color_classes[array_rand($color_classes)];
+                    $displayClass = $class['name'] . ($divLabel !== '' ? (' ' . $divLabel) : '');
+
+                    $timetable_data[$day][$room['name']][] = [
+                        'course' => [
+                            'id' => $course['id'],
+                            'code' => $course['code'],
+                            'name' => $course['name'],
+                            'duration' => 1,
+                            'color' => $color,
+                            'lecturerName' => $lecturer['name'] ?? 'Lecturer',
+                            'classes' => [$displayClass]
+                        ],
+                        'start_time' => $start_hour,
+                        'spans' => 1
+                    ];
+
+                    $room_occupied[$day][$room['name']][$start_hour] = true;
+                    $division_occupied[$class_id][$divLabel][$day][$start_hour] = true;
+                    $scheduled_courses[$course_key] = true;
+                    $placed = true;
+                }
+            }
+        }
+    }
+
     return $timetable_data;
 }
 ?>
