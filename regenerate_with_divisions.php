@@ -3,17 +3,21 @@ include 'connect.php';
 
 echo "<h2>Regenerating Timetable with Individual Class Divisions</h2>";
 
+// Accept semester and academic year via query params (defaults: semester=2, computed academic year)
+$requested_semester = isset($_GET['semester']) ? (int)$_GET['semester'] : 2;
+if ($requested_semester !== 1 && $requested_semester !== 2) { $requested_semester = 2; }
+
 // Step 1: Clear current timetable data
 echo "<h3>Step 1: Clearing Current Timetable Data</h3>";
-
-$clear_sql = "DELETE FROM timetable WHERE semester = 'second'";
-$clear_result = $conn->query($clear_sql);
-
-if ($clear_result) {
-    $affected_rows = $conn->affected_rows;
+$clear_sql = "DELETE FROM timetable WHERE semester = ?";
+if ($stmt = $conn->prepare($clear_sql)) {
+    $stmt->bind_param('i', $requested_semester);
+    $stmt->execute();
+    $affected_rows = $stmt->affected_rows;
+    $stmt->close();
     echo "<p>✓ Cleared $affected_rows timetable entries</p>";
 } else {
-    echo "<p>✗ Error clearing timetable: " . $conn->error . "</p>";
+    echo "<p>✗ Error preparing delete: " . $conn->error . "</p>";
     exit;
 }
 
@@ -66,6 +70,7 @@ if (file_exists(__DIR__ . '/includes/stream_manager.php')) {
     $stream_id = 1;
 }
 echo "<p>Using stream id: " . htmlspecialchars($stream_id) . "</p>";
+echo "<p>Using semester: " . htmlspecialchars($requested_semester) . "</p>";
 // Determine academic year from stream manager if available
 if (isset($streamManager) && method_exists($streamManager, 'getCurrentAcademicYear')) {
     $academic_year = $streamManager->getCurrentAcademicYear();
@@ -91,7 +96,7 @@ try {
         'mutation_rate' => 0.1,
         'crossover_rate' => 0.8,
         'stream_id' => $stream_id,
-        'semester' => 2,  // Second semester
+        'semester' => $requested_semester,
         'academic_year' => $academic_year
     ];
     
@@ -181,11 +186,18 @@ try {
                    JOIN class_courses cc ON t.class_course_id = cc.id 
                    JOIN classes c ON cc.class_id = c.id 
                    JOIN courses co ON cc.course_id = co.id 
-                   WHERE t.semester = 'second' AND t.academic_year = '2025/2026'
+                   WHERE t.semester = ? AND t.academic_year = ?
                    GROUP BY t.division_label, c.name, co.code
                    ORDER BY c.name, t.division_label";
     
-    $verify_result = $conn->query($verify_sql);
+    $verify_stmt = $conn->prepare($verify_sql);
+    if ($verify_stmt) {
+        $verify_stmt->bind_param('is', $requested_semester, $academic_year);
+        $verify_stmt->execute();
+        $verify_result = $verify_stmt->get_result();
+    } else {
+        $verify_result = false;
+    }
     
     if ($verify_result) {
         echo "<table border='1'>";
