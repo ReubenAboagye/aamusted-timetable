@@ -66,7 +66,7 @@ $lecturers_result = $conn->query("SELECT id, name FROM lecturers WHERE is_active
 
 // --- Build query for timetable display/export when all needed filters are present
 $timetable_rows = [];
-$can_query = ($selected_stream > 0 && $selected_semester > 0 && in_array($role, ['class','department','lecturer']));
+$can_query = ($selected_stream > 0 && $selected_semester > 0 && in_array($role, ['class','department','lecturer','full']));
 
 if ($can_query) {
 	// Detect schema variants
@@ -170,13 +170,34 @@ if ($can_query) {
 			$out = fopen('php://output', 'w');
 			fputcsv($out, ['Day', 'Start', 'End', 'Class', 'Division', 'Course Code', 'Course Name', 'Lecturer', 'Room', 'Capacity']);
 			$lastDay = null;
+			$lastStart = null;
+			$lastEnd = null;
 			foreach ($timetable_rows as $r) {
-				$dayCell = ($r['day_name'] !== $lastDay) ? $r['day_name'] : '';
-				$classWithDivision = $r['class_name'] . ($r['division_label'] ? ' ' . $r['division_label'] : '');
+				$isNewDay = ($r['day_name'] !== $lastDay);
+				$dayCell = $isNewDay ? $r['day_name'] : '';
+
+				// Merge period labels within the same day: only show Start/End when they change
+				if ($isNewDay) {
+					$startCell = $r['start_time'];
+					$endCell = $r['end_time'];
+					$lastStart = $r['start_time'];
+					$lastEnd = $r['end_time'];
+				} else {
+					if ($r['start_time'] === $lastStart && $r['end_time'] === $lastEnd) {
+						$startCell = '';
+						$endCell = '';
+					} else {
+						$startCell = $r['start_time'];
+						$endCell = $r['end_time'];
+						$lastStart = $r['start_time'];
+						$lastEnd = $r['end_time'];
+					}
+				}
+
 				fputcsv($out, [
 					$dayCell,
-					$r['start_time'],
-					$r['end_time'],
+					$startCell,
+					$endCell,
 					$r['class_name'],
 					$r['division_label'] ?: '',
 					$r['course_code'],
@@ -256,6 +277,8 @@ if ($can_query) {
 						<label class="btn btn-outline-primary" for="roleDept"><i class="fas fa-building me-1"></i>Department</label>
 						<input type="radio" class="btn-check" name="role" id="roleLect" value="lecturer" <?php echo ($role==='lecturer')?'checked':''; ?> autocomplete="off">
 						<label class="btn btn-outline-primary" for="roleLect"><i class="fas fa-chalkboard-teacher me-1"></i>Lecturer</label>
+						<input type="radio" class="btn-check" name="role" id="roleFull" value="full" <?php echo ($role==='full')?'checked':''; ?> autocomplete="off">
+						<label class="btn btn-outline-primary" for="roleFull"><i class="fas fa-globe me-1"></i>Full Timetable</label>
 					</div>
 				</div>
 
@@ -424,17 +447,37 @@ if ($can_query) {
 										<td colspan="8"><i class="fas fa-users me-2"></i><?php echo htmlspecialchars($rows[0]['class_name']); ?> - Division <?php echo htmlspecialchars($division); ?></td>
 									</tr>
 									<?php foreach ($rows as $row): ?>
-										<tr>
-											<td><?php echo htmlspecialchars($row['day_name']); ?></td>
-											<td><?php echo htmlspecialchars($row['start_time']); ?></td>
-											<td><?php echo htmlspecialchars($row['end_time']); ?></td>
-											<td><strong><?php echo htmlspecialchars($row['class_name']); ?></strong></td>
-											<td><span class="badge bg-primary division-badge"><?php echo htmlspecialchars($division); ?></span></td>
-											<td><?php echo htmlspecialchars(($row['course_code'] ? ($row['course_code'] . ' - ') : '') . $row['course_name']); ?></td>
-											<td><?php echo htmlspecialchars($row['lecturer_name']); ?></td>
-											<td><?php echo htmlspecialchars($row['room_name']); ?></td>
-										</tr>
-									<?php endforeach; ?>
+<?php
+$isNewDay = ($row['day_name'] !== ($lastDay ?? null));
+$dayCell = $isNewDay ? $row['day_name'] : '';
+if ($isNewDay) {
+	$startCell = $row['start_time'];
+	$endCell = $row['end_time'];
+	$lastStart = $row['start_time'];
+	$lastEnd = $row['end_time'];
+} else {
+	if ($row['start_time'] === ($lastStart ?? null) && $row['end_time'] === ($lastEnd ?? null)) {
+		$startCell = '';
+		$endCell = '';
+	} else {
+		$startCell = $row['start_time'];
+		$endCell = $row['end_time'];
+		$lastStart = $row['start_time'];
+		$lastEnd = $row['end_time'];
+	}
+}
+?>
+									<tr>
+										<td><?php echo htmlspecialchars($dayCell); ?></td>
+										<td><?php echo htmlspecialchars($startCell); ?></td>
+										<td><?php echo htmlspecialchars($endCell); ?></td>
+										<td><strong><?php echo htmlspecialchars($row['class_name']); ?></strong></td>
+										<td><span class="badge bg-primary division-badge"><?php echo htmlspecialchars($division); ?></span></td>
+										<td><?php echo htmlspecialchars(($row['course_code'] ? ($row['course_code'] . ' - ') : '') . $row['course_name']); ?></td>
+										<td><?php echo htmlspecialchars($row['lecturer_name']); ?></td>
+										<td><?php echo htmlspecialchars($row['room_name']); ?></td>
+									</tr>
+<?php $lastDay = $row['day_name']; endforeach; ?>
 								<?php
 								$is_first_level = false;
 								endforeach;
@@ -460,10 +503,43 @@ document.addEventListener('DOMContentLoaded', function() {
 	function updateRoleBlocks() {
 		var role = document.querySelector('input[name="role"]:checked');
 		var roleVal = role ? role.value : '';
-		document.querySelectorAll('.role-block').forEach(function(el){ el.style.display = 'none'; });
-		if (roleVal === 'class') document.querySelector('.role-class')?.setAttribute('style','display:block;');
-		if (roleVal === 'department') document.querySelector('.role-department')?.setAttribute('style','display:block;');
-		if (roleVal === 'lecturer') document.querySelector('.role-lecturer')?.setAttribute('style','display:block;');
+		// Hide all role blocks and disable their fields to avoid HTML5 required blocking submission
+		document.querySelectorAll('.role-block').forEach(function(el){
+			el.style.display = 'none';
+			el.querySelectorAll('select, input').forEach(function(ctrl){
+				ctrl.disabled = true;
+				ctrl.removeAttribute('required');
+			});
+		});
+		// Show and enable fields for the active role; set required only where needed
+		if (roleVal === 'class') {
+			var blocks = document.querySelectorAll('.role-class');
+			blocks.forEach(function(b){
+				b.setAttribute('style','display:block;');
+				b.querySelectorAll('select, input').forEach(function(ctrl){ ctrl.disabled = false; });
+			});
+			var cls = document.getElementById('class_id');
+			if (cls) cls.setAttribute('required','required');
+		}
+		if (roleVal === 'department') {
+			var b = document.querySelector('.role-department');
+			if (b) {
+				b.setAttribute('style','display:block;');
+				b.querySelectorAll('select, input').forEach(function(ctrl){ ctrl.disabled = false; });
+			}
+			var dep = document.getElementById('department_id');
+			if (dep) dep.setAttribute('required','required');
+		}
+		if (roleVal === 'lecturer') {
+			var b2 = document.querySelector('.role-lecturer');
+			if (b2) {
+				b2.setAttribute('style','display:block;');
+				b2.querySelectorAll('select, input').forEach(function(ctrl){ ctrl.disabled = false; });
+			}
+			var lec = document.getElementById('lecturer_id');
+			if (lec) lec.setAttribute('required','required');
+		}
+		// For 'full' role, we intentionally keep all role-specific selectors hidden
 	}
 	Array.from(document.querySelectorAll('input[name="role"]')).forEach(function(radio){
 		radio.addEventListener('change', updateRoleBlocks);
