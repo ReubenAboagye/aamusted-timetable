@@ -8,6 +8,38 @@ include 'includes/header.php';
 $success_message = '';
 $error_message = '';
 
+// Helper: get day name by id
+function get_day_name_by_id(mysqli $conn, int $day_id): ?string {
+    $stmt = $conn->prepare("SELECT name FROM days WHERE id = ?");
+    $stmt->bind_param('i', $day_id);
+    $stmt->execute();
+    $res = $stmt->get_result();
+    $row = $res->fetch_assoc();
+    $stmt->close();
+    return $row['name'] ?? null;
+}
+
+// Helper: is selected day allowed for class's stream
+function is_day_allowed_for_stream(mysqli $conn, int $day_id, int $stream_id): bool {
+    // If streams.active_days is empty/null, allow all days
+    $stmt = $conn->prepare("SELECT active_days FROM streams WHERE id = ?");
+    $stmt->bind_param('i', $stream_id);
+    $stmt->execute();
+    $res = $stmt->get_result();
+    $row = $res->fetch_assoc();
+    $stmt->close();
+
+    $active_days_json = $row['active_days'] ?? null;
+    if (empty($active_days_json)) { return true; }
+
+    $allowed = json_decode($active_days_json, true);
+    if (!is_array($allowed) || empty($allowed)) { return true; }
+
+    $day_name = get_day_name_by_id($conn, $day_id);
+    if ($day_name === null) { return false; }
+    return in_array($day_name, $allowed, true);
+}
+
 // Handle form submissions
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
@@ -50,16 +82,79 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($conflict) {
                 $error_message = "This time slot and room is already occupied. Please choose a different time or room.";
             } else {
-                $stmt = $conn->prepare("UPDATE timetable SET day_id = ?, time_slot_id = ?, room_id = ?, class_course_id = ?, lecturer_course_id = ? WHERE id = ?");
-                $stmt->bind_param('iiiiii', $day_id, $time_slot_id, $room_id, $class_course_id, $lecturer_course_id, $id);
-                
-                if ($stmt->execute()) {
-                    $stmt->close();
-                    redirect_with_flash('update_timetable.php?id=' . $id, 'success', 'Timetable entry updated successfully!');
-                } else {
-                    $error_message = "Error updating timetable entry.";
+                // Load class/course/semester/stream for the selected class_course
+                $meta_sql = "SELECT cc.class_id, cc.course_id, cc.semester, c.stream_id FROM class_courses cc JOIN classes c ON cc.class_id = c.id WHERE cc.id = ?";
+                $meta_stmt = $conn->prepare($meta_sql);
+                $meta_stmt->bind_param('i', $class_course_id);
+                $meta_stmt->execute();
+                $meta_res = $meta_stmt->get_result();
+                $meta = $meta_res->fetch_assoc();
+                $meta_stmt->close();
+
+                if (!$meta) {
+                    $error_message = "Invalid class-course selection.";
                 }
-                $stmt->close();
+
+                // Stream-day rule
+                if (empty($error_message) && !is_day_allowed_for_stream($conn, $day_id, (int)$meta['stream_id'])) {
+                    $error_message = "Selected day is not allowed for this division's stream.";
+                }
+
+                // Once per week per course per division
+                if (empty($error_message)) {
+                    $dup_sql = "SELECT COUNT(*) AS cnt FROM timetable t JOIN class_courses cc2 ON t.class_course_id = cc2.id WHERE cc2.class_id = ? AND cc2.course_id = ? AND t.id != ?";
+                    $dup_stmt = $conn->prepare($dup_sql);
+                    $dup_stmt->bind_param('iii', $meta['class_id'], $meta['course_id'], $id);
+                    $dup_stmt->execute();
+                    $dup_res = $dup_stmt->get_result();
+                    $already = (int)($dup_res->fetch_assoc()['cnt'] ?? 0) > 0;
+                    $dup_stmt->close();
+                    if ($already) {
+                        $error_message = "This course is already scheduled once this week for the selected division.";
+                    }
+                }
+
+                // Weekly cap: at most N assignments where N = number of courses assigned to the class for this semester
+                if (empty($error_message)) {
+                    // N: total class_courses for the class in same semester
+                    $n_stmt = $conn->prepare("SELECT COUNT(*) AS n FROM class_courses WHERE class_id = ? AND semester = ? AND is_active = 1");
+                    $n_stmt->bind_param('is', $meta['class_id'], $meta['semester']);
+                    $n_stmt->execute();
+                    $n_res = $n_stmt->get_result();
+                    $N = (int)($n_res->fetch_assoc()['n'] ?? 0);
+                    $n_stmt->close();
+
+                    // How many distinct courses already scheduled for this class in same semester (excluding this row's current course if unchanged is fine)
+                    $count_stmt = $conn->prepare("SELECT COUNT(DISTINCT cc2.course_id) AS cnt FROM timetable t JOIN class_courses cc2 ON t.class_course_id = cc2.id WHERE cc2.class_id = ? AND cc2.semester = ?");
+                    $count_stmt->bind_param('is', $meta['class_id'], $meta['semester']);
+                    $count_stmt->execute();
+                    $count_res = $count_stmt->get_result();
+                    $scheduled_count = (int)($count_res->fetch_assoc()['cnt'] ?? 0);
+                    $count_stmt->close();
+
+                    // Is the selected course already scheduled (so we aren't increasing the count)?
+                    $has_course_stmt = $conn->prepare("SELECT t.id FROM timetable t JOIN class_courses cc2 ON t.class_course_id = cc2.id WHERE cc2.class_id = ? AND cc2.course_id = ? LIMIT 1");
+                    $has_course_stmt->bind_param('ii', $meta['class_id'], $meta['course_id']);
+                    $has_course_stmt->execute();
+                    $has_course = $has_course_stmt->get_result()->num_rows > 0;
+                    $has_course_stmt->close();
+
+                    if (!$has_course && $scheduled_count >= $N) {
+                        $error_message = "Weekly cap reached for this division: all assigned semester courses are already scheduled.";
+                    }
+                }
+
+                if (empty($error_message)) {
+                    $stmt = $conn->prepare("UPDATE timetable SET day_id = ?, time_slot_id = ?, room_id = ?, class_course_id = ?, lecturer_course_id = ? WHERE id = ?");
+                    $stmt->bind_param('iiiiii', $day_id, $time_slot_id, $room_id, $class_course_id, $lecturer_course_id, $id);
+                    if ($stmt->execute()) {
+                        $stmt->close();
+                        redirect_with_flash('update_timetable.php?id=' . $id, 'success', 'Timetable entry updated successfully!');
+                    } else {
+                        $error_message = "Error updating timetable entry.";
+                    }
+                    $stmt->close();
+                }
             }
         } else {
             $error_message = "Please fill in all required fields.";
@@ -84,16 +179,72 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($conflict) {
                 $error_message = "This time slot and room is already occupied. Please choose a different time or room.";
             } else {
-                $stmt = $conn->prepare("INSERT INTO timetable (day_id, time_slot_id, room_id, class_course_id, lecturer_course_id) VALUES (?, ?, ?, ?, ?)");
-                $stmt->bind_param('iiiii', $day_id, $time_slot_id, $room_id, $class_course_id, $lecturer_course_id);
-                
-                if ($stmt->execute()) {
-                    $stmt->close();
-                    redirect_with_flash('update_timetable.php', 'success', 'Timetable entry created successfully!');
-                } else {
-                    $error_message = "Error creating timetable entry.";
+                // Load class/course/semester/stream for the selected class_course
+                $meta_sql = "SELECT cc.class_id, cc.course_id, cc.semester, c.stream_id FROM class_courses cc JOIN classes c ON cc.class_id = c.id WHERE cc.id = ?";
+                $meta_stmt = $conn->prepare($meta_sql);
+                $meta_stmt->bind_param('i', $class_course_id);
+                $meta_stmt->execute();
+                $meta_res = $meta_stmt->get_result();
+                $meta = $meta_res->fetch_assoc();
+                $meta_stmt->close();
+
+                if (!$meta) {
+                    $error_message = "Invalid class-course selection.";
                 }
-                $stmt->close();
+
+                // Stream-day rule
+                if (empty($error_message) && !is_day_allowed_for_stream($conn, $day_id, (int)$meta['stream_id'])) {
+                    $error_message = "Selected day is not allowed for this division's stream.";
+                }
+
+                // Once per week per course per division
+                if (empty($error_message)) {
+                    $dup_sql = "SELECT COUNT(*) AS cnt FROM timetable t JOIN class_courses cc2 ON t.class_course_id = cc2.id WHERE cc2.class_id = ? AND cc2.course_id = ?";
+                    $dup_stmt = $conn->prepare($dup_sql);
+                    $dup_stmt->bind_param('ii', $meta['class_id'], $meta['course_id']);
+                    $dup_stmt->execute();
+                    $dup_res = $dup_stmt->get_result();
+                    $already = (int)($dup_res->fetch_assoc()['cnt'] ?? 0) > 0;
+                    $dup_stmt->close();
+                    if ($already) {
+                        $error_message = "This course is already scheduled once this week for the selected division.";
+                    }
+                }
+
+                // Weekly cap: at most N assignments where N = number of courses assigned to the class for this semester
+                if (empty($error_message)) {
+                    // N: total class_courses for the class in same semester
+                    $n_stmt = $conn->prepare("SELECT COUNT(*) AS n FROM class_courses WHERE class_id = ? AND semester = ? AND is_active = 1");
+                    $n_stmt->bind_param('is', $meta['class_id'], $meta['semester']);
+                    $n_stmt->execute();
+                    $n_res = $n_stmt->get_result();
+                    $N = (int)($n_res->fetch_assoc()['n'] ?? 0);
+                    $n_stmt->close();
+
+                    // How many distinct courses already scheduled for this class in same semester
+                    $count_stmt = $conn->prepare("SELECT COUNT(DISTINCT cc2.course_id) AS cnt FROM timetable t JOIN class_courses cc2 ON t.class_course_id = cc2.id WHERE cc2.class_id = ? AND cc2.semester = ?");
+                    $count_stmt->bind_param('is', $meta['class_id'], $meta['semester']);
+                    $count_stmt->execute();
+                    $count_res = $count_stmt->get_result();
+                    $scheduled_count = (int)($count_res->fetch_assoc()['cnt'] ?? 0);
+                    $count_stmt->close();
+
+                    if ($scheduled_count >= $N) {
+                        $error_message = "Weekly cap reached for this division: all assigned semester courses are already scheduled.";
+                    }
+                }
+
+                if (empty($error_message)) {
+                    $stmt = $conn->prepare("INSERT INTO timetable (day_id, time_slot_id, room_id, class_course_id, lecturer_course_id) VALUES (?, ?, ?, ?, ?)");
+                    $stmt->bind_param('iiiii', $day_id, $time_slot_id, $room_id, $class_course_id, $lecturer_course_id);
+                    if ($stmt->execute()) {
+                        $stmt->close();
+                        redirect_with_flash('update_timetable.php', 'success', 'Timetable entry created successfully!');
+                    } else {
+                        $error_message = "Error creating timetable entry.";
+                    }
+                    $stmt->close();
+                }
             }
         } else {
             $error_message = "Please fill in all required fields.";
