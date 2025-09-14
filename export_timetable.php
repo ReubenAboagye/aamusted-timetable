@@ -26,6 +26,7 @@ if ($col && $col->num_rows > 0) { $has_lecturer_course = true; }
 
 $select_parts = [
     "c.name as class_name",
+    "t.division_label",
     "co.`code` AS course_code",
     "co.`name` AS course_name",
     "d.name as day_name",
@@ -76,7 +77,7 @@ if ($room_filter > 0) {
     $types .= "i";
 }
 
-$main_query .= " ORDER BY d.id, ts.start_time, c.name";
+$main_query .= " ORDER BY d.id, ts.start_time, c.name, t.division_label, co.code";
 
 // Execute the main query
 $stmt = $conn->prepare($main_query);
@@ -112,7 +113,7 @@ function exportCSV($result) {
     $output = fopen('php://output', 'w');
     
     // Add headers
-    fputcsv($output, ['Day', 'Time', 'Class', 'Course Code', 'Course Name', 'Room', 'Capacity', 'Lecturer']);
+    fputcsv($output, ['Day', 'Time', 'Class', 'Division', 'Course Code', 'Course Name', 'Room', 'Capacity', 'Lecturer']);
     
     // Add data
     while ($row = $result->fetch_assoc()) {
@@ -120,6 +121,7 @@ function exportCSV($result) {
             $row['day_name'],
             substr($row['start_time'], 0, 5) . ' - ' . substr($row['end_time'], 0, 5),
             $row['class_name'],
+            $row['division_label'] ?: '',
             $row['course_code'],
             $row['course_name'],
             $row['room_name'],
@@ -141,11 +143,12 @@ function exportExcel($result) {
     $sheet->setCellValue('A1', 'Day');
     $sheet->setCellValue('B1', 'Time');
     $sheet->setCellValue('C1', 'Class');
-    $sheet->setCellValue('D1', 'Course Code');
-    $sheet->setCellValue('E1', 'Course Name');
-    $sheet->setCellValue('F1', 'Room');
-    $sheet->setCellValue('G1', 'Capacity');
-    $sheet->setCellValue('H1', 'Lecturer');
+    $sheet->setCellValue('D1', 'Division');
+    $sheet->setCellValue('E1', 'Course Code');
+    $sheet->setCellValue('F1', 'Course Name');
+    $sheet->setCellValue('G1', 'Room');
+    $sheet->setCellValue('H1', 'Capacity');
+    $sheet->setCellValue('I1', 'Lecturer');
     
     // Style headers
     $headerStyle = [
@@ -155,7 +158,7 @@ function exportExcel($result) {
             'startColor' => ['rgb' => 'E2E3E5']
         ]
     ];
-    $sheet->getStyle('A1:H1')->applyFromArray($headerStyle);
+    $sheet->getStyle('A1:I1')->applyFromArray($headerStyle);
     
     // Add data
     $row = 2;
@@ -163,16 +166,17 @@ function exportExcel($result) {
         $sheet->setCellValue('A' . $row, $data['day_name']);
         $sheet->setCellValue('B' . $row, substr($data['start_time'], 0, 5) . ' - ' . substr($data['end_time'], 0, 5));
         $sheet->setCellValue('C' . $row, $data['class_name']);
-        $sheet->setCellValue('D' . $row, $data['course_code']);
-        $sheet->setCellValue('E' . $row, $data['course_name']);
-        $sheet->setCellValue('F' . $row, $data['room_name']);
-        $sheet->setCellValue('G' . $row, $data['capacity']);
-        $sheet->setCellValue('H' . $row, $data['lecturer_name'] ?: 'Not assigned');
+        $sheet->setCellValue('D' . $row, $data['division_label'] ?: '');
+        $sheet->setCellValue('E' . $row, $data['course_code']);
+        $sheet->setCellValue('F' . $row, $data['course_name']);
+        $sheet->setCellValue('G' . $row, $data['room_name']);
+        $sheet->setCellValue('H' . $row, $data['capacity']);
+        $sheet->setCellValue('I' . $row, $data['lecturer_name'] ?: 'Not assigned');
         $row++;
     }
     
     // Auto-size columns
-    foreach (range('A', 'H') as $col) {
+    foreach (range('A', 'I') as $col) {
         $sheet->getColumnDimension($col)->setAutoSize(true);
     }
     
@@ -403,6 +407,7 @@ if ($col) $col->close();
                                                     <th>Day</th>
                                                     <th>Time</th>
                                                     <th>Class</th>
+                                                    <th>Division</th>
                                                     <th>Course</th>
                                                     <th>Room</th>
                                                     <th>Lecturer</th>
@@ -420,6 +425,7 @@ if ($col) $col->close();
                                                     <td><?php echo htmlspecialchars($entry['day_name']); ?></td>
                                                     <td><?php echo htmlspecialchars(substr($entry['start_time'], 0, 5) . ' - ' . substr($entry['end_time'], 0, 5)); ?></td>
                                                     <td><?php echo htmlspecialchars($entry['class_name']); ?></td>
+                                                    <td><?php echo htmlspecialchars($entry['division_label'] ?: ''); ?></td>
                                                     <td><?php echo htmlspecialchars($entry['course_code'] . ' - ' . $entry['course_name']); ?></td>
                                                     <td><?php echo htmlspecialchars($entry['room_name']); ?></td>
                                                     <td><?php echo $entry['lecturer_name'] ? htmlspecialchars($entry['lecturer_name']) : '<span class="text-muted">Not assigned</span>'; ?></td>
