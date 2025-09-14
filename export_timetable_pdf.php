@@ -23,7 +23,7 @@ $class_id = isset($_GET['class_id']) ? intval($_GET['class_id']) : 0;
 $department_id = isset($_GET['department_id']) ? intval($_GET['department_id']) : 0;
 $lecturer_id = isset($_GET['lecturer_id']) ? intval($_GET['lecturer_id']) : 0;
 
-if (!($selected_stream > 0 && $selected_semester > 0 && in_array($role, ['class','department','lecturer']))) {
+if (!($selected_stream > 0 && $selected_semester > 0 && in_array($role, ['class','department','lecturer','full']))) {
     http_response_code(400);
     echo 'Missing required parameters';
     exit;
@@ -100,6 +100,7 @@ if ($role === 'lecturer' && $lecturer_id > 0) {
     $params[] = $lecturer_id;
     $types .= 'i';
 }
+// role 'full' adds no extra filters
 
 $sql = "SELECT " . implode(",\n    ", $select_parts) . "\nFROM timetable t\n    " . implode("\n    ", $joins) . "\nWHERE " . implode(" AND ", $where) . "\nORDER BY d.id, ts.start_time, c.name, co.code";
 
@@ -119,11 +120,12 @@ if ($selected_stream > 0) {
     $ss = $conn->prepare("SELECT name, code FROM streams WHERE id = ?");
     if ($ss) { $ss->bind_param('i', $selected_stream); $ss->execute(); $sr = $ss->get_result(); if ($sr && ($row = $sr->fetch_assoc())) { $stream_name = $row['name'] . (!empty($row['code']) ? (' (' . $row['code'] . ')') : ''); } $ss->close(); }
 }
-$role_title = ($role === 'class' ? 'Class' : ($role === 'department' ? 'Department' : 'Lecturer'));
+$role_title = ($role === 'class' ? 'Class' : ($role === 'department' ? 'Department' : ($role === 'lecturer' ? 'Lecturer' : 'Full')));
 $filter_value = '';
 if ($role === 'class' && $class_id) { $qr = $conn->prepare("SELECT name FROM classes WHERE id = ?"); if ($qr) { $qr->bind_param('i', $class_id); $qr->execute(); $rs = $qr->get_result(); if ($rs && ($r = $rs->fetch_assoc())) { $filter_value = $r['name']; } $qr->close(); } }
 if ($role === 'department' && $department_id) { $qr = $conn->prepare("SELECT name FROM departments WHERE id = ?"); if ($qr) { $qr->bind_param('i', $department_id); $qr->execute(); $rs = $qr->get_result(); if ($rs && ($r = $rs->fetch_assoc())) { $filter_value = $r['name']; } $qr->close(); } }
 if ($role === 'lecturer' && $lecturer_id) { $qr = $conn->prepare("SELECT name FROM lecturers WHERE id = ?"); if ($qr) { $qr->bind_param('i', $lecturer_id); $qr->execute(); $rs = $qr->get_result(); if ($rs && ($r = $rs->fetch_assoc())) { $filter_value = $r['name']; } $qr->close(); } }
+if ($role === 'full') { $filter_value = 'All'; }
 
 // Build HTML for PDF
 $logoPathPreferred = __DIR__ . '/images/aamusted-logo.png';
@@ -145,6 +147,7 @@ foreach ($rows as $r) {
 }
 foreach ($dayToRows as $dayName => $dayRows) {
     $first = true;
+    $lastPeriod = null; // Track last period within this day to suppress duplicates
     foreach ($dayRows as $r) {
         $rowsHtml .= '<tr>';
         // show day only for the first row of the day to achieve merged appearance
@@ -153,15 +156,17 @@ foreach ($dayToRows as $dayName => $dayRows) {
         $startFmt = !empty($r['start_time']) ? date('g:i A', strtotime($r['start_time'])) : '';
         $endFmt = !empty($r['end_time']) ? date('g:i A', strtotime($r['end_time'])) : '';
         $period = trim($startFmt . ($endFmt ? ' - ' . $endFmt : ''));
+        $displayPeriod = ($first || $period !== $lastPeriod) ? $period : '';
         $rowsHtml
             .= '<td>' . $dayCell . '</td>'
-            . '<td>' . htmlspecialchars($period) . '</td>'
+            . '<td>' . htmlspecialchars($displayPeriod) . '</td>'
             . '<td><strong>' . htmlspecialchars($r['class_name'] . (isset($r['division_label']) && $r['division_label'] ? ' ' . $r['division_label'] : '')) . '</strong></td>'
             . '<td>' . htmlspecialchars(($r['course_code'] ? ($r['course_code'] . ' - ') : '') . $r['course_name']) . '</td>'
             . '<td>' . htmlspecialchars($r['lecturer_name']) . '</td>'
             . '<td>' . htmlspecialchars($r['room_name']) . '</td>'
             . '</tr>';
         $first = false;
+        $lastPeriod = $period;
     }
 }
 
@@ -193,6 +198,16 @@ $html = '<html><head><meta charset="UTF-8"><style>
     . $rowsHtml
     . '</tbody></table></body></html>';
 
+// Simple filename sanitizer for downloads
+if (!function_exists('sanitize_filename')) {
+    function sanitize_filename($text) {
+        $text = preg_replace('/\s+/', '_', $text);
+        $text = preg_replace('/[^A-Za-z0-9_\-]+/', '_', $text);
+        $text = trim($text, '_-');
+        return $text !== '' ? $text : 'timetable';
+    }
+}
+
 // Clean buffers to avoid mixing output
 while (ob_get_level() > 0) { @ob_end_clean(); }
 
@@ -203,6 +218,13 @@ $dompdf = new Dompdf\Dompdf($options);
 $dompdf->loadHtml($html, 'UTF-8');
 $dompdf->setPaper('A4', 'landscape');
 $dompdf->render();
-$dompdf->stream('timetable.pdf', ['Attachment' => true]);
+// Build descriptive download filename: Timetable - [Stream] - Semester N - [Role Filter] - [Division]
+$filename_parts = ['Timetable'];
+if ($stream_name !== '') { $filename_parts[] = $stream_name; }
+$filename_parts[] = 'Semester ' . $selected_semester;
+if ($filter_value !== '') { $filename_parts[] = $role_title . ' ' . $filter_value; }
+if (!empty($division_label)) { $filename_parts[] = 'Division ' . $division_label; }
+$download_filename = sanitize_filename(implode(' - ', $filename_parts)) . '.pdf';
+$dompdf->stream($download_filename, ['Attachment' => true]);
 exit;
 
