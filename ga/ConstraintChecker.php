@@ -14,7 +14,8 @@ class ConstraintChecker {
     private $indexes = [
         'roomsById' => [],
         'timeSlotsById' => [],
-        'classCapacityByClassId' => []
+        'classCapacityByClassId' => [],
+        'divisionCapacityByClassIdAndLabel' => []
     ];
     
     public function __construct(array $data, array $options = []) {
@@ -81,8 +82,9 @@ class ConstraintChecker {
                 }
             }
         }
-        // Class capacity by class id (prefer individual_capacity, fallback to total_capacity)
+        // Class capacity by class id (fallback) and per-division capacity index
         $byClass = [];
+        $byDivision = [];
         if (!empty($this->data['class_courses'])) {
             foreach ($this->data['class_courses'] as $cc) {
                 if (!isset($cc['class_id'])) { continue; }
@@ -90,6 +92,10 @@ class ConstraintChecker {
                 if (isset($cc['individual_capacity'])) {
                     $cap = (int)$cc['individual_capacity'];
                     $byClass[$cid] = max($byClass[$cid] ?? 0, $cap);
+                    $label = isset($cc['division_label']) ? (string)$cc['division_label'] : '';
+                    if ($label !== '') {
+                        $byDivision[$cid][$label] = max($byDivision[$cid][$label] ?? 0, $cap);
+                    }
                 }
             }
         }
@@ -102,6 +108,7 @@ class ConstraintChecker {
             }
         }
         $this->indexes['classCapacityByClassId'] = $byClass;
+        $this->indexes['divisionCapacityByClassIdAndLabel'] = $byDivision;
     }
     
     /**
@@ -271,7 +278,7 @@ class ConstraintChecker {
                     }
                 }
                 
-                // Check class conflicts
+                // Check class conflicts (per-division time clash)
                 $classKey = $gene['class_id'] . '|' . $gene['day_id'] . '|' . $gene['time_slot_id'];
                 if (!empty($gene['division_label'])) { $classKey .= '|' . $gene['division_label']; }
                 if (isset($classSlots[$classKey])) {
@@ -282,6 +289,18 @@ class ConstraintChecker {
                     ];
                 } else {
                     $classSlots[$classKey] = $classCourseId;
+                }
+
+                // Hard: each course occurs once per week for a class division
+                $div = (string)($gene['division_label'] ?? '');
+                $repeatKey = 'once_per_week|' . $gene['class_id'] . '|' . $div . '|' . ($gene['course_id'] ?? '');
+                if (isset($this->cache[$repeatKey])) {
+                    $violations['duplicate_assignment'][] = [
+                        'class_course_id' => $classCourseId,
+                        'message' => 'Course scheduled more than once this week for this class division'
+                    ];
+                } else {
+                    $this->cache[$repeatKey] = true;
                 }
             }
             
@@ -316,7 +335,7 @@ class ConstraintChecker {
                 $violations['room_type_mismatch'][] = $roomTypeMismatch;
             }
 
-            // Hard: break should not split a lecture across consecutive slots
+            // Hard: break should not split a lecture across consecutive slots (duration forced to 1, but keep check safe)
             $breakSplit = $this->checkBreakSplit($gene);
             if ($breakSplit) {
                 $violations['break_split'][] = $breakSplit;
@@ -602,8 +621,15 @@ class ConstraintChecker {
             // Handle individual assignment
             $classId = $gene['class_id'];
             
-            // Class capacity (indexed)
-            $classCapacity = (int)($this->indexes['classCapacityByClassId'][(int)$classId] ?? 0);
+            // Class capacity: prefer per-division capacity when division_label present
+            $divLabel = isset($gene['division_label']) ? (string)$gene['division_label'] : '';
+            $classCapacity = 0;
+            if ($divLabel !== '') {
+                $classCapacity = (int)($this->indexes['divisionCapacityByClassIdAndLabel'][(int)$classId][$divLabel] ?? 0);
+            }
+            if ($classCapacity <= 0) {
+                $classCapacity = (int)($this->indexes['classCapacityByClassId'][(int)$classId] ?? 0);
+            }
             
             // Find room capacity (indexed)
             $roomCapacity = (int)($this->indexes['roomsById'][(int)$roomId]['capacity'] ?? 0);

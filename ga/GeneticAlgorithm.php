@@ -267,9 +267,9 @@ class GeneticAlgorithm {
     private function crossover(array $parent1, array $parent2): array {
         $offspring = [];
         
-        // Group genes by class_course_id to handle multi-slot courses
-        $parent1Groups = $this->groupGenesByClassCourse($parent1);
-        $parent2Groups = $this->groupGenesByClassCourse($parent2);
+        // Group genes by class_course_id + division to handle multi-slot courses per division
+        $parent1Groups = $this->groupGenesByDivision($parent1);
+        $parent2Groups = $this->groupGenesByDivision($parent2);
         
         foreach ($parent1Groups as $classCourseId => $genes1) {
             $genes2 = $parent2Groups[$classCourseId] ?? $genes1;
@@ -277,12 +277,14 @@ class GeneticAlgorithm {
             // Uniform crossover - either take all genes from parent1 or parent2
             if (mt_rand() / mt_getrandmax() < 0.5) {
                 foreach ($genes1 as $gene) {
-                    $geneKey = $classCourseId . '_' . $gene['slot_index'];
+                    $divKey = $gene['division_key'] ?? ($classCourseId . '|' . ($gene['division_label'] ?? ''));
+                    $geneKey = $divKey . '_' . $gene['slot_index'];
                     $offspring[$geneKey] = $gene;
                 }
             } else {
                 foreach ($genes2 as $gene) {
-                    $geneKey = $classCourseId . '_' . $gene['slot_index'];
+                    $divKey = $gene['division_key'] ?? ($classCourseId . '|' . ($gene['division_label'] ?? ''));
+                    $geneKey = $divKey . '_' . $gene['slot_index'];
                     $offspring[$geneKey] = $gene;
                 }
             }
@@ -296,15 +298,22 @@ class GeneticAlgorithm {
      */
     private function groupGenesByClassCourse(array $individual): array {
         $groups = [];
-        
         foreach ($individual as $geneKey => $gene) {
             $classCourseId = $gene['class_course_id'];
-            if (!isset($groups[$classCourseId])) {
-                $groups[$classCourseId] = [];
-            }
+            if (!isset($groups[$classCourseId])) { $groups[$classCourseId] = []; }
             $groups[$classCourseId][] = $gene;
         }
-        
+        return $groups;
+    }
+
+    private function groupGenesByDivision(array $individual): array {
+        $groups = [];
+        foreach ($individual as $geneKey => $gene) {
+            $classCourseId = $gene['class_course_id'];
+            $divKey = $gene['division_key'] ?? ($classCourseId . '|' . ($gene['division_label'] ?? ''));
+            if (!isset($groups[$divKey])) { $groups[$divKey] = []; }
+            $groups[$divKey][] = $gene;
+        }
         return $groups;
     }
     
@@ -389,14 +398,14 @@ class GeneticAlgorithm {
         $uniqueKeys = []; // Track unique combinations to prevent duplicates
         $processedGenes = []; // Track which genes we've already processed
         
-        // Group genes by class_course_id to handle multi-slot courses
+        // Group genes by class_course_id + division to handle multi-slot courses per division
         $groupedGenes = [];
         foreach ($solution['individual'] as $geneKey => $gene) {
-            $classCourseId = $gene['class_course_id'];
-            if (!isset($groupedGenes[$classCourseId])) {
-                $groupedGenes[$classCourseId] = [];
+            $divisionKey = $gene['division_key'] ?? ($gene['class_course_id'] . '|' . ($gene['division_label'] ?? ''));
+            if (!isset($groupedGenes[$divisionKey])) {
+                $groupedGenes[$divisionKey] = [];
             }
-            $groupedGenes[$classCourseId][] = $gene;
+            $groupedGenes[$divisionKey][] = $gene;
         }
         
         // Process each class-course group
@@ -412,7 +421,8 @@ class GeneticAlgorithm {
             
             if ($isCombined && !empty($combinedClasses)) {
                 // Handle combined assignment - create entries for all class divisions
-                $courseDuration = $genes[0]['course_duration'] ?? 1;
+                // Force one period per course per division
+                $courseDuration = 1;
                 $baseTimeSlotId = $genes[0]['time_slot_id'];
                 $baseDayId = $genes[0]['day_id'];
                 $baseRoomId = $genes[0]['room_id'];
@@ -451,7 +461,8 @@ class GeneticAlgorithm {
                 }
             } else {
                 // Handle individual assignment - ensure each division gene in the group is emitted
-                $courseDuration = $genes[0]['course_duration'] ?? 1;
+                // Force one period per course per division
+                $courseDuration = 1;
 
                 // For each gene (which may represent a division of the parent class_course), emit entries
                 foreach ($genes as $gene) {

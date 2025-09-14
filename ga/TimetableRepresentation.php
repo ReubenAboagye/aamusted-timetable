@@ -71,7 +71,8 @@ class TimetableRepresentation {
      */
     private static function createIndividualAssignment(array $classCourse, array $data): array {
         $assignments = [];
-        $courseDuration = $classCourse['hours_per_week'] ?? 1;
+        // Business rule: each course occurs once per week per class division => single slot
+        $courseDuration = 1;
         
         // Filter rooms by preferred room type if available
         $roomsForCourse = $data['rooms'];
@@ -87,7 +88,7 @@ class TimetableRepresentation {
             }
         }
         
-        // Create multiple genes for courses with duration > 1
+        // Create a single gene per class-course per division for the week
         for ($i = 0; $i < $courseDuration; $i++) {
             $geneKey = $classCourse['id'] . '_' . $i; // Unique key for each slot
             $assignments[$geneKey] = self::createRandomGene(
@@ -144,7 +145,8 @@ class TimetableRepresentation {
         
         // Use the first class course as the base for the combined assignment
         $baseClassCourse = $classCourses[0];
-        $courseDuration = $baseClassCourse['hours_per_week'] ?? 1;
+        // Enforce once-per-week per course per division: always one period
+        $courseDuration = 1;
         
         // Create combined assignment
         for ($i = 0; $i < $courseDuration; $i++) {
