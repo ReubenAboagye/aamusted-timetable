@@ -54,9 +54,7 @@
                          <a href="generate_timetable.php" class="nav-link <?= ($currentPage == 'generate_timetable.php') ? 'active' : '' ?>">
                <i class="fas fa-calendar-plus me-2"></i>Generate Lecture Timetable
              </a>
-                         <a href="generate_exams.php" class="nav-link <?= ($currentPage == 'generate_exams.php') ? 'active' : '' ?>">
-               <i class="fas fa-file-alt me-2"></i>Generate Exams Timetable
-             </a>
+                        <!-- Exams generation removed per user request -->
             <?php if (!empty($_SESSION['is_admin'])): ?>
                          <a href="#jobsModal" class="nav-link" data-bs-toggle="modal" data-bs-target="#jobsModal">
                <i class="fas fa-tasks me-2"></i>Jobs

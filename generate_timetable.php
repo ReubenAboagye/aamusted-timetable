@@ -2316,23 +2316,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
 
 
-// Generate exams timetable function
-function generateExamsTimetable() {
-    // Prompt the user for number of weeks (1-3)
-    let weeks = prompt('Enter number of exam weeks (1-3):', '1');
-    if (weeks === null) return; // user cancelled
-    weeks = parseInt(weeks, 10);
-    if (isNaN(weeks) || weeks < 1 || weeks > 3) {
-        alert('Please enter a valid number of weeks between 1 and 3.');
-        return;
-    }
-    // Redirect to dedicated exams page with weeks and semester as query params
-    const semesterSelect = document.querySelector('select[name="semester"]');
-    const url = new URL('generate_exams.php', window.location.origin);
-    url.searchParams.set('exam_weeks', weeks);
-    if (semesterSelect && semesterSelect.value) url.searchParams.set('semester', semesterSelect.value);
-    window.location.href = url.toString();
-}
+// Exams generation removed — function intentionally left out
 
 // Fetch generated timetable data from the database
 function fetchGeneratedTimetableData() {
