@@ -1,5 +1,5 @@
 <?php
-// Public extraction page (no sidebar) for students, departments, lecturers
+// Public extraction page for students, departments, lecturers
 // Step 1: choose stream, semester; Step 2: choose role + specific filter; Step 3: view/export
 
 include 'connect.php';
@@ -40,6 +40,7 @@ if ($do_export && strtolower($export_format) === 'pdf') {
 // Only include header/layout for non-export (view) requests
 if (!$do_export) {
 	include 'includes/header.php';
+	include 'includes/sidebar.php';
 }
 
 // --- Load options for selectors
@@ -216,10 +217,6 @@ if ($can_query) {
 ?>
 
 <style>
-/* Make content full-width since we have no sidebar here */
-#mainContent { margin-left: 0 !important; }
-#footer { left: 0 !important; }
-
 /* Division header styling */
 .division-header {
 	background: linear-gradient(135deg, #007bff, #0056b3) !important;

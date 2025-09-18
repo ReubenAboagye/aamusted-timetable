@@ -73,6 +73,7 @@ $joins[] = "JOIN rooms r ON t.room_id = r.id";
 
 // support optional division filter
 $division_label = isset($_GET['division_label']) ? $_GET['division_label'] : '';
+$isDivisionView = ($role === 'class' && $division_label !== '');
 
 $where = ["c.stream_id = ?", "t.semester = ?"];
 $params = [$selected_stream, $selected_semester];
@@ -159,16 +160,31 @@ foreach ($dayToRows as $dayName => $dayRows) {
         $displayPeriod = ($first || $period !== $lastPeriod) ? $period : '';
         $rowsHtml
             .= '<td>' . $dayCell . '</td>'
-            . '<td>' . htmlspecialchars($displayPeriod) . '</td>'
-            . '<td><strong>' . htmlspecialchars($r['class_name'] . (isset($r['division_label']) && $r['division_label'] ? ' ' . $r['division_label'] : '')) . '</strong></td>'
-            . '<td>' . htmlspecialchars(($r['course_code'] ? ($r['course_code'] . ' - ') : '') . $r['course_name']) . '</td>'
-            . '<td>' . htmlspecialchars($r['lecturer_name']) . '</td>'
+            . '<td>' . htmlspecialchars($displayPeriod) . '</td>';
+        if (!$isDivisionView) {
+            $rowsHtml .= '<td><strong>' . htmlspecialchars($r['class_name'] . (isset($r['division_label']) && $r['division_label'] ? ' ' . $r['division_label'] : '')) . '</strong></td>';
+        }
+        $rowsHtml
+            .= '<td>' . htmlspecialchars(($r['course_code'] ? ($r['course_code'] . ' - ') : '') . $r['course_name']) . '</td>'
             . '<td>' . htmlspecialchars($r['room_name']) . '</td>'
+            . '<td>' . htmlspecialchars($r['lecturer_name']) . '</td>'
             . '</tr>';
         $first = false;
         $lastPeriod = $period;
     }
 }
+
+$tableColGroup = $isDivisionView
+    ? '<colgroup><col class="day" /><col class="period" /><col class="course" /><col class="room" /><col class="lecturer" /></colgroup>'
+    : '<colgroup><col class="day" /><col class="period" /><col class="class" /><col class="course" /><col class="room" /><col class="lecturer" /></colgroup>';
+
+$tableHeadRow = $isDivisionView
+    ? '<tr><th>Day</th><th>Period</th><th>Course</th><th>Room</th><th>Lecturer</th></tr>'
+    : '<tr><th>Day</th><th>Period</th><th>Class</th><th>Course</th><th>Room</th><th>Lecturer</th></tr>';
+
+$metaHtml = '<div class="meta"><span><strong>Role:</strong> ' . $safeRole . '</span><span><strong>Filter:</strong> ' . $safeFilter . '</span>'
+    . (!empty($division_label) ? '<span><strong>Division:</strong> ' . htmlspecialchars($division_label, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</span>' : '')
+    . '<span><strong>Generated:</strong> ' . htmlspecialchars(date('Y-m-d H:i')) . '</span></div>';
 
 $html = '<html><head><meta charset="UTF-8"><style>
     body { font-family: DejaVu Sans, Arial, Helvetica, sans-serif; font-size: 11px; }
@@ -193,18 +209,21 @@ $html = '<html><head><meta charset="UTF-8"><style>
     . '<h1 class="title">AKENTEN APPIAH-MENKA UNIVERSITY</h1>'
     . '<div class="subtitle">Timetable - ' . $safeTitle . ' | Semester ' . $safeSemester . '</div>'
     . '</div>'
-    . '<div class="meta"><span><strong>Role:</strong> ' . $safeRole . '</span><span><strong>Filter:</strong> ' . $safeFilter . '</span><span><strong>Generated:</strong> ' . htmlspecialchars(date('Y-m-d H:i')) . '</span></div>'
-    . '<table><colgroup><col class="day" /><col class="period" /><col class="class" /><col class="course" /><col class="lecturer" /><col class="room" /></colgroup><thead><tr><th>Day</th><th>Period</th><th>Class</th><th>Course</th><th>Lecturer</th><th>Room</th></tr></thead><tbody>'
+    . $metaHtml
+    . '<table>' . $tableColGroup . '<thead>' . $tableHeadRow . '</thead><tbody>'
     . $rowsHtml
     . '</tbody></table></body></html>';
 
 // Simple filename sanitizer for downloads
-if (!function_exists('sanitize_filename')) {
-    function sanitize_filename($text) {
-        $text = preg_replace('/\s+/', '_', $text);
-        $text = preg_replace('/[^A-Za-z0-9_\-]+/', '_', $text);
-        $text = trim($text, '_-');
-        return $text !== '' ? $text : 'timetable';
+if (!function_exists('tt_sanitize_filename')) {
+    function tt_sanitize_filename($text) {
+        // Remove control chars and Windows-illegal characters: <>:"/\|?*
+        $text = preg_replace('/[\x00-\x1F\x7F]+/', '', $text);
+        $text = preg_replace('/[<>:\"\\\/\|\?\*]+/', '', $text);
+        // Collapse whitespace to single spaces and trim
+        $text = preg_replace('/\s+/', ' ', $text);
+        $text = trim($text);
+        return $text !== '' ? $text : 'AAMUSTED Timetable';
     }
 }
 
@@ -218,13 +237,29 @@ $dompdf = new Dompdf\Dompdf($options);
 $dompdf->loadHtml($html, 'UTF-8');
 $dompdf->setPaper('A4', 'landscape');
 $dompdf->render();
-// Build descriptive download filename: Timetable - [Stream] - Semester N - [Role Filter] - [Division]
-$filename_parts = ['Timetable'];
-if ($stream_name !== '') { $filename_parts[] = $stream_name; }
+// Build descriptive download filename: AAMUSTED - [Stream] - Semester N - [Role/Filter or Full] - [Division]
+$filename_parts = ['AAMUSTED'];
+$stream_label = trim($stream_name) !== '' ? $stream_name : ('Stream ' . (int)$selected_stream);
+$filename_parts[] = $stream_label;
 $filename_parts[] = 'Semester ' . $selected_semester;
-if ($filter_value !== '') { $filename_parts[] = $role_title . ' ' . $filter_value; }
+if ($role === 'full') {
+    $filename_parts[] = 'Full';
+} elseif ($filter_value !== '') {
+    $filename_parts[] = $role_title . ' ' . $filter_value;
+}
 if (!empty($division_label)) { $filename_parts[] = 'Division ' . $division_label; }
-$download_filename = sanitize_filename(implode(' - ', $filename_parts)) . '.pdf';
+$raw_filename = implode(' ', $filename_parts);
+if (trim($raw_filename) === '') { $raw_filename = 'AAMUSTED Semester ' . (int)$selected_semester; }
+$sanitized_filename = tt_sanitize_filename($raw_filename);
+if ($sanitized_filename === '' || $sanitized_filename === 'AAMUSTED Timetable') {
+    // Fallback builder to avoid generic name
+    $fallback = 'AAMUSTED ' . $stream_label . ' Semester ' . (int)$selected_semester;
+    if ($role === 'full') { $fallback .= ' Full'; }
+    elseif ($filter_value !== '') { $fallback .= ' ' . $role_title . ' ' . $filter_value; }
+    if (!empty($division_label)) { $fallback .= ' Division ' . $division_label; }
+    $sanitized_filename = tt_sanitize_filename($fallback);
+}
+$download_filename = $sanitized_filename . '.pdf';
 $dompdf->stream($download_filename, ['Attachment' => true]);
 exit;
 

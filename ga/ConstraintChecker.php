@@ -429,6 +429,8 @@ class ConstraintChecker {
         
         foreach ($this->data['time_slots'] as $timeSlot) {
             if ($timeSlot['id'] == $gene['time_slot_id']) {
+                // Hard rule: do not allow scheduling in break slots
+                if (!empty($timeSlot['is_break'])) { return false; }
                 return true;
             }
         }

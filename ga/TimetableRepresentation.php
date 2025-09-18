@@ -222,8 +222,12 @@ class TimetableRepresentation {
             if ($ok) { $validStartIndices[] = $idx; }
         }
         if (empty($validStartIndices)) {
-            // Fallback: if no continuous non-break window exists, allow any start
-            $validStartIndices = range(0, $maxStartIndex);
+            // Fallback: if no continuous non-break window exists, allow any non-break start
+            $nonBreakStarts = [];
+            for ($idx = 0; $idx <= $maxStartIndex; $idx++) {
+                if (empty($timeSlots[$idx]['is_break'])) { $nonBreakStarts[] = $idx; }
+            }
+            $validStartIndices = !empty($nonBreakStarts) ? $nonBreakStarts : range(0, $maxStartIndex);
         }
         
         if ($slotIndex === 0) {
@@ -403,9 +407,11 @@ class TimetableRepresentation {
             throw new Exception("Day at index $randomDayIndex missing 'id' key: " . print_r($randomDay, true));
         }
         
-        // Get random time slot with proper error checking
-        $randomTimeSlotIndex = array_rand($timeSlots);
-        $randomTimeSlot = $timeSlots[$randomTimeSlotIndex];
+        // Get random time slot with proper error checking (avoid break slots)
+        $nonBreakSlots = array_values(array_filter($timeSlots, function($s){ return empty($s['is_break']); }));
+        $pool = !empty($nonBreakSlots) ? $nonBreakSlots : $timeSlots;
+        $randomTimeSlotIndex = array_rand($pool);
+        $randomTimeSlot = $pool[$randomTimeSlotIndex];
         if (!isset($randomTimeSlot['id'])) {
             throw new Exception("Time slot at index $randomTimeSlotIndex missing 'id' key: " . print_r($randomTimeSlot, true));
         }
