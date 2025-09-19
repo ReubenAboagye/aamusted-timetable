@@ -197,7 +197,7 @@ foreach ($streams as $s) {
      </div>
 
     <div class="col-md-3">
-      <a href="adddepartmentform.php" class="grid-button">
+      <a href="department.php" class="grid-button">
         <i class="fas fa-building"></i>
         <div>Departments</div>
         <span class="count-circle"><?= $dept_count ?></span>
