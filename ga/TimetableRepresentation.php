@@ -3,14 +3,118 @@
  * Enhanced Timetable Representation for Genetic Algorithm
  * 
  * This class handles the chromosome structure and gene manipulation
- * for the genetic algorithm timetable generation.
+ * for the genetic algorithm timetable generation. It provides comprehensive
+ * functionality for creating, validating, and manipulating timetable genes
+ * that represent individual class-course assignments.
+ * 
+ * @package TimetableGA
+ * @author Timetable System
+ * @version 2.0
+ * @since 1.0
+ * 
+ * @example
+ * // Create a random individual for genetic algorithm
+ * $data = [
+ *     'class_courses' => [...],
+ *     'days' => [...],
+ *     'time_slots' => [...],
+ *     'rooms' => [...],
+ *     'lecturer_courses' => [...]
+ * ];
+ * $individual = TimetableRepresentation::createRandomIndividual($data);
+ * 
+ * @example
+ * // Validate a gene structure
+ * $isValid = TimetableRepresentation::validateGene($gene);
+ * 
+ * @example
+ * // Check for conflicts between two genes
+ * $hasConflict = TimetableRepresentation::genesConflict($gene1, $gene2, $data);
  */
+
+/**
+ * Custom exception for timetable representation errors
+ */
+class TimetableRepresentationException extends Exception {
+    protected $context = [];
+    
+    public function __construct($message = "", $code = 0, Exception $previous = null, array $context = []) {
+        parent::__construct($message, $code, $previous);
+        $this->context = $context;
+    }
+    
+    public function getContext(): array {
+        return $this->context;
+    }
+    
+    public function getFormattedMessage(): string {
+        $message = $this->getMessage();
+        if (!empty($this->context)) {
+            $message .= "\nContext: " . json_encode($this->context, JSON_PRETTY_PRINT);
+        }
+        return $message;
+    }
+}
+
+/**
+ * Exception for data validation errors
+ */
+class TimetableDataValidationException extends TimetableRepresentationException {
+    protected $validationErrors = [];
+    
+    public function __construct($message = "", $code = 0, Exception $previous = null, array $validationErrors = []) {
+        parent::__construct($message, $code, $previous);
+        $this->validationErrors = $validationErrors;
+    }
+    
+    public function getValidationErrors(): array {
+        return $this->validationErrors;
+    }
+}
+
+/**
+ * Exception for gene creation errors
+ */
+class TimetableGeneCreationException extends TimetableRepresentationException {
+    protected $geneData = [];
+    
+    public function __construct($message = "", $code = 0, Exception $previous = null, array $geneData = []) {
+        parent::__construct($message, $code, $previous);
+        $this->geneData = $geneData;
+    }
+    
+    public function getGeneData(): array {
+        return $this->geneData;
+    }
+}
 
 class TimetableRepresentation {
     
     /**
      * Create a random individual (chromosome) for the genetic algorithm
-     * Updated to ensure every class division appears for each course it offers
+     * 
+     * This method generates a complete timetable individual by creating random
+     * assignments for all class-course combinations. It handles both individual
+     * class divisions and combined classes where multiple divisions can share
+     * the same time slot and room.
+     * 
+     * @param array $data The input data containing:
+     *   - class_courses: Array of class-course relationships
+     *   - days: Available days for scheduling
+     *   - time_slots: Available time slots
+     *   - rooms: Available rooms with capacity information
+     *   - lecturer_courses: Lecturer-course assignments
+     *   - course_room_types: Preferred room types for courses
+     * 
+     * @return array An array of genes representing the complete timetable individual
+     * 
+     * @throws Exception If required data is missing or invalid
+     * 
+     * @example
+     * $individual = TimetableRepresentation::createRandomIndividual($data);
+     * foreach ($individual as $geneKey => $gene) {
+     *     echo "Gene: $geneKey, Class: {$gene['class_id']}, Course: {$gene['course_id']}\n";
+     * }
      */
     public static function createRandomIndividual(array $data): array {
         $individual = [];
@@ -181,13 +285,28 @@ class TimetableRepresentation {
     ): array {
         // Validate input arrays
         if (empty($days)) {
-            throw new Exception("Days array is empty");
+            throw new TimetableRepresentationException(
+                "Days array is empty - cannot create gene without available days",
+                1001,
+                null,
+                ['days_count' => count($days), 'class_course' => $classCourse]
+            );
         }
         if (empty($timeSlots)) {
-            throw new Exception("Time slots array is empty");
+            throw new TimetableRepresentationException(
+                "Time slots array is empty - cannot create gene without available time slots",
+                1002,
+                null,
+                ['time_slots_count' => count($timeSlots), 'class_course' => $classCourse]
+            );
         }
         if (empty($rooms)) {
-            throw new Exception("Rooms array is empty");
+            throw new TimetableRepresentationException(
+                "Rooms array is empty - cannot create gene without available rooms",
+                1003,
+                null,
+                ['rooms_count' => count($rooms), 'class_course' => $classCourse]
+            );
         }
         
         // Find appropriate lecturer course for this class course
@@ -447,8 +566,20 @@ class TimetableRepresentation {
     /**
      * Get lecturer conflict key
      */
-    public static function getLecturerConflictKey(array $gene): string {
-        $lecturerId = $gene['lecturer_course_id'] ?? $gene['lecturer_id'];
+    public static function getLecturerConflictKey(array $gene, array $data = null): string {
+        $lecturerId = $gene['lecturer_id'] ?? null;
+        
+        // If lecturer_id is not directly available, resolve it from lecturer_course_id
+        if (!$lecturerId && isset($gene['lecturer_course_id']) && $data) {
+            $lecturerCourseId = $gene['lecturer_course_id'];
+            foreach ($data['lecturer_courses'] as $lc) {
+                if ($lc['id'] == $lecturerCourseId) {
+                    $lecturerId = $lc['lecturer_id'];
+                    break;
+                }
+            }
+        }
+        
         return $lecturerId . '|' . $gene['day_id'] . '|' . $gene['time_slot_id'];
     }
     
@@ -466,7 +597,7 @@ class TimetableRepresentation {
     /**
      * Check if two genes conflict
      */
-    public static function genesConflict(array $gene1, array $gene2): bool {
+    public static function genesConflict(array $gene1, array $gene2, array $data = null): bool {
         // Same time slot and day
         if ($gene1['day_id'] == $gene2['day_id'] && 
             $gene1['time_slot_id'] == $gene2['time_slot_id']) {
@@ -476,9 +607,31 @@ class TimetableRepresentation {
                 return true;
             }
             
-            // Lecturer conflict
-            $lecturer1 = $gene1['lecturer_course_id'] ?? $gene1['lecturer_id'];
-            $lecturer2 = $gene2['lecturer_course_id'] ?? $gene2['lecturer_id'];
+            // Lecturer conflict - resolve actual lecturer IDs
+            $lecturer1 = $gene1['lecturer_id'] ?? null;
+            $lecturer2 = $gene2['lecturer_id'] ?? null;
+            
+            // If lecturer_id is not directly available, resolve it from lecturer_course_id
+            if (!$lecturer1 && isset($gene1['lecturer_course_id']) && $data) {
+                $lecturerCourseId = $gene1['lecturer_course_id'];
+                foreach ($data['lecturer_courses'] as $lc) {
+                    if ($lc['id'] == $lecturerCourseId) {
+                        $lecturer1 = $lc['lecturer_id'];
+                        break;
+                    }
+                }
+            }
+            
+            if (!$lecturer2 && isset($gene2['lecturer_course_id']) && $data) {
+                $lecturerCourseId = $gene2['lecturer_course_id'];
+                foreach ($data['lecturer_courses'] as $lc) {
+                    if ($lc['id'] == $lecturerCourseId) {
+                        $lecturer2 = $lc['lecturer_id'];
+                        break;
+                    }
+                }
+            }
+            
             if ($lecturer1 && $lecturer2 && $lecturer1 == $lecturer2) {
                 return true;
             }
@@ -546,6 +699,548 @@ class TimetableRepresentation {
         // This method is called with the class_id from the expanded class course data
         // The individual_capacity should be available in the class course data
         return 50; // Default fallback - this should be overridden by individual_capacity
+    }
+    
+    /**
+     * Analyze timetable individual for conflicts and issues
+     * 
+     * This method provides comprehensive analysis of a timetable individual,
+     * identifying conflicts, constraint violations, and optimization opportunities.
+     * 
+     * @param array $individual The timetable individual to analyze
+     * @param array $data The data context for analysis
+     * @return array Analysis results with conflict counts and details
+     * 
+     * @example
+     * $analysis = TimetableRepresentation::analyzeIndividual($individual, $data);
+     * echo "Total conflicts: {$analysis['total_conflicts']}\n";
+     * echo "Room conflicts: {$analysis['room_conflicts']}\n";
+     * echo "Lecturer conflicts: {$analysis['lecturer_conflicts']}\n";
+     */
+    public static function analyzeIndividual(array $individual, array $data): array {
+        $analysis = [
+            'total_genes' => count($individual),
+            'total_conflicts' => 0,
+            'room_conflicts' => 0,
+            'lecturer_conflicts' => 0,
+            'class_conflicts' => 0,
+            'constraint_violations' => 0,
+            'conflict_details' => [],
+            'room_utilization' => [],
+            'lecturer_workload' => [],
+            'time_slot_usage' => []
+        ];
+        
+        $genes = array_values($individual);
+        $conflictKeys = [];
+        
+        // Check for conflicts between all gene pairs
+        for ($i = 0; $i < count($genes); $i++) {
+            for ($j = $i + 1; $j < count($genes); $j++) {
+                if (self::genesConflict($genes[$i], $genes[$j], $data)) {
+                    $analysis['total_conflicts']++;
+                    
+                    // Determine conflict type
+                    $conflictType = self::getConflictType($genes[$i], $genes[$j], $data);
+                    $analysis[$conflictType . '_conflicts']++;
+                    
+                    $analysis['conflict_details'][] = [
+                        'gene1' => $genes[$i],
+                        'gene2' => $genes[$j],
+                        'type' => $conflictType,
+                        'time_slot' => $genes[$i]['day_id'] . '|' . $genes[$i]['time_slot_id']
+                    ];
+                }
+            }
+        }
+        
+        // Analyze room utilization
+        foreach ($individual as $gene) {
+            $roomKey = $gene['room_id'];
+            if (!isset($analysis['room_utilization'][$roomKey])) {
+                $analysis['room_utilization'][$roomKey] = 0;
+            }
+            $analysis['room_utilization'][$roomKey]++;
+        }
+        
+        // Analyze lecturer workload
+        foreach ($individual as $gene) {
+            if ($gene['lecturer_id']) {
+                $lecturerKey = $gene['lecturer_id'];
+                if (!isset($analysis['lecturer_workload'][$lecturerKey])) {
+                    $analysis['lecturer_workload'][$lecturerKey] = 0;
+                }
+                $analysis['lecturer_workload'][$lecturerKey]++;
+            }
+        }
+        
+        // Analyze time slot usage
+        foreach ($individual as $gene) {
+            $timeKey = $gene['day_id'] . '|' . $gene['time_slot_id'];
+            if (!isset($analysis['time_slot_usage'][$timeKey])) {
+                $analysis['time_slot_usage'][$timeKey] = 0;
+            }
+            $analysis['time_slot_usage'][$timeKey]++;
+        }
+        
+        return $analysis;
+    }
+    
+    /**
+     * Get the type of conflict between two genes
+     * 
+     * @param array $gene1 First gene
+     * @param array $gene2 Second gene
+     * @param array $data Data context
+     * @return string Conflict type ('room', 'lecturer', or 'class')
+     */
+    private static function getConflictType(array $gene1, array $gene2, array $data): string {
+        if ($gene1['day_id'] == $gene2['day_id'] && $gene1['time_slot_id'] == $gene2['time_slot_id']) {
+            if ($gene1['room_id'] == $gene2['room_id']) {
+                return 'room';
+            }
+            
+            // Check lecturer conflict
+            $lecturer1 = $gene1['lecturer_id'] ?? null;
+            $lecturer2 = $gene2['lecturer_id'] ?? null;
+            
+            if (!$lecturer1 && isset($gene1['lecturer_course_id']) && $data) {
+                foreach ($data['lecturer_courses'] as $lc) {
+                    if ($lc['id'] == $gene1['lecturer_course_id']) {
+                        $lecturer1 = $lc['lecturer_id'];
+                        break;
+                    }
+                }
+            }
+            
+            if (!$lecturer2 && isset($gene2['lecturer_course_id']) && $data) {
+                foreach ($data['lecturer_courses'] as $lc) {
+                    if ($lc['id'] == $gene2['lecturer_course_id']) {
+                        $lecturer2 = $lc['lecturer_id'];
+                        break;
+                    }
+                }
+            }
+            
+            if ($lecturer1 && $lecturer2 && $lecturer1 == $lecturer2) {
+                return 'lecturer';
+            }
+            
+            if ($gene1['class_id'] == $gene2['class_id']) {
+                return 'class';
+            }
+        }
+        
+        return 'unknown';
+    }
+    
+    /**
+     * Get statistics about a timetable individual
+     * 
+     * @param array $individual The timetable individual
+     * @param array $data The data context
+     * @return array Statistical information
+     */
+    public static function getIndividualStats(array $individual, array $data): array {
+        $stats = [
+            'total_assignments' => count($individual),
+            'unique_classes' => 0,
+            'unique_courses' => 0,
+            'unique_lecturers' => 0,
+            'unique_rooms' => 0,
+            'time_slots_used' => 0,
+            'days_used' => 0,
+            'room_utilization_rate' => 0,
+            'lecturer_utilization_rate' => 0
+        ];
+        
+        $classes = [];
+        $courses = [];
+        $lecturers = [];
+        $rooms = [];
+        $timeSlots = [];
+        $days = [];
+        
+        foreach ($individual as $gene) {
+            $classes[$gene['class_id']] = true;
+            $courses[$gene['course_id']] = true;
+            $rooms[$gene['room_id']] = true;
+            $timeSlots[$gene['time_slot_id']] = true;
+            $days[$gene['day_id']] = true;
+            
+            if ($gene['lecturer_id']) {
+                $lecturers[$gene['lecturer_id']] = true;
+            }
+        }
+        
+        $stats['unique_classes'] = count($classes);
+        $stats['unique_courses'] = count($courses);
+        $stats['unique_lecturers'] = count($lecturers);
+        $stats['unique_rooms'] = count($rooms);
+        $stats['time_slots_used'] = count($timeSlots);
+        $stats['days_used'] = count($days);
+        
+        // Calculate utilization rates
+        if (!empty($data['rooms'])) {
+            $stats['room_utilization_rate'] = count($rooms) / count($data['rooms']) * 100;
+        }
+        
+        if (!empty($data['lecturer_courses'])) {
+            $uniqueLecturers = array_unique(array_column($data['lecturer_courses'], 'lecturer_id'));
+            $stats['lecturer_utilization_rate'] = count($lecturers) / count($uniqueLecturers) * 100;
+        }
+        
+        return $stats;
+    }
+    
+    /**
+     * Find genes that can be optimized (moved to better time slots)
+     * 
+     * @param array $individual The timetable individual
+     * @param array $data The data context
+     * @return array Array of genes that could be optimized
+     */
+    public static function findOptimizableGenes(array $individual, array $data): array {
+        $optimizable = [];
+        
+        foreach ($individual as $geneKey => $gene) {
+            // Check if gene is in a break slot
+            foreach ($data['time_slots'] as $timeSlot) {
+                if ($timeSlot['id'] == $gene['time_slot_id'] && !empty($timeSlot['is_break'])) {
+                    $optimizable[] = [
+                        'gene_key' => $geneKey,
+                        'gene' => $gene,
+                        'reason' => 'scheduled_in_break_slot',
+                        'priority' => 'high'
+                    ];
+                    break;
+                }
+            }
+            
+            // Check for room capacity issues
+            foreach ($data['rooms'] as $room) {
+                if ($room['id'] == $gene['room_id']) {
+                    $classSize = $gene['course_duration'] ?? 1;
+                    if ($room['capacity'] < $classSize * 10) { // Assuming 10 students per hour
+                        $optimizable[] = [
+                            'gene_key' => $geneKey,
+                            'gene' => $gene,
+                            'reason' => 'room_capacity_issue',
+                            'priority' => 'medium'
+                        ];
+                    }
+                    break;
+                }
+            }
+        }
+        
+        return $optimizable;
+    }
+    
+    /**
+     * Generate a summary report for a timetable individual
+     * 
+     * @param array $individual The timetable individual
+     * @param array $data The data context
+     * @return string Human-readable summary report
+     */
+    public static function generateSummaryReport(array $individual, array $data): string {
+        $analysis = self::analyzeIndividual($individual, $data);
+        $stats = self::getIndividualStats($individual, $data);
+        
+        $report = "=== TIMETABLE INDIVIDUAL SUMMARY REPORT ===\n\n";
+        $report .= "Basic Statistics:\n";
+        $report .= "- Total assignments: {$stats['total_assignments']}\n";
+        $report .= "- Unique classes: {$stats['unique_classes']}\n";
+        $report .= "- Unique courses: {$stats['unique_courses']}\n";
+        $report .= "- Unique lecturers: {$stats['unique_lecturers']}\n";
+        $report .= "- Unique rooms: {$stats['unique_rooms']}\n";
+        $report .= "- Time slots used: {$stats['time_slots_used']}\n";
+        $report .= "- Days used: {$stats['days_used']}\n\n";
+        
+        $report .= "Conflict Analysis:\n";
+        $report .= "- Total conflicts: {$analysis['total_conflicts']}\n";
+        $report .= "- Room conflicts: {$analysis['room_conflicts']}\n";
+        $report .= "- Lecturer conflicts: {$analysis['lecturer_conflicts']}\n";
+        $report .= "- Class conflicts: {$analysis['class_conflicts']}\n\n";
+        
+        $report .= "Utilization Rates:\n";
+        $report .= "- Room utilization: " . number_format($stats['room_utilization_rate'], 2) . "%\n";
+        $report .= "- Lecturer utilization: " . number_format($stats['lecturer_utilization_rate'], 2) . "%\n\n";
+        
+        if ($analysis['total_conflicts'] > 0) {
+            $report .= "Conflict Details:\n";
+            foreach ($analysis['conflict_details'] as $i => $conflict) {
+                $report .= ($i + 1) . ". {$conflict['type']} conflict at time slot {$conflict['time_slot']}\n";
+            }
+        }
+        
+        return $report;
+    }
+    
+    /**
+     * Validate data structure before creating individuals
+     * 
+     * @param array $data The data to validate
+     * @return array Validation results with errors and warnings
+     */
+    public static function validateDataStructure(array $data): array {
+        $validation = [
+            'is_valid' => true,
+            'errors' => [],
+            'warnings' => []
+        ];
+        
+        $requiredKeys = ['class_courses', 'days', 'time_slots', 'rooms', 'lecturer_courses'];
+        
+        foreach ($requiredKeys as $key) {
+            if (!isset($data[$key]) || !is_array($data[$key]) || empty($data[$key])) {
+                $validation['errors'][] = "Missing or empty required data: $key";
+                $validation['is_valid'] = false;
+            }
+        }
+        
+        // Validate class_courses structure
+        if (isset($data['class_courses'])) {
+            foreach ($data['class_courses'] as $i => $classCourse) {
+                $requiredFields = ['id', 'class_id', 'course_id'];
+                foreach ($requiredFields as $field) {
+                    if (!isset($classCourse[$field])) {
+                        $validation['errors'][] = "Class course at index $i missing required field: $field";
+                        $validation['is_valid'] = false;
+                    }
+                }
+            }
+        }
+        
+        // Validate days structure
+        if (isset($data['days'])) {
+            foreach ($data['days'] as $i => $day) {
+                if (!isset($day['id']) || !isset($day['name'])) {
+                    $validation['errors'][] = "Day at index $i missing required fields: id or name";
+                    $validation['is_valid'] = false;
+                }
+            }
+        }
+        
+        // Validate time_slots structure
+        if (isset($data['time_slots'])) {
+            foreach ($data['time_slots'] as $i => $timeSlot) {
+                if (!isset($timeSlot['id']) || !isset($timeSlot['start_time']) || !isset($timeSlot['end_time'])) {
+                    $validation['errors'][] = "Time slot at index $i missing required fields: id, start_time, or end_time";
+                    $validation['is_valid'] = false;
+                }
+            }
+        }
+        
+        // Validate rooms structure
+        if (isset($data['rooms'])) {
+            foreach ($data['rooms'] as $i => $room) {
+                if (!isset($room['id']) || !isset($room['name']) || !isset($room['capacity'])) {
+                    $validation['errors'][] = "Room at index $i missing required fields: id, name, or capacity";
+                    $validation['is_valid'] = false;
+                }
+            }
+        }
+        
+        return $validation;
+    }
+    
+    /**
+     * Cache for frequently accessed data to improve performance
+     */
+    private static $cache = [];
+    
+    /**
+     * Clear the internal cache
+     */
+    public static function clearCache(): void {
+        self::$cache = [];
+    }
+    
+    /**
+     * Get cached data or compute and cache it
+     * 
+     * @param string $key Cache key
+     * @param callable $computeFunction Function to compute the value if not cached
+     * @return mixed Cached or computed value
+     */
+    private static function getCached(string $key, callable $computeFunction) {
+        if (!isset(self::$cache[$key])) {
+            self::$cache[$key] = $computeFunction();
+        }
+        return self::$cache[$key];
+    }
+    
+    /**
+     * Optimized conflict checking with caching
+     * 
+     * @param array $individual The timetable individual
+     * @param array $data The data context
+     * @return array Conflict analysis with performance metrics
+     */
+    public static function analyzeIndividualOptimized(array $individual, array $data): array {
+        $startTime = microtime(true);
+        
+        // Use cached conflict keys for better performance
+        $conflictKeys = self::getCached('conflict_keys_' . md5(serialize($individual)), function() use ($individual) {
+            $keys = [];
+            foreach ($individual as $gene) {
+                $keys[] = [
+                    'gene_key' => self::getGeneKey($gene),
+                    'room_key' => self::getRoomConflictKey($gene),
+                    'lecturer_key' => self::getLecturerConflictKey($gene),
+                    'class_key' => self::getClassConflictKey($gene)
+                ];
+            }
+            return $keys;
+        });
+        
+        $analysis = [
+            'total_genes' => count($individual),
+            'total_conflicts' => 0,
+            'room_conflicts' => 0,
+            'lecturer_conflicts' => 0,
+            'class_conflicts' => 0,
+            'conflict_details' => [],
+            'performance' => [
+                'analysis_time' => 0,
+                'cache_hits' => 0,
+                'cache_misses' => 0
+            ]
+        ];
+        
+        // Check for conflicts using optimized approach
+        $usedKeys = [];
+        foreach ($conflictKeys as $i => $keys) {
+            foreach ($usedKeys as $j => $usedKey) {
+                if ($keys['gene_key'] === $usedKey['gene_key']) {
+                    $analysis['total_conflicts']++;
+                    
+                    // Determine conflict type efficiently
+                    if ($keys['room_key'] === $usedKey['room_key']) {
+                        $analysis['room_conflicts']++;
+                        $conflictType = 'room';
+                    } elseif ($keys['lecturer_key'] === $usedKey['lecturer_key']) {
+                        $analysis['lecturer_conflicts']++;
+                        $conflictType = 'lecturer';
+                    } elseif ($keys['class_key'] === $usedKey['class_key']) {
+                        $analysis['class_conflicts']++;
+                        $conflictType = 'class';
+                    } else {
+                        $conflictType = 'unknown';
+                    }
+                    
+                    $analysis['conflict_details'][] = [
+                        'gene1_index' => $i,
+                        'gene2_index' => $j,
+                        'type' => $conflictType,
+                        'time_slot' => $keys['gene_key']
+                    ];
+                }
+            }
+            $usedKeys[] = $keys;
+        }
+        
+        $analysis['performance']['analysis_time'] = microtime(true) - $startTime;
+        
+        return $analysis;
+    }
+    
+    /**
+     * Batch process multiple individuals for better performance
+     * 
+     * @param array $individuals Array of timetable individuals
+     * @param array $data The data context
+     * @return array Analysis results for all individuals
+     */
+    public static function batchAnalyzeIndividuals(array $individuals, array $data): array {
+        $results = [];
+        $startTime = microtime(true);
+        
+        foreach ($individuals as $index => $individual) {
+            $results[$index] = self::analyzeIndividualOptimized($individual, $data);
+        }
+        
+        $totalTime = microtime(true) - $startTime;
+        
+        return [
+            'individuals' => $results,
+            'summary' => [
+                'total_individuals' => count($individuals),
+                'total_analysis_time' => $totalTime,
+                'average_time_per_individual' => $totalTime / count($individuals),
+                'best_individual' => self::findBestIndividual($results),
+                'worst_individual' => self::findWorstIndividual($results)
+            ]
+        ];
+    }
+    
+    /**
+     * Find the best individual based on conflict count
+     * 
+     * @param array $analysisResults Analysis results from batchAnalyzeIndividuals
+     * @return int Index of the best individual
+     */
+    private static function findBestIndividual(array $analysisResults): int {
+        $bestIndex = 0;
+        $minConflicts = PHP_INT_MAX;
+        
+        foreach ($analysisResults as $index => $result) {
+            if ($result['total_conflicts'] < $minConflicts) {
+                $minConflicts = $result['total_conflicts'];
+                $bestIndex = $index;
+            }
+        }
+        
+        return $bestIndex;
+    }
+    
+    /**
+     * Find the worst individual based on conflict count
+     * 
+     * @param array $analysisResults Analysis results from batchAnalyzeIndividuals
+     * @return int Index of the worst individual
+     */
+    private static function findWorstIndividual(array $analysisResults): int {
+        $worstIndex = 0;
+        $maxConflicts = 0;
+        
+        foreach ($analysisResults as $index => $result) {
+            if ($result['total_conflicts'] > $maxConflicts) {
+                $maxConflicts = $result['total_conflicts'];
+                $worstIndex = $index;
+            }
+        }
+        
+        return $worstIndex;
+    }
+    
+    /**
+     * Generate a performance report for the class
+     * 
+     * @return array Performance metrics and recommendations
+     */
+    public static function getPerformanceReport(): array {
+        return [
+            'cache_status' => [
+                'cached_items' => count(self::$cache),
+                'memory_usage' => memory_get_usage(true),
+                'peak_memory' => memory_get_peak_usage(true)
+            ],
+            'recommendations' => [
+                'Use analyzeIndividualOptimized() for better performance',
+                'Use batchAnalyzeIndividuals() for multiple individuals',
+                'Clear cache periodically with clearCache()',
+                'Consider using smaller data sets for very large timetables'
+            ],
+            'optimization_tips' => [
+                'Cache frequently accessed data structures',
+                'Use batch processing for multiple operations',
+                'Validate data structure before processing',
+                'Monitor memory usage for large datasets'
+            ]
+        ];
     }
 }
 ?>
