@@ -398,6 +398,9 @@ class GeneticAlgorithm {
         $uniqueKeys = []; // Track unique combinations to prevent duplicates
         $processedGenes = []; // Track which genes we've already processed
         
+        // Validate solution for lecturer conflicts before conversion
+        $this->validateSolutionForLecturerConflicts($solution);
+        
         // Group genes by class_course_id + division to handle multi-slot courses per division
         $groupedGenes = [];
         foreach ($solution['individual'] as $geneKey => $gene) {
@@ -559,6 +562,87 @@ class GeneticAlgorithm {
      */
     public function getGenerationStats(): array {
         return $this->generationStats;
+    }
+    
+    /**
+     * Validate solution for lecturer conflicts before conversion
+     */
+    private function validateSolutionForLecturerConflicts(array $solution): void {
+        if (!isset($solution['individual']) || !is_array($solution['individual'])) {
+            return;
+        }
+        
+        $lecturerSlots = []; // Track lecturer assignments by time slot
+        $conflicts = [];
+        
+        foreach ($solution['individual'] as $geneKey => $gene) {
+            if (!$gene['day_id'] || !$gene['time_slot_id'] || !$gene['room_id']) {
+                continue;
+            }
+            
+            // Get lecturer ID
+            $lecturerId = $gene['lecturer_id'] ?? null;
+            if (!$lecturerId && isset($gene['lecturer_course_id'])) {
+                // Resolve lecturer ID from lecturer_course_id
+                foreach ($this->data['lecturer_courses'] as $lc) {
+                    if ($lc['id'] == $gene['lecturer_course_id']) {
+                        $lecturerId = $lc['lecturer_id'];
+                        break;
+                    }
+                }
+            }
+            
+            if (!$lecturerId) {
+                continue;
+            }
+            
+            // Create lecturer slot key
+            $lecturerSlotKey = $lecturerId . '|' . $gene['day_id'] . '|' . $gene['time_slot_id'];
+            
+            if (isset($lecturerSlots[$lecturerSlotKey])) {
+                $conflicts[] = [
+                    'lecturer_id' => $lecturerId,
+                    'day_id' => $gene['day_id'],
+                    'time_slot_id' => $gene['time_slot_id'],
+                    'conflicting_genes' => [$lecturerSlots[$lecturerSlotKey], $geneKey]
+                ];
+            } else {
+                $lecturerSlots[$lecturerSlotKey] = $geneKey;
+            }
+        }
+        
+        if (!empty($conflicts)) {
+            error_log("Lecturer conflicts detected in solution before conversion:");
+            foreach ($conflicts as $conflict) {
+                error_log("Lecturer {$conflict['lecturer_id']} has multiple classes at day {$conflict['day_id']}, time slot {$conflict['time_slot_id']}");
+                error_log("Conflicting genes: " . implode(', ', $conflict['conflicting_genes']));
+            }
+            
+            // Remove conflicting entries to prevent database insertion
+            $this->removeConflictingEntries($solution, $conflicts);
+        }
+    }
+    
+    /**
+     * Remove conflicting entries from solution
+     */
+    private function removeConflictingEntries(array &$solution, array $conflicts): void {
+        $conflictingGeneKeys = [];
+        
+        foreach ($conflicts as $conflict) {
+            $conflictingGeneKeys = array_merge($conflictingGeneKeys, $conflict['conflicting_genes']);
+        }
+        
+        // Remove duplicate gene keys
+        $conflictingGeneKeys = array_unique($conflictingGeneKeys);
+        
+        // Remove conflicting genes from solution
+        foreach ($conflictingGeneKeys as $geneKey) {
+            if (isset($solution['individual'][$geneKey])) {
+                unset($solution['individual'][$geneKey]);
+                error_log("Removed conflicting gene: $geneKey");
+            }
+        }
     }
 }
 ?>
