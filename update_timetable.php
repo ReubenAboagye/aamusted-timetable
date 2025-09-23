@@ -368,7 +368,7 @@ $lecturer_courses_result = $conn->query("
                         <i class="fas fa-edit me-2"></i>
                         <?php echo $edit_entry ? 'Edit' : 'Create'; ?> Timetable Entry
                     </h5>
-                    <a href="view_timetable.php" class="btn btn-outline-secondary btn-sm">
+                    <a href="extract_timetable.php" class="btn btn-outline-secondary btn-sm">
                         <i class="fas fa-arrow-left me-2"></i>Back to Timetable
                     </a>
                 </div>
@@ -527,7 +527,7 @@ $lecturer_courses_result = $conn->query("
                                 </button>
                             <?php endif; ?>
                             
-                            <a href="view_timetable.php" class="btn btn-outline-secondary btn-action">
+                            <a href="extract_timetable.php" class="btn btn-outline-secondary btn-action">
                                 <i class="fas fa-times me-2"></i>Cancel
                             </a>
                         </div>
