@@ -107,12 +107,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // Update current semester for display
         $current_semester = $semester_int;
         
-        // GA parameters (with sensible defaults - hidden from user)
-        $population_size = 50;  // Reduced from 100 to save memory
-        $generations = 300;     // Reduced from 500 to save time
-        $mutation_rate = 0.1;
+        // GA parameters (optimized for conflict resolution)
+        $population_size = 150;  // Increased population for better diversity
+        $generations = 800;     // More generations for better convergence
+        $mutation_rate = 0.2;   // Higher mutation rate to escape local optima
         $crossover_rate = 0.8;
-        $max_runtime = 300;
+        $max_runtime = 600;     // 10 minutes for thorough search
 
         if ($semester === '' || $semester_int === 0) {
             $error_message = 'Please specify semester (1 or 2) before generating the timetable.';
@@ -846,6 +846,7 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                             <a href="class_courses.php" class="btn btn-outline-primary"><i class="fas fa-link me-2"></i>Manage Assignments</a>
                             <a href="extract_timetable.php" class="btn btn-success"><i class="fas fa-eye me-2"></i>View Timetable</a>
                             <a href="export_timetable.php" class="btn btn-outline-info"><i class="fas fa-download me-2"></i>Export Timetable</a>
+                            <a href="lecturer_conflicts.php" class="btn btn-outline-warning"><i class="fas fa-exclamation-triangle me-2"></i>Fix Conflicts</a>
                         </div>
                     </div>
                 </div>
