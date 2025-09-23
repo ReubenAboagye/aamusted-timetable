@@ -239,7 +239,7 @@ class ConstraintChecker {
                 
                 // Check lecturer conflicts (only once for the combined assignment)
                 if ($gene['lecturer_course_id'] || $gene['lecturer_id']) {
-                    $lecturerKey = TimetableRepresentation::getLecturerConflictKey($gene);
+                    $lecturerKey = TimetableRepresentation::getLecturerConflictKey($gene, $this->data);
                     if (isset($lecturerSlots[$lecturerKey])) {
                         $violations['lecturer_conflict'][] = [
                             'class_course_id' => $classCourseId,
@@ -266,7 +266,7 @@ class ConstraintChecker {
                 
                 // Check lecturer conflicts
                 if ($gene['lecturer_course_id'] || $gene['lecturer_id']) {
-                    $lecturerKey = TimetableRepresentation::getLecturerConflictKey($gene);
+                    $lecturerKey = TimetableRepresentation::getLecturerConflictKey($gene, $this->data);
                     if (isset($lecturerSlots[$lecturerKey])) {
                         $violations['lecturer_conflict'][] = [
                             'class_course_id' => $classCourseId,
