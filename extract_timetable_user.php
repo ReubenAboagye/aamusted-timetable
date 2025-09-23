@@ -1,6 +1,6 @@
 <?php
 // Standalone extraction page for students and lecturers (AAMUSTED branding)
-// Improved UI inspired by export_timetable.php: stats cards, export options, preview
+// Improved UI with stats cards, export options, and preview
 
 include 'connect.php';
 
@@ -192,7 +192,7 @@ if ($can_query) {
 	}
 }
 
-// Compute small stats similar to export_timetable.php for the UI cards
+// Compute small stats for the UI cards
 $total_entries = $conn->query("SELECT COUNT(*) as count FROM timetable")->fetch_assoc()['count'];
 $col = $conn->query("SHOW COLUMNS FROM timetable LIKE 'class_course_id'");
 $has_t_class_course = ($col && $col->num_rows > 0);
