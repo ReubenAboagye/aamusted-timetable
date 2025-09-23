@@ -26,7 +26,7 @@ class ConstraintChecker {
         $this->constraintWeights = [
             'hard' => [
                 'room_conflict' => 1000,
-                'lecturer_conflict' => 1000,
+                'lecturer_conflict' => 5000, // Increased penalty for lecturer conflicts
                 'class_conflict' => 1000,
                 'missing_assignment' => 1000,
                 'invalid_time_slot' => 1000,
