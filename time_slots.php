@@ -33,14 +33,25 @@ $current_stream_id = $streamManager->getCurrentStreamId();
 			// Use calculated end time
 			$end_time = $calculated_end_time;
 
-			$stmt = $conn->prepare("INSERT INTO time_slots (start_time, end_time, duration, is_break, is_mandatory) VALUES (?, ?, ?, ?, ?)");
-			$stmt->bind_param('ssiii', $start_time, $end_time, $duration, $is_break, $is_mandatory);
-			if ($stmt->execute()) {
-				$success_message = 'Time slot added successfully.';
+			// Check whether a time slot with the same start_time already exists
+			$check_stmt = $conn->prepare("SELECT id FROM time_slots WHERE start_time = ? LIMIT 1");
+			$check_stmt->bind_param('s', $start_time);
+			$check_stmt->execute();
+			$check_res = $check_stmt->get_result();
+			if ($check_res && $check_res->fetch_assoc()) {
+				$error_message = 'A time slot starting at ' . substr($start_time, 0, 5) . ' already exists.';
+				$check_stmt->close();
 			} else {
-				$error_message = 'Failed to add time slot: ' . $conn->error;
+				$check_stmt->close();
+				$stmt = $conn->prepare("INSERT INTO time_slots (start_time, end_time, duration, is_break, is_mandatory) VALUES (?, ?, ?, ?, ?)");
+				$stmt->bind_param('ssiii', $start_time, $end_time, $duration, $is_break, $is_mandatory);
+				if ($stmt->execute()) {
+					$success_message = 'Time slot added successfully.';
+				} else {
+					$error_message = 'Failed to add time slot: ' . $conn->error;
+				}
+				$stmt->close();
 			}
-			$stmt->close();
 		}
 	} elseif ($action === 'add_multiple') {
 		$base_start_time = $conn->real_escape_string($_POST['base_start_time']);
@@ -59,6 +70,9 @@ $current_stream_id = $streamManager->getCurrentStreamId();
 
 			$stmt = $conn->prepare("INSERT INTO time_slots (start_time, end_time, duration, is_break, is_mandatory) VALUES (?, ?, ?, ?, ?)");
 			$stmt->bind_param('ssiii', $start_time, $end_time, $duration, $is_break, $is_mandatory);
+			// Prepare a check statement to skip existing start times
+			$check_stmt = $conn->prepare("SELECT id FROM time_slots WHERE start_time = ? LIMIT 1");
+			$skipped = [];
 
 			for ($i = 0; $i < $num_slots; $i++) {
 				// Calculate start time for this slot (XX:00 format)
@@ -71,6 +85,16 @@ $current_stream_id = $streamManager->getCurrentStreamId();
 				$end_time_obj->add(new DateInterval('PT' . $duration . 'M'));
 				$end_time = $end_time_obj->format('H:i:s');
 
+				// Check if slot already exists; if so, skip insert and record it
+				$check_stmt->bind_param('s', $start_time);
+				$check_stmt->execute();
+				$check_res = $check_stmt->get_result();
+				if ($check_res && $check_res->fetch_assoc()) {
+					$error_count++;
+					$skipped[] = substr($start_time, 0, 5);
+					continue;
+				}
+
 				if ($stmt->execute()) {
 					$success_count++;
 				} else {
@@ -78,9 +102,11 @@ $current_stream_id = $streamManager->getCurrentStreamId();
 				}
 			}
 			$stmt->close();
+			$check_stmt->close();
 
 			if ($error_count > 0) {
-				$error_message = "Added $success_count time slots successfully. Failed to add $error_count time slots.";
+				$success_message = "Added $success_count time slots successfully.";
+				$error_message = "Skipped $error_count existing time slots: " . implode(', ', $skipped) . ".";
 			} else {
 				$success_message = "Successfully added $success_count time slots.";
 			}
@@ -93,14 +119,25 @@ $current_stream_id = $streamManager->getCurrentStreamId();
 		$is_break = isset($_POST['is_break']) ? 1 : 0;
 		$is_mandatory = isset($_POST['is_mandatory']) ? 1 : 0;
 
-		$stmt = $conn->prepare("UPDATE time_slots SET start_time = ?, end_time = ?, duration = ?, is_break = ?, is_mandatory = ? WHERE id = ?");
-		$stmt->bind_param('ssiiii', $start_time, $end_time, $duration, $is_break, $is_mandatory, $id);
-		if ($stmt->execute()) {
-			$success_message = 'Time slot updated successfully.';
+		// Prevent changing to a start_time that already exists on a different slot
+		$check_stmt = $conn->prepare("SELECT id FROM time_slots WHERE start_time = ? AND id <> ? LIMIT 1");
+		$check_stmt->bind_param('si', $start_time, $id);
+		$check_stmt->execute();
+		$check_res = $check_stmt->get_result();
+		if ($check_res && $check_res->fetch_assoc()) {
+			$error_message = 'A different time slot starting at ' . substr($start_time, 0, 5) . ' already exists.';
+			$check_stmt->close();
 		} else {
-			$error_message = 'Failed to update time slot: ' . $conn->error;
+			$check_stmt->close();
+			$stmt = $conn->prepare("UPDATE time_slots SET start_time = ?, end_time = ?, duration = ?, is_break = ?, is_mandatory = ? WHERE id = ?");
+			$stmt->bind_param('ssiiii', $start_time, $end_time, $duration, $is_break, $is_mandatory, $id);
+			if ($stmt->execute()) {
+				$success_message = 'Time slot updated successfully.';
+			} else {
+				$error_message = 'Failed to update time slot: ' . $conn->error;
+			}
+			$stmt->close();
 		}
-		$stmt->close();
 	} elseif ($action === 'delete') {
 		$id = (int)$_POST['id'];
 		$stmt = $conn->prepare("DELETE FROM time_slots WHERE id = ?");
