@@ -194,8 +194,8 @@ $error_message = $_GET['error'] ?? '';
                                         <td>
                                             <div class="btn-group btn-group-sm" role="group">
                                                 <div class="btn-group" role="group" aria-label="Actions">
-                                                    <a href="export_timetable.php?stream_id=<?php echo $timetable['stream_id']; ?>" class="btn btn-sm btn-outline-success" title="Export" target="_blank">
-                                                        <i class="fas fa-download"></i>
+                                                    <a href="generate_timetable.php?edit_stream_id=<?php echo $timetable['stream_id']; ?>" class="btn btn-sm btn-outline-primary" title="Edit Timetable">
+                                                        <i class="fas fa-edit"></i>
                                                     </a>
                                                     <!-- Edit Stream button removed -->
                                                     <button type="button" class="btn btn-sm btn-outline-danger" title="Delete Timetable" onclick="confirmDelete(<?php echo $timetable['stream_id']; ?>, '<?php echo htmlspecialchars($timetable['stream_name']); ?>')">
