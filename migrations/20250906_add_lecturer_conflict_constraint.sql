@@ -38,3 +38,6 @@ UNIQUE KEY (`lecturer_course_id`, `day_id`, `time_slot_id`, `semester`, `academi
 ALTER TABLE timetable 
 ADD INDEX `idx_timetable_lecturer_conflict_check` (`lecturer_course_id`, `day_id`, `time_slot_id`, `semester`, `academic_year`, `timetable_type`);
 
+
+
+
