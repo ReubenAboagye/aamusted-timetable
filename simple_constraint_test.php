@@ -106,3 +106,6 @@ if (!empty($lecturer_courses)) {
 $conn->close();
 ?>
 
+
+
+
