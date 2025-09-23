@@ -239,25 +239,49 @@ if (!$do_export) {
 		.division-badge { font-size:0.85em; padding:4px 8px; }
 		.empty-state { text-align:center; padding:40px 20px; color:#6c757d; }
 		.actions .btn { min-width:140px; }
-		@media (max-width:767px) {
-			.brand h2 { font-size:16px; }
+		
+		/* Mobile Responsive Styles */
+		@media (max-width: 768px) {
+			.container-xl { padding: 0 15px; }
+			.brand { flex-direction: column; text-align: center; gap: 8px; }
+			.brand img { height: 48px; }
+			.brand h2 { font-size: 18px; }
+			.card { margin-bottom: 15px; }
+			.card .p-3 { padding: 15px !important; }
+			.row.g-3 { margin: 0; }
+			.row.g-3 > * { padding: 0 8px; margin-bottom: 15px; }
+			.col-md-4, .col-md-3, .col-md-5 { margin-bottom: 15px; }
+			.btn-group { flex-direction: column; width: 100%; }
+			.btn-group .btn { border-radius: 6px !important; margin-bottom: 5px; }
+			.btn-group .btn:last-child { margin-bottom: 0; }
+			.actions { flex-direction: column; gap: 10px; }
+			.actions .btn { min-width: auto; width: 100%; }
+			.table-responsive { font-size: 0.9rem; }
+			.table th, .table td { padding: 8px 4px; }
+			.division-header { font-size: 0.9rem; padding: 6px; }
+			.division-badge { font-size: 0.75em; padding: 2px 6px; }
+		}
+		
+		@media (max-width: 576px) {
+			.brand h2 { font-size: 16px; }
+			.brand img { height: 40px; }
+			.small-note { font-size: 0.85rem; }
+			.form-label { font-size: 0.9rem; }
+			.table-responsive { font-size: 0.8rem; }
+			.table th, .table td { padding: 6px 2px; }
+			.division-header { font-size: 0.8rem; padding: 4px; }
+			.empty-state { padding: 20px 10px; }
 		}
 		</style>
 	</head>
 	<body>
 	<div class="container-xl py-4">
 		<div class="card p-3 mb-4">
-			<div class="d-flex justify-content-between align-items-center">
-				<div class="brand">
-					<img src="images/aamusted-logo.png" alt="AAMUSTED Logo" onerror="this.style.display='none'" />
-					<div>
-						<h2>AAMUSTED Timetable Extract</h2>
-						<div class="small-note">Students and lecturers can view or export timetables for their stream and semester.</div>
-					</div>
-				</div>
-				<div class="text-end">
-					<!-- Intentionally no link back to main project -->
-					<div class="small-note">AAMUSTED</div>
+			<div class="brand">
+				<img src="images/aamusted-logo.png" alt="AAMUSTED Logo" onerror="this.style.display='none'" />
+				<div>
+					<h2>Timetable Extract</h2>
+					<div class="small-note">Students and lecturers can view or export timetables for their stream and semester.</div>
 				</div>
 			</div>
 		</div>
@@ -266,7 +290,22 @@ if (!$do_export) {
 
 		<div class="card p-3 mt-4">
 			<div class="row g-3">
-				<div class="col-lg-9">
+				<!-- Info card - shown first on mobile, second on desktop -->
+				<div class="col-lg-3 order-lg-2 order-1">
+					<div class="card p-3">
+						<h6 class="mb-2">Quick Info</h6>
+						<p class="small-note mb-1">Use Stream + Semester to narrow results. Students choose their class; lecturers pick their name.</p>
+						<hr />
+						<p class="mb-1"><strong>Export</strong></p>
+						<ul class="small-note mb-1">
+							<li>CSV for spreadsheets</li>
+							<li>PDF for printing</li>
+						</ul>
+					</div>
+				</div>
+				
+				<!-- Filter form - shown second on mobile, first on desktop -->
+				<div class="col-lg-9 order-lg-1 order-2">
 					<form method="GET" action="extract_timetable_user.php" class="row g-3">
 						<div class="col-md-4">
 							<label for="stream_id" class="form-label">Stream</label>
@@ -357,19 +396,6 @@ if (!$do_export) {
 							<?php endif; ?>
 						</div>
 					</form>
-				</div>
-
-				<div class="col-lg-3">
-					<div class="card p-3">
-						<h6 class="mb-2">Quick Info</h6>
-						<p class="small-note mb-1">Use Stream + Semester to narrow results. Students choose their class; lecturers pick their name.</p>
-						<hr />
-						<p class="mb-1"><strong>Export</strong></p>
-						<ul class="small-note mb-1">
-							<li>CSV for spreadsheets</li>
-							<li>PDF for printing</li>
-						</ul>
-					</div>
 				</div>
 			</div>
 		</div>
