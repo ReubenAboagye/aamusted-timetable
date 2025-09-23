@@ -212,258 +212,331 @@ if ($col) $col->close();
 
 <!-- Bootstrap CSS and JS are included globally in includes/header.php -->
 <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+
+<?php include 'includes/sidebar.php'; ?>
     <style>
-        .card {
-            box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
-            border: 1px solid rgba(0, 0, 0, 0.125);
-        }
+        /* Export Page Specific Styles */
         .stat-card {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--hover-color) 100%);
             color: white;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 15px;
+            transition: all 0.3s ease;
         }
-        .stat-card .card-body {
-            padding: 1.5rem;
+        
+        .stat-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(128, 0, 32, 0.3);
         }
+        
         .stat-number {
             font-size: 2.5rem;
             font-weight: bold;
+            margin-bottom: 5px;
+        }
+        
+        .stat-label {
+            font-size: 0.9rem;
+            opacity: 0.9;
+        }
+        
+        .export-info-card {
+            border: none;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            transition: all 0.3s ease;
+        }
+        
+        .export-info-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+        }
+        
+        .preview-section {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 25px;
+            margin-top: 25px;
+        }
+        
+        .preview-title {
+            color: var(--primary-color);
+            font-weight: 700;
+            margin-bottom: 20px;
+        }
+        
+        .table-responsive {
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+        }
+        
+        .table thead th {
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--hover-color) 100%);
+            color: white;
+            border: none;
+            padding: 15px;
+            font-weight: 600;
+        }
+        
+        .table tbody tr {
+            transition: all 0.3s ease;
+        }
+        
+        .table tbody tr:hover {
+            background-color: rgba(128, 0, 32, 0.05);
+            transform: scale(1.01);
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #6c757d;
+        }
+        
+        .empty-state i {
+            font-size: 4rem;
+            margin-bottom: 20px;
+            color: var(--primary-color);
+            opacity: 0.5;
         }
     </style>
 </head>
 <body>
-    <div class="container-fluid mt-4">
-        <div class="row">
-            <div class="col-12">
-                <div class="card">
-                    <div class="card-header d-flex justify-content-between align-items-center">
-                        <h5 class="mb-0">
-                            <i class="fas fa-download me-2"></i>Export Timetable
-                        </h5>
-                        <div class="d-flex gap-2">
-                            <a href="view_timetable.php" class="btn btn-outline-primary">
-                                <i class="fas fa-eye me-2"></i>View Timetable
-                            </a>
-                            <a href="generate_timetable.php" class="btn btn-outline-success">
-                                <i class="fas fa-plus me-2"></i>Generate Timetable
-                            </a>
+    <div id="mainContent" class="main-content">
+        <div class="container-fluid mt-4">
+            <div class="row">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <h5 class="mb-0">
+                                <i class="fas fa-download me-2"></i>Export Timetable
+                            </h5>
+                            <div class="d-flex gap-2">
+                                <a href="extract_timetable.php" class="btn btn-outline-primary">
+                                    <i class="fas fa-eye me-2"></i>View Timetable
+                                </a>
+                                <a href="generate_timetable.php" class="btn btn-outline-success">
+                                    <i class="fas fa-plus me-2"></i>Generate Timetable
+                                </a>
+                            </div>
                         </div>
-                    </div>
-                    <div class="card-body">
-                        <!-- Statistics Cards -->
-                        <div class="row mb-4">
-                            <div class="col-md-3">
-                                <div class="card stat-card">
-                                    <div class="card-body text-center">
+                        <div class="card-body">
+                            <!-- Statistics Cards -->
+                            <div class="row mb-4">
+                                <div class="col-md-3">
+                                    <div class="stat-card text-center">
                                         <i class="fas fa-calendar-check fa-2x mb-2"></i>
                                         <div class="stat-number"><?php echo $total_entries; ?></div>
-                                        <div>Total Entries</div>
+                                        <div class="stat-label">Total Entries</div>
                                     </div>
                                 </div>
-                            </div>
-                            <div class="col-md-3">
-                                <div class="card stat-card">
-                                    <div class="card-body text-center">
+                                <div class="col-md-3">
+                                    <div class="stat-card text-center">
                                         <i class="fas fa-users fa-2x mb-2"></i>
                                         <div class="stat-number"><?php echo $total_classes; ?></div>
-                                        <div>Classes</div>
+                                        <div class="stat-label">Classes</div>
                                     </div>
                                 </div>
-                            </div>
-                            <div class="col-md-3">
-                                <div class="card stat-card">
-                                    <div class="card-body text-center">
+                                <div class="col-md-3">
+                                    <div class="stat-card text-center">
                                         <i class="fas fa-book fa-2x mb-2"></i>
                                         <div class="stat-number"><?php echo $total_courses; ?></div>
-                                        <div>Courses</div>
+                                        <div class="stat-label">Courses</div>
                                     </div>
                                 </div>
-                            </div>
-                            <div class="col-md-3">
-                                <div class="card stat-card">
-                                    <div class="card-body text-center">
+                                <div class="col-md-3">
+                                    <div class="stat-card text-center">
                                         <i class="fas fa-clock fa-2x mb-2"></i>
                                         <div class="stat-number"><?php echo $days_result->num_rows; ?></div>
-                                        <div>Working Days</div>
+                                        <div class="stat-label">Working Days</div>
                                     </div>
                                 </div>
                             </div>
-                        </div>
 
-                        <!-- Export Options -->
-                        <div class="row">
-                            <div class="col-md-8">
-                                <div class="card">
-                                    <div class="card-header">
-                                        <h6 class="mb-0">Export Options</h6>
-                                    </div>
-                                    <div class="card-body">
-                                        <form method="GET" class="row g-3">
-                                            <div class="col-md-3">
-                                                <label for="class_id" class="form-label">Class</label>
-                                                <select name="class_id" id="class_id" class="form-select">
-                                                    <option value="">All Classes</option>
-                                                    <?php while ($class = $classes_result->fetch_assoc()): ?>
-                                                        <option value="<?php echo $class['id']; ?>" 
-                                                                <?php echo $class_filter == $class['id'] ? 'selected' : ''; ?>>
-                                                            <?php echo htmlspecialchars($class['name']); ?>
-                                                        </option>
-                                                    <?php endwhile; ?>
-                                                </select>
-                                            </div>
-                                            <div class="col-md-3">
-                                                <label for="day_id" class="form-label">Day</label>
-                                                <select name="day_id" id="day_id" class="form-select">
-                                                    <option value="">All Days</option>
-                                                    <?php while ($day = $days_result->fetch_assoc()): ?>
-                                                        <option value="<?php echo $day['id']; ?>" 
-                                                                <?php echo $day_filter == $day['id'] ? 'selected' : ''; ?>>
-                                                            <?php echo htmlspecialchars($day['name']); ?>
-                                                        </option>
-                                                    <?php endwhile; ?>
-                                                </select>
-                                            </div>
-                                            <div class="col-md-3">
-                                                <label for="room_id" class="form-label">Room</label>
-                                                <select name="room_id" id="room_id" class="form-select">
-                                                    <option value="">All Rooms</option>
-                                                    <?php while ($room = $rooms_result->fetch_assoc()): ?>
-                                                        <option value="<?php echo $room['id']; ?>" 
-                                                                <?php echo $room_filter == $room['id'] ? 'selected' : ''; ?>>
-                                                            <?php echo htmlspecialchars($room['name']); ?>
-                                                        </option>
-                                                    <?php endwhile; ?>
-                                                </select>
-                                            </div>
-                                            <div class="col-md-3">
-                                                <label for="format" class="form-label">Format</label>
-                                                <select name="format" id="format" class="form-select">
-                                                    <option value="excel" <?php echo $format === 'excel' ? 'selected' : ''; ?>>Excel (.xlsx)</option>
-                                                    <option value="csv" <?php echo $format === 'csv' ? 'selected' : ''; ?>>CSV</option>
-                                                </select>
-                                            </div>
-                                            <div class="col-12">
-                                                <div class="d-flex gap-2">
-                                                    <button type="submit" name="export" value="1" class="btn btn-primary btn-lg">
-                                                        <i class="fas fa-download me-2"></i>Export Timetable
-                                                    </button>
-                                                    <a href="export_timetable.php" class="btn btn-outline-secondary">
-                                                        <i class="fas fa-times me-2"></i>Clear Filters
-                                                    </a>
+                            <!-- Export Options -->
+                            <div class="row">
+                                <div class="col-md-8">
+                                    <div class="card">
+                                        <div class="card-header">
+                                            <h6 class="mb-0">Export Options</h6>
+                                        </div>
+                                        <div class="card-body">
+                                            <form method="GET" class="row g-3">
+                                                <div class="col-md-3">
+                                                    <label for="class_id" class="form-label">Class</label>
+                                                    <select name="class_id" id="class_id" class="form-select">
+                                                        <option value="">All Classes</option>
+                                                        <?php 
+                                                        $classes_result->data_seek(0);
+                                                        while ($class = $classes_result->fetch_assoc()): ?>
+                                                            <option value="<?php echo $class['id']; ?>" 
+                                                                    <?php echo $class_filter == $class['id'] ? 'selected' : ''; ?>>
+                                                                <?php echo htmlspecialchars($class['name']); ?>
+                                                            </option>
+                                                        <?php endwhile; ?>
+                                                    </select>
                                                 </div>
+                                                <div class="col-md-3">
+                                                    <label for="day_id" class="form-label">Day</label>
+                                                    <select name="day_id" id="day_id" class="form-select">
+                                                        <option value="">All Days</option>
+                                                        <?php 
+                                                        $days_result->data_seek(0);
+                                                        while ($day = $days_result->fetch_assoc()): ?>
+                                                            <option value="<?php echo $day['id']; ?>" 
+                                                                    <?php echo $day_filter == $day['id'] ? 'selected' : ''; ?>>
+                                                                <?php echo htmlspecialchars($day['name']); ?>
+                                                            </option>
+                                                        <?php endwhile; ?>
+                                                    </select>
+                                                </div>
+                                                <div class="col-md-3">
+                                                    <label for="room_id" class="form-label">Room</label>
+                                                    <select name="room_id" id="room_id" class="form-select">
+                                                        <option value="">All Rooms</option>
+                                                        <?php 
+                                                        $rooms_result->data_seek(0);
+                                                        while ($room = $rooms_result->fetch_assoc()): ?>
+                                                            <option value="<?php echo $room['id']; ?>" 
+                                                                    <?php echo $room_filter == $room['id'] ? 'selected' : ''; ?>>
+                                                                <?php echo htmlspecialchars($room['name']); ?>
+                                                            </option>
+                                                        <?php endwhile; ?>
+                                                    </select>
+                                                </div>
+                                                <div class="col-md-3">
+                                                    <label for="format" class="form-label">Format</label>
+                                                    <select name="format" id="format" class="form-select">
+                                                        <option value="excel" <?php echo $format === 'excel' ? 'selected' : ''; ?>>Excel (.xlsx)</option>
+                                                        <option value="csv" <?php echo $format === 'csv' ? 'selected' : ''; ?>>CSV</option>
+                                                    </select>
+                                                </div>
+                                                <div class="col-12">
+                                                    <div class="d-flex gap-2">
+                                                        <button type="submit" name="export" value="1" class="btn btn-primary btn-lg">
+                                                            <i class="fas fa-download me-2"></i>Export Timetable
+                                                        </button>
+                                                        <a href="export_timetable.php" class="btn btn-outline-secondary">
+                                                            <i class="fas fa-times me-2"></i>Clear Filters
+                                                        </a>
+                                                    </div>
+                                                </div>
+                                            </form>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="col-md-4">
+                                    <div class="card export-info-card">
+                                        <div class="card-header">
+                                            <h6 class="mb-0">Export Information</h6>
+                                        </div>
+                                        <div class="card-body">
+                                            <div class="mb-3">
+                                                <h6 class="text-primary">Excel Export</h6>
+                                                <p class="text-muted small">
+                                                    Exports timetable data to an Excel file (.xlsx) with proper formatting, 
+                                                    column sizing, and styling.
+                                                </p>
                                             </div>
-                                        </form>
+                                            <div class="mb-3">
+                                                <h6 class="text-success">CSV Export</h6>
+                                                <p class="text-muted small">
+                                                    Exports timetable data to a CSV file that can be opened in Excel, 
+                                                    Google Sheets, or any spreadsheet application.
+                                                </p>
+                                            </div>
+                                            <div class="mb-3">
+                                                <h6 class="text-info">Filtered Exports</h6>
+                                                <p class="text-muted small">
+                                                    Use the filters above to export specific subsets of the timetable 
+                                                    (by class, day, or room).
+                                                </p>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
-                            
-                            <div class="col-md-4">
-                                <div class="card">
+
+                            <!-- Preview -->
+                            <?php if ($timetable_result->num_rows > 0): ?>
+                                <div class="card mt-4">
                                     <div class="card-header">
-                                        <h6 class="mb-0">Export Information</h6>
+                                        <h6 class="mb-0">
+                                            Export Preview (<?php echo $timetable_result->num_rows; ?> entries)
+                                            <?php if ($class_filter || $day_filter || $room_filter): ?>
+                                                <span class="badge bg-info ms-2">Filtered</span>
+                                            <?php endif; ?>
+                                        </h6>
                                     </div>
                                     <div class="card-body">
-                                        <div class="mb-3">
-                                            <h6 class="text-primary">Excel Export</h6>
-                                            <p class="text-muted small">
-                                                Exports timetable data to an Excel file (.xlsx) with proper formatting, 
-                                                column sizing, and styling.
-                                            </p>
-                                        </div>
-                                        <div class="mb-3">
-                                            <h6 class="text-success">CSV Export</h6>
-                                            <p class="text-muted small">
-                                                Exports timetable data to a CSV file that can be opened in Excel, 
-                                                Google Sheets, or any spreadsheet application.
-                                            </p>
-                                        </div>
-                                        <div class="mb-3">
-                                            <h6 class="text-info">Filtered Exports</h6>
-                                            <p class="text-muted small">
-                                                Use the filters above to export specific subsets of the timetable 
-                                                (by class, day, or room).
-                                            </p>
+                                        <div class="table-responsive">
+                                            <table class="table table-sm table-striped">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Day</th>
+                                                        <th>Time</th>
+                                                        <th>Class</th>
+                                                        <th>Division</th>
+                                                        <th>Course</th>
+                                                        <th>Room</th>
+                                                        <th>Lecturer</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <?php 
+                                                    // Reset result pointer for preview
+                                                    $timetable_result->data_seek(0);
+                                                    $preview_count = 0;
+                                                    while (($entry = $timetable_result->fetch_assoc()) && $preview_count < 10): 
+                                                        $preview_count++;
+                                                    ?>
+                                                    <tr>
+                                                        <td><?php echo htmlspecialchars($entry['day_name']); ?></td>
+                                                        <td><?php echo htmlspecialchars(substr($entry['start_time'], 0, 5) . ' - ' . substr($entry['end_time'], 0, 5)); ?></td>
+                                                        <td><?php echo htmlspecialchars($entry['class_name']); ?></td>
+                                                        <td><?php echo htmlspecialchars($entry['division_label'] ?: ''); ?></td>
+                                                        <td><?php echo htmlspecialchars($entry['course_code'] . ' - ' . $entry['course_name']); ?></td>
+                                                        <td><?php echo htmlspecialchars($entry['room_name']); ?></td>
+                                                        <td><?php echo $entry['lecturer_name'] ? htmlspecialchars($entry['lecturer_name']) : '<span class="text-muted">Not assigned</span>'; ?></td>
+                                                    </tr>
+                                                    <?php endwhile; ?>
+                                                    <?php if ($timetable_result->num_rows > 10): ?>
+                                                    <tr>
+                                                        <td colspan="6" class="text-center text-muted">
+                                                            <em>Showing first 10 entries. Total: <?php echo $timetable_result->num_rows; ?> entries.</em>
+                                                        </td>
+                                                    </tr>
+                                                    <?php endif; ?>
+                                                </tbody>
+                                            </table>
                                         </div>
                                     </div>
                                 </div>
-                            </div>
-                        </div>
-
-                        <!-- Preview -->
-                        <?php if ($timetable_result->num_rows > 0): ?>
-                            <div class="card mt-4">
-                                <div class="card-header">
-                                    <h6 class="mb-0">
-                                        Export Preview (<?php echo $timetable_result->num_rows; ?> entries)
-                                        <?php if ($class_filter || $day_filter || $room_filter): ?>
-                                            <span class="badge bg-info ms-2">Filtered</span>
-                                        <?php endif; ?>
-                                    </h6>
-                                </div>
-                                <div class="card-body">
-                                    <div class="table-responsive">
-                                        <table class="table table-sm table-striped">
-                                            <thead>
-                                                <tr>
-                                                    <th>Day</th>
-                                                    <th>Time</th>
-                                                    <th>Class</th>
-                                                    <th>Division</th>
-                                                    <th>Course</th>
-                                                    <th>Room</th>
-                                                    <th>Lecturer</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                <?php 
-                                                // Reset result pointer for preview
-                                                $timetable_result->data_seek(0);
-                                                $preview_count = 0;
-                                                while (($entry = $timetable_result->fetch_assoc()) && $preview_count < 10): 
-                                                    $preview_count++;
-                                                ?>
-                                                <tr>
-                                                    <td><?php echo htmlspecialchars($entry['day_name']); ?></td>
-                                                    <td><?php echo htmlspecialchars(substr($entry['start_time'], 0, 5) . ' - ' . substr($entry['end_time'], 0, 5)); ?></td>
-                                                    <td><?php echo htmlspecialchars($entry['class_name']); ?></td>
-                                                    <td><?php echo htmlspecialchars($entry['division_label'] ?: ''); ?></td>
-                                                    <td><?php echo htmlspecialchars($entry['course_code'] . ' - ' . $entry['course_name']); ?></td>
-                                                    <td><?php echo htmlspecialchars($entry['room_name']); ?></td>
-                                                    <td><?php echo $entry['lecturer_name'] ? htmlspecialchars($entry['lecturer_name']) : '<span class="text-muted">Not assigned</span>'; ?></td>
-                                                </tr>
-                                                <?php endwhile; ?>
-                                                <?php if ($timetable_result->num_rows > 10): ?>
-                                                <tr>
-                                                    <td colspan="6" class="text-center text-muted">
-                                                        <em>Showing first 10 entries. Total: <?php echo $timetable_result->num_rows; ?> entries.</em>
-                                                    </td>
-                                                </tr>
-                                                <?php endif; ?>
-                                            </tbody>
-                                        </table>
+                            <?php else: ?>
+                                <div class="card mt-4">
+                                    <div class="card-body text-center py-5">
+                                        <i class="fas fa-calendar-times fa-3x text-muted mb-3"></i>
+                                        <h5 class="text-muted">No Timetable Entries Found</h5>
+                                        <p class="text-muted">
+                                            <?php if ($class_filter || $day_filter || $room_filter): ?>
+                                                No entries match the current filters. Try adjusting your filters.
+                                            <?php else: ?>
+                                                No timetable entries have been generated yet. 
+                                                <a href="generate_timetable.php">Generate a timetable</a> to get started.
+                                            <?php endif; ?>
+                                        </p>
                                     </div>
                                 </div>
-                            </div>
-                        <?php else: ?>
-                            <div class="card mt-4">
-                                <div class="card-body text-center py-5">
-                                    <i class="fas fa-calendar-times fa-3x text-muted mb-3"></i>
-                                    <h5 class="text-muted">No Timetable Entries Found</h5>
-                                    <p class="text-muted">
-                                        <?php if ($class_filter || $day_filter || $room_filter): ?>
-                                            No entries match the current filters. Try adjusting your filters.
-                                        <?php else: ?>
-                                            No timetable entries have been generated yet. 
-                                            <a href="generate_timetable.php">Generate a timetable</a> to get started.
-                                        <?php endif; ?>
-                                    </p>
-                                </div>
-                            </div>
-                        <?php endif; ?>
+                            <?php endif; ?>
                     </div>
                 </div>
             </div>
         </div>
     </div>
 
+    <?php include 'includes/footer.php'; ?>
 </body>
 </html>
