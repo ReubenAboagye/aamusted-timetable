@@ -121,7 +121,7 @@ class FitnessEvaluator {
             
             // Lecturer conflicts
             if ($gene['lecturer_course_id'] || $gene['lecturer_id']) {
-                $lecturerKey = TimetableRepresentation::getLecturerConflictKey($gene);
+                $lecturerKey = TimetableRepresentation::getLecturerConflictKey($gene, $this->data);
                 if (isset($lecturerSlots[$lecturerKey])) {
                     $lecturerConflicts[] = [
                         'conflict_with' => $lecturerSlots[$lecturerKey],
