@@ -60,7 +60,17 @@ register_shutdown_function(function() {
 // Include stream manager so generation respects currently selected stream
 if (file_exists(__DIR__ . '/includes/stream_manager.php')) include_once __DIR__ . '/includes/stream_manager.php';
 $streamManager = getStreamManager();
-$current_stream_id = $streamManager->getCurrentStreamId();
+
+// Check if we're in edit mode (stream_id passed via URL)
+$edit_mode = false;
+$edit_stream_id = null;
+if (isset($_GET['edit_stream_id']) && !empty($_GET['edit_stream_id'])) {
+    $edit_stream_id = intval($_GET['edit_stream_id']);
+    $edit_mode = true;
+    $current_stream_id = $edit_stream_id;
+} else {
+    $current_stream_id = $streamManager->getCurrentStreamId();
+}
 
 // Set current semester from form, URL params, or use defaults
 $current_semester = 2; // Default to semester 2
@@ -783,7 +793,29 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
 <div class="main-content" id="mainContent">
     <div class="table-container">
         <div class="table-header d-flex justify-content-between align-items-center">
-            <h4><i class="fas fa-calendar-alt me-2"></i>Generate Timetable</h4>
+            <h4>
+                <i class="fas fa-calendar-alt me-2"></i>
+                <?php if ($edit_mode): ?>
+                    Edit Timetable
+                    <?php 
+                    // Get stream name for display
+                    $stream_name = '';
+                    if ($edit_stream_id) {
+                        $stream_stmt = $conn->prepare("SELECT name FROM streams WHERE id = ?");
+                        $stream_stmt->bind_param("i", $edit_stream_id);
+                        $stream_stmt->execute();
+                        $stream_result = $stream_stmt->get_result();
+                        if ($stream_row = $stream_result->fetch_assoc()) {
+                            $stream_name = $stream_row['name'];
+                        }
+                        $stream_stmt->close();
+                    }
+                    ?>
+                    <span class="badge bg-primary ms-2"><?php echo htmlspecialchars($stream_name); ?></span>
+                <?php else: ?>
+                    Generate Timetable
+                <?php endif; ?>
+            </h4>
         </div>
 
         <div class="m-3">
@@ -802,6 +834,19 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
             <?php endif; ?>
         </div>
 
+        <?php if ($edit_mode): ?>
+        <!-- Edit Mode Message -->
+        <div class="row m-3">
+            <div class="col-12">
+                <div class="alert alert-info">
+                    <i class="fas fa-info-circle me-2"></i>
+                    <strong>Edit Mode:</strong> You are currently editing the timetable for <strong><?php echo htmlspecialchars($stream_name); ?></strong>. 
+                    Click on any timetable cell to edit the course schedule. Changes are saved automatically.
+                </div>
+            </div>
+        </div>
+        <?php else: ?>
+        <!-- Generation Form (only show in generate mode) -->
         <div class="row m-3">
             <div class="col-md-8">
                 <div class="card">
@@ -845,12 +890,13 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                         <div class="d-grid gap-2">
                             <a href="class_courses.php" class="btn btn-outline-primary"><i class="fas fa-link me-2"></i>Manage Assignments</a>
                             <a href="extract_timetable.php" class="btn btn-success"><i class="fas fa-eye me-2"></i>View Timetable</a>
-                            <a href="export_timetable.php" class="btn btn-outline-info"><i class="fas fa-download me-2"></i>Export Timetable</a>
+                            <a href="saved_timetable.php" class="btn btn-outline-info"><i class="fas fa-list me-2"></i>Saved Timetables</a>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
+        <?php endif; ?>
 
         <?php if ($generation_results): ?>
         <div class="row m-3">
@@ -1644,14 +1690,23 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
         <div class="row m-3">
             <div class="col-12">
                 <div class="card mt-3">
-                    <div class="card-header">
+                    <div class="card-header d-flex justify-content-between align-items-center">
                         <h6 class="mb-0">
-                            <i class="fas fa-table me-2"></i>Timetable Preview
+                            <i class="fas fa-table me-2"></i>
+                            <?php if ($edit_mode): ?>
+                                Editable Timetable
+                            <?php else: ?>
+                                Timetable Preview
+                            <?php endif; ?>
                             <?php if ($weeks_to_loop > 1): ?>
                                 <span class="badge bg-secondary ms-2">Week <?php echo $w; ?> / <?php echo $weeks_to_loop; ?></span>
                             <?php endif; ?>
                             <?php if (!empty($timetable_data)): ?>
-                                <span class="badge bg-success ms-2">Generated Data</span>
+                                <?php if ($edit_mode): ?>
+                                    <span class="badge bg-warning ms-2">Edit Mode</span>
+                                <?php else: ?>
+                                    <span class="badge bg-success ms-2">Generated Data</span>
+                                <?php endif; ?>
                                 <span class="badge bg-primary ms-1"><?php 
                                     $total_entries = 0;
                                     if (is_array($timetable_data)) {
@@ -1671,20 +1726,38 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                                 <span class="badge bg-info ms-2">Skeleton Structure</span>
                             <?php endif; ?>
                         </h6>
+                        <?php if ($edit_mode): ?>
+                            <div>
+                                <a href="saved_timetable.php" class="btn btn-sm btn-outline-secondary">
+                                    <i class="fas fa-arrow-left me-1"></i>Back to Saved Timetables
+                                </a>
+                            </div>
+                        <?php endif; ?>
                     </div>
                     <div class="card-body">
                         
                         <div class="mb-3">
                             <p class="text-muted">
                                 <i class="fas fa-info-circle me-1"></i>
-                                <?php if (!empty($timetable_data)): ?>
-                                    This timetable shows the actual generated data for the selected stream and semester. 
-                                    Blue cells contain scheduled courses with class, course code, and lecturer details.
-                                    <strong>Click on any course block to edit the day, time slot, or room assignment.</strong>
-                                    Course duration is fixed and cannot be changed. Courses will span multiple periods based on their duration (e.g., 3-hour courses span 3 periods).
+                                <?php if ($edit_mode): ?>
+                                    <?php if (!empty($timetable_data)): ?>
+                                        You are editing the existing timetable for <strong><?php echo htmlspecialchars($stream_name); ?></strong>. 
+                                        Blue cells contain scheduled courses with class, course code, and lecturer details.
+                                        <strong>Click on any course block to edit the day, time slot, or room assignment.</strong>
+                                        Changes are saved automatically when you submit the edit form.
+                                    <?php else: ?>
+                                        No timetable data found for this stream. Please generate a timetable first.
+                                    <?php endif; ?>
                                 <?php else: ?>
-                                    This template shows the structure that will be used for timetable generation. 
-                                    The cells will be filled with class-course assignments when you generate the timetable.
+                                    <?php if (!empty($timetable_data)): ?>
+                                        This timetable shows the actual generated data for the selected stream and semester. 
+                                        Blue cells contain scheduled courses with class, course code, and lecturer details.
+                                        <strong>Click on any course block to edit the day, time slot, or room assignment.</strong>
+                                        Course duration is fixed and cannot be changed. Courses will span multiple periods based on their duration (e.g., 3-hour courses span 3 periods).
+                                    <?php else: ?>
+                                        This template shows the structure that will be used for timetable generation. 
+                                        The cells will be filled with class-course assignments when you generate the timetable.
+                                    <?php endif; ?>
                                 <?php endif; ?>
                             </p>
                             <!-- Debug information -->
@@ -2705,8 +2778,8 @@ function exportTimetable() {
         return;
     }
     
-    // Redirect to export_timetable.php with the current parameters
-    const url = new URL('export_timetable.php', window.location.origin);
+    // Redirect to extract_timetable.php with the current parameters
+    const url = new URL('extract_timetable.php', window.location.origin);
     url.searchParams.set('academic_year', currentGenerationParams.academic_year);
     url.searchParams.set('semester', currentGenerationParams.semester);
     url.searchParams.set('type', currentGenerationParams.type);
