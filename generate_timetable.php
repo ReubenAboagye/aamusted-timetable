@@ -1,8 +1,8 @@
 <?php
 // Set higher limits for genetic algorithm processing
-ini_set('max_execution_time', 300); // 5 minutes
+ini_set('max_execution_time', 1800); // 30 minutes for large timetable generation
 ini_set('memory_limit', '1024M');   // 1GB memory limit
-set_time_limit(300);                // Alternative way to set execution time
+set_time_limit(1800);                // Alternative way to set execution time
 
 include 'connect.php';
 // Ensure flash helper is available for PRG redirects
@@ -185,6 +185,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     
                     if ($inserted_count > 0) {
                         $msg = "Timetable generated successfully! $inserted_count entries created.";
+                        
+                        // Check for lecturer conflicts in session
+                        $conflictCount = 0;
+                        if (session_status() === PHP_SESSION_NONE) {
+                            session_start();
+                        }
+                        if (isset($_SESSION['lecturer_conflicts'])) {
+                            $conflictCount = count($_SESSION['lecturer_conflicts']);
+                            if ($conflictCount > 0) {
+                                $msg .= " <strong>Note:</strong> $conflictCount lecturer conflicts detected. <a href='lecturer_conflicts.php' class='alert-link'>Review and resolve conflicts</a>";
+                            }
+                        }
+                        
                         if (function_exists('redirect_with_flash')) {
                             // Redirect with parameters so the page shows the correct data
                             $redirect_url = 'generate_timetable.php?semester=' . $semester_int;
@@ -236,12 +249,22 @@ function clearExistingTimetable($conn, $semester, $stream_id) {
         $stmt->execute();
         $stmt->close();
         
-        // Also clear any entries with the same semester to be safe
-        $sql = "DELETE FROM timetable WHERE semester = ?";
-        $stmt = $conn->prepare($sql);
-        $stmt->bind_param("s", $semester_param);
-        $stmt->execute();
-        $stmt->close();
+        // Also clear any entries with the same semester and academic year to be safe
+        $academic_year_param = $_POST['academic_year'] ?? null;
+        if ($academic_year_param) {
+            $sql = "DELETE FROM timetable WHERE semester = ? AND academic_year = ?";
+            $stmt = $conn->prepare($sql);
+            $stmt->bind_param("ss", $semester_param, $academic_year_param);
+            $stmt->execute();
+            $stmt->close();
+        } else {
+            // Fallback: clear all entries with the same semester
+            $sql = "DELETE FROM timetable WHERE semester = ?";
+            $stmt = $conn->prepare($sql);
+            $stmt->bind_param("s", $semester_param);
+            $stmt->execute();
+            $stmt->close();
+        }
     } else {
         // Old schema: clear via class_id -> classes -> stream
         $sql = "DELETE t FROM timetable t 
@@ -252,12 +275,22 @@ function clearExistingTimetable($conn, $semester, $stream_id) {
         $stmt->execute();
         $stmt->close();
         
-        // Also clear any entries with the same semester to be safe
-        $sql = "DELETE FROM timetable WHERE semester = ?";
-        $stmt = $conn->prepare($sql);
-        $stmt->bind_param("s", $semester_param);
-        $stmt->execute();
-        $stmt->close();
+        // Also clear any entries with the same semester and academic year to be safe
+        $academic_year_param = $_POST['academic_year'] ?? null;
+        if ($academic_year_param) {
+            $sql = "DELETE FROM timetable WHERE semester = ? AND academic_year = ?";
+            $stmt = $conn->prepare($sql);
+            $stmt->bind_param("ss", $semester_param, $academic_year_param);
+            $stmt->execute();
+            $stmt->close();
+        } else {
+            // Fallback: clear all entries with the same semester
+            $sql = "DELETE FROM timetable WHERE semester = ?";
+            $stmt = $conn->prepare($sql);
+            $stmt->bind_param("s", $semester_param);
+            $stmt->execute();
+            $stmt->close();
+        }
     }
 }
 
@@ -265,6 +298,8 @@ function insertTimetableEntries($conn, $entries) {
     if (empty($entries)) {
         return 0;
     }
+    
+    error_log("Starting insertion of " . count($entries) . " timetable entries");
     
     // Pre-filter duplicates before database insertion
     $uniqueEntries = [];
@@ -339,7 +374,23 @@ function insertTimetableEntries($conn, $entries) {
     }
     $skipped_invalid_fk = 0;
     
-    foreach ($uniqueEntries as $entry) {
+    // Process entries in batches for better performance
+    $batchSize = 1000; // Process 1000 entries at a time
+    $totalEntries = count($uniqueEntries);
+    $processedEntries = 0;
+    
+    for ($batchStart = 0; $batchStart < $totalEntries; $batchStart += $batchSize) {
+        $batchEnd = min($batchStart + $batchSize, $totalEntries);
+        $batch = array_slice($uniqueEntries, $batchStart, $batchEnd - $batchStart);
+        
+        error_log("Processing batch " . ($batchStart / $batchSize + 1) . " of " . ceil($totalEntries / $batchSize) . " (" . count($batch) . " entries)");
+        
+        // Prepare batch insert data
+        $batchValues = [];
+        $batchParams = [];
+        $batchTypes = '';
+        
+        foreach ($batch as $entry) {
         // Normalize semester for enum schemas: map numeric to names if needed
         $semesterVal = $entry['semester'] ?? '';
         if (is_numeric($semesterVal)) {
@@ -363,6 +414,7 @@ function insertTimetableEntries($conn, $entries) {
                 continue;
             }
         }
+            
         // Ensure academic_year is set; if missing compute default like "2025/2026"
         $academicYearVal = $entry['academic_year'] ?? null;
         if (empty($academicYearVal)) {
@@ -384,12 +436,72 @@ function insertTimetableEntries($conn, $entries) {
             error_log("Skipping entry due to invalid FK(s): " . json_encode($entry));
             continue;
         }
+            
         // Prevent duplicate room/day/time slot collisions (uq_timetable_slot)
         $slotKey = $entry['room_id'] . '-' . $entry['day_id'] . '-' . $entry['time_slot_id'] . '-' . $semesterVal . '-' . $academicYearVal . '-lecture';
         if (isset($occupiedSlotKeys[$slotKey])) {
             error_log("Skipping entry due to occupied slot (room/day/time): " . $slotKey . " entry=" . json_encode($entry));
             continue;
         }
+            
+            // Add to batch
+            $batchValues[] = "(" . (int)$entry['class_course_id'] . ", " . (int)$lecturerCourseId . ", " . (int)$entry['day_id'] . ", " . (int)$entry['time_slot_id'] . ", " . (int)$entry['room_id'] . ", '" . $conn->real_escape_string($entry['division_label']) . "', '" . $conn->real_escape_string($semesterVal) . "', '" . $conn->real_escape_string($academicYearVal) . "')";
+            $occupiedSlotKeys[$slotKey] = true;
+        }
+        
+        // Validate batch for lecturer conflicts before insert
+        $conflicts = validateBatchForLecturerConflicts($batch, $conn);
+        if (!empty($conflicts)) {
+            error_log("Batch contains " . count($conflicts) . " lecturer conflicts - proceeding with insertion");
+        }
+        
+        // Execute batch insert if we have valid entries
+        if (!empty($batchValues)) {
+            $sql = "INSERT INTO timetable (class_course_id, lecturer_course_id, day_id, time_slot_id, room_id, division_label, semester, academic_year) VALUES " . implode(', ', $batchValues);
+            
+            if ($conn->query($sql)) {
+                $batchInserted = $conn->affected_rows;
+                $inserted_count += $batchInserted;
+                error_log("Batch inserted $batchInserted entries successfully");
+            } else {
+                error_log("Batch insert failed: " . $conn->error);
+                // Fallback to individual inserts for this batch
+                error_log("Falling back to individual inserts for this batch");
+                foreach ($batch as $entry) {
+                    // Individual insert logic here (simplified version)
+                    $semesterVal = $entry['semester'] ?? '';
+                    if (is_numeric($semesterVal)) {
+                        $semesterVal = ((int)$semesterVal === 1) ? 'first' : (((int)$semesterVal === 2) ? 'second' : (string)$semesterVal);
+                    } else {
+                        $sv = strtolower((string)$semesterVal);
+                        if ($sv === '1' || $sv === 'first' || $sv === 'semester 1') { $semesterVal = 'first'; }
+                        elseif ($sv === '2' || $sv === 'second' || $sv === 'semester 2') { $semesterVal = 'second'; }
+                    }
+                    
+                    $lecturerCourseId = $entry['lecturer_course_id'] ?? null;
+                    if (!$lecturerCourseId || !isset($lecturerCourseIds[(int)$lecturerCourseId])) {
+                        $classCourseId = (int)$entry['class_course_id'];
+                        $courseId = $classCourseToCourse[$classCourseId] ?? null;
+                        if ($courseId !== null && isset($lecturerCourseByCourse[$courseId])) {
+                            $lecturerCourseId = $lecturerCourseByCourse[$courseId];
+                        } else {
+                            continue;
+                        }
+                    }
+                    
+                    $academicYearVal = $entry['academic_year'] ?? null;
+                    if (empty($academicYearVal)) {
+                        $m = (int)date('n');
+                        $y = (int)date('Y');
+                        if ($m >= 8) {
+                            $academicYearVal = $y . '/' . ($y + 1);
+                        } else {
+                            $academicYearVal = ($y - 1) . '/' . $y;
+                        }
+                    }
+                    
+                    // Note: Lecturer conflicts are now allowed and will be reported for manual review
+                    
         $sql = "INSERT INTO timetable (class_course_id, lecturer_course_id, day_id, time_slot_id, room_id, division_label, semester, academic_year) 
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
         
@@ -408,24 +520,27 @@ function insertTimetableEntries($conn, $entries) {
             
             if ($stmt->execute()) {
                 $inserted_count++;
-                $occupiedSlotKeys[$slotKey] = true;
-            } else {
-                // Check if it's a duplicate key error
-                if ($stmt->errno == 1062) { // MySQL duplicate key error
-                    $duplicate_key = $entry['class_course_id'] . '-' . $entry['day_id'] . '-' . $entry['time_slot_id'] . '-' . $entry['division_label'];
-                    $db_duplicate_keys[] = $duplicate_key;
-                    
-                    // Log the duplicate for debugging
-                    error_log("Database duplicate key error: " . $duplicate_key . " for entry: " . json_encode($entry));
-                } elseif ($stmt->errno == 1452) { // FK constraint fails
-                    error_log("Foreign key constraint failed for entry: " . json_encode($entry) . "; resolved_lecturer_course_id=" . $lecturerCourseId);
-                } else {
-                    error_log("Database insertion error: " . $stmt->error . " for entry: " . json_encode($entry));
-                }
             }
             $stmt->close();
-        } else {
-            error_log("Failed to prepare statement for entry: " . json_encode($entry));
+                    }
+                }
+            }
+        }
+        
+        $processedEntries += count($batch);
+        error_log("Processed $processedEntries of $totalEntries entries (" . round(($processedEntries / $totalEntries) * 100, 2) . "%)");
+        
+        // Memory optimization: clear batch data and force garbage collection
+        unset($batch, $batchValues, $batchParams);
+        if (function_exists('gc_collect_cycles')) {
+            gc_collect_cycles();
+        }
+        
+        // Log memory usage every 10 batches
+        if (($batchStart / $batchSize) % 10 == 0) {
+            $memoryUsage = memory_get_usage(true);
+            $memoryPeak = memory_get_peak_usage(true);
+            error_log("Memory usage: " . round($memoryUsage / 1024 / 1024, 2) . "MB (Peak: " . round($memoryPeak / 1024 / 1024, 2) . "MB)");
         }
     }
     
@@ -440,6 +555,67 @@ function insertTimetableEntries($conn, $entries) {
     error_log("Successfully inserted " . $inserted_count . " out of " . count($uniqueEntries) . " unique entries");
     
     return $inserted_count;
+}
+
+/**
+ * Validate batch for lecturer conflicts
+ */
+function validateBatchForLecturerConflicts($batch, $conn) {
+    $lecturerSlots = [];
+    $conflicts = [];
+    $semester = $batch[0]['semester'] ?? 'first';
+    $academicYear = $batch[0]['academic_year'] ?? null;
+    
+    // Set default academic year if not provided
+    if (empty($academicYear)) {
+        $m = (int)date('n');
+        $y = (int)date('Y');
+        if ($m >= 8) {
+            $academicYear = $y . '/' . ($y + 1);
+        } else {
+            $academicYear = ($y - 1) . '/' . $y;
+        }
+    }
+    
+    // Check for conflicts within the current batch
+    foreach ($batch as $entry) {
+        if (!$entry['lecturer_course_id']) {
+            continue;
+        }
+        
+        // Create lecturer slot key for batch validation
+        $lecturerSlotKey = $entry['lecturer_course_id'] . '|' . $entry['day_id'] . '|' . $entry['time_slot_id'];
+        
+        if (isset($lecturerSlots[$lecturerSlotKey])) {
+            $conflicts[] = [
+                'lecturer_course_id' => $entry['lecturer_course_id'],
+                'day_id' => $entry['day_id'],
+                'time_slot_id' => $entry['time_slot_id'],
+                'class_course_id' => $entry['class_course_id']
+            ];
+        } else {
+            $lecturerSlots[$lecturerSlotKey] = $entry['class_course_id'];
+        }
+    }
+    
+    // Log conflicts but don't throw exceptions - allow generation to continue
+    if (!empty($conflicts)) {
+        error_log("Lecturer conflicts detected in batch (will be logged for review):");
+        foreach ($conflicts as $conflict) {
+            error_log("CONFLICT: Lecturer course {$conflict['lecturer_course_id']} has multiple classes at day {$conflict['day_id']}, time slot {$conflict['time_slot_id']} - class_course_id: {$conflict['class_course_id']}");
+        }
+        
+        // Store conflicts in session for later review
+        if (session_status() === PHP_SESSION_NONE) {
+            session_start();
+        }
+        if (!isset($_SESSION['lecturer_conflicts'])) {
+            $_SESSION['lecturer_conflicts'] = [];
+        }
+        $_SESSION['lecturer_conflicts'] = array_merge($_SESSION['lecturer_conflicts'], $conflicts);
+    }
+    
+    return $conflicts; // Return conflicts for optional handling
 }
 
 /**
@@ -668,7 +844,7 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                     <div class="card-body">
                         <div class="d-grid gap-2">
                             <a href="class_courses.php" class="btn btn-outline-primary"><i class="fas fa-link me-2"></i>Manage Assignments</a>
-                            <a href="view_timetable.php" class="btn btn-success"><i class="fas fa-eye me-2"></i>View Timetable</a>
+                            <a href="extract_timetable.php" class="btn btn-success"><i class="fas fa-eye me-2"></i>View Timetable</a>
                             <a href="export_timetable.php" class="btn btn-outline-info"><i class="fas fa-download me-2"></i>Export Timetable</a>
                         </div>
                     </div>
@@ -1711,65 +1887,6 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                             </table>
                         </div>
                         
-                        <!-- Sample Course Blocks (for demonstration) -->
-                        <div class="mt-4">
-                            <h6 class="mb-3">
-                                <i class="fas fa-info-circle me-2"></i>
-                                Sample Course Blocks (for demonstration)
-                            </h6>
-                            <div class="sample-blocks">
-                                <div class="sample-block sample-1h" style="width: 120px; height: 60px; background-color: #28a745; color: white; display: inline-flex; align-items: center; justify-content: center; margin: 5px; border-radius: 4px; font-size: 0.8rem; font-weight: bold;">
-                                    1h Course<br><small>Fits in 1h slot</small>
-                                </div>
-                                <div class="sample-block sample-2h" style="width: 120px; height: 60px; background-color: #007bff; color: white; display: inline-flex; align-items: center; justify-content: center; margin: 5px; border-radius: 4px; font-size: 0.8rem; font-weight: bold;">
-                                    2h Course<br><small>Fits in 2h slot</small>
-                                </div>
-                                <div class="sample-block sample-3h" style="width: 120px; height: 60px; background-color: #dc3545; color: white; display: inline-flex; align-items: center; justify-content: center; margin: 5px; border-radius: 4px; font-size: 0.8rem; font-weight: bold;">
-                                    3h Course<br><small>Fits in 3h slot</small>
-                                </div>
-                                <div class="sample-block sample-4h" style="width: 120px; height: 60px; background-color: #6f42c1; color: white; display: inline-flex; align-items: center; justify-content: center; margin: 5px; border-radius: 4px; font-size: 0.8rem; font-weight: bold;">
-                                    4h Course<br><small>Fits in 4h slot</small>
-                                </div>
-                            </div>
-                            <small class="text-muted">
-                                <i class="fas fa-lightbulb me-1"></i>
-                                <?php 
-                                // Display stream-specific period information
-                                if (!empty($current_stream_id)) {
-                                    $stream_period_info_sql = "SELECT period_start, period_end, break_start, break_end FROM streams WHERE id = ? AND is_active = 1";
-                                    $stream_period_info_stmt = $conn->prepare($stream_period_info_sql);
-                                    $stream_period_info_stmt->bind_param('i', $current_stream_id);
-                                    $stream_period_info_stmt->execute();
-                                    $stream_period_info_result = $stream_period_info_stmt->get_result();
-                                    
-                                    if ($stream_period_info_row = $stream_period_info_result->fetch_assoc()) {
-                                        $period_start = $stream_period_info_row['period_start'];
-                                        $period_end = $stream_period_info_row['period_end'];
-                                        $break_start = $stream_period_info_row['break_start'];
-                                        $break_end = $stream_period_info_row['break_end'];
-                                        
-                                        if (!empty($period_start) && !empty($period_end)) {
-                                            echo "Stream period range: " . htmlspecialchars(formatTimeForDisplay($period_start)) . " - " . htmlspecialchars(formatTimeForDisplay($period_end));
-                                            if (!empty($break_start) && !empty($break_end)) {
-                                                echo ". Break period: " . htmlspecialchars(formatTimeForDisplay($break_start)) . " - " . htmlspecialchars(formatTimeForDisplay($break_end));
-                                            }
-                                            echo ". ";
-                                        } else {
-                                            echo "Default period range: 07:00 - 20:00 (13 hours). Break periods: 12:00-13:00 and 15:00-16:00. ";
-                                        }
-                                    } else {
-                                        echo "Default period range: 07:00 - 20:00 (13 hours). Break periods: 12:00-13:00 and 15:00-16:00. ";
-                                    }
-                                    $stream_period_info_stmt->close();
-                                } else {
-                                    echo "Default period range: 07:00 - 20:00 (13 hours). Break periods: 12:00-13:00 and 15:00-16:00. ";
-                                }
-                                ?>
-                                <strong>NEW:</strong> Courses now fit perfectly into single time slots based on their duration. 
-                                A 3-hour course will fit into a 3-hour time slot (e.g., "7:00 AM - 10:00 AM"). 
-                                Time display shows full time ranges and break periods are clearly marked.
-                            </small>
-                        </div>
                         
                         <div class="mt-3">
                             <div class="row text-center">
@@ -2469,9 +2586,48 @@ function deleteTimetableEntry(index) {
 
 // Save timetable changes
 function saveTimetableChanges() {
-    // Here you would save the changes to the database
-    showSuccessMessage('Timetable changes saved successfully!');
-    displayTimetablePreview(generatedTimetableData); // Switch back to preview mode
+    // Show loading state
+    const saveBtn = document.querySelector('.btn-success');
+    const originalText = saveBtn.innerHTML;
+    saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Saving...';
+    saveBtn.disabled = true;
+    
+    // Send all changes to the database
+    const changes = generatedTimetableData.map(entry => ({
+        id: entry.id,
+        day_id: entry.day_id,
+        time_slot_id: entry.time_slot_id,
+        room_id: entry.room_id
+    }));
+    
+    fetch('api_timetable_edit.php', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            action: 'bulk_update_timetable_entries',
+            changes: changes
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showSuccessMessage('Timetable changes saved successfully!');
+            displayTimetablePreview(generatedTimetableData); // Switch back to preview mode
+        } else {
+            showErrorMessage('Failed to save timetable changes: ' + data.message);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        showErrorMessage('Error saving timetable changes. Please try again.');
+    })
+    .finally(() => {
+        // Restore button state
+        saveBtn.innerHTML = originalText;
+        saveBtn.disabled = false;
+    });
 }
 
 // Cancel timetable edit
@@ -2712,6 +2868,51 @@ function generateRoomOptions(selectedRoomId) {
 
 // Show edit modal
 function showEditModal(entryId, dayId, timeSlotId, roomId, courseCode, className, lecturerName, hours) {
+    // Fetch time slots from database
+    fetch('get_stream_time_slots.php')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                const timeSlots = data.data;
+                showEditModalWithTimeSlots(entryId, dayId, timeSlotId, roomId, courseCode, className, lecturerName, hours, timeSlots);
+            } else {
+                console.error('Failed to fetch time slots:', data.error);
+                // Fallback to hardcoded time slots
+                showEditModalWithTimeSlots(entryId, dayId, timeSlotId, roomId, courseCode, className, lecturerName, hours, []);
+            }
+        })
+        .catch(error => {
+            console.error('Error fetching time slots:', error);
+            // Fallback to hardcoded time slots
+            showEditModalWithTimeSlots(entryId, dayId, timeSlotId, roomId, courseCode, className, lecturerName, hours, []);
+        });
+}
+
+// Show edit modal with time slots data
+function showEditModalWithTimeSlots(entryId, dayId, timeSlotId, roomId, courseCode, className, lecturerName, hours, timeSlots) {
+    // Generate time slot options
+    let timeSlotOptions = '<option value="">Select Time Slot</option>';
+    if (timeSlots.length > 0) {
+        timeSlots.forEach(slot => {
+            const selected = timeSlotId == slot.id ? 'selected' : '';
+            const startTime = slot.start_time.substring(0, 5); // Remove seconds
+            const endTime = slot.end_time.substring(0, 5); // Remove seconds
+            timeSlotOptions += `<option value="${slot.id}" ${selected}>${startTime} - ${endTime}</option>`;
+        });
+    } else {
+        // Fallback hardcoded options
+        timeSlotOptions += `
+            <option value="1" ${timeSlotId == 1 ? 'selected' : ''}>08:00 - 09:00</option>
+            <option value="2" ${timeSlotId == 2 ? 'selected' : ''}>09:00 - 10:00</option>
+            <option value="3" ${timeSlotId == 3 ? 'selected' : ''}>10:00 - 11:00</option>
+            <option value="4" ${timeSlotId == 4 ? 'selected' : ''}>11:00 - 12:00</option>
+            <option value="5" ${timeSlotId == 5 ? 'selected' : ''}>13:00 - 14:00</option>
+            <option value="6" ${timeSlotId == 6 ? 'selected' : ''}>14:00 - 15:00</option>
+            <option value="7" ${timeSlotId == 7 ? 'selected' : ''}>15:00 - 16:00</option>
+            <option value="8" ${timeSlotId == 8 ? 'selected' : ''}>16:00 - 17:00</option>
+        `;
+    }
+
     // Create modal HTML
     const modalHtml = `
         <div class="modal fade" id="editTimetableModal" tabindex="-1" aria-labelledby="editTimetableModalLabel" aria-hidden="true">
@@ -2745,15 +2946,7 @@ function showEditModal(entryId, dayId, timeSlotId, roomId, courseCode, className
                                     <div class="mb-3">
                                         <label for="edit_time_slot" class="form-label">Time Slot</label>
                                         <select class="form-select" id="edit_time_slot" name="time_slot_id" required>
-                                            <option value="">Select Time Slot</option>
-                                            <option value="1" ${timeSlotId == 1 ? 'selected' : ''}>08:00 - 09:00</option>
-                                            <option value="2" ${timeSlotId == 2 ? 'selected' : ''}>09:00 - 10:00</option>
-                                            <option value="3" ${timeSlotId == 3 ? 'selected' : ''}>10:00 - 11:00</option>
-                                            <option value="4" ${timeSlotId == 4 ? 'selected' : ''}>11:00 - 12:00</option>
-                                            <option value="5" ${timeSlotId == 5 ? 'selected' : ''}>13:00 - 14:00</option>
-                                            <option value="6" ${timeSlotId == 6 ? 'selected' : ''}>14:00 - 15:00</option>
-                                            <option value="7" ${timeSlotId == 7 ? 'selected' : ''}>15:00 - 16:00</option>
-                                            <option value="8" ${timeSlotId == 8 ? 'selected' : ''}>16:00 - 17:00</option>
+                                            ${timeSlotOptions}
                                         </select>
                                     </div>
                                 </div>
@@ -2840,10 +3033,8 @@ function saveTimetableEdit() {
             // Close modal
             const modal = bootstrap.Modal.getInstance(document.getElementById('editTimetableModal'));
             modal.hide();
-            // Reload page to show updated data
-            setTimeout(() => {
-                location.reload();
-            }, 1000);
+            // Reload page immediately to show updated data
+            location.reload();
         } else {
             showErrorMessage('Failed to update timetable entry: ' + data.message);
         }
