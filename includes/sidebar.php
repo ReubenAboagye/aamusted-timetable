@@ -66,6 +66,9 @@
              <a href="saved_timetable.php" class="nav-link <?= ($currentPage == 'saved_timetable.php') ? 'active' : '' ?>">
                <i class="fas fa-save me-2"></i>Saved Timetable
              </a>
+             <a href="lecturer_conflicts.php" class="nav-link <?= ($currentPage == 'lecturer_conflicts.php') ? 'active' : '' ?>">
+               <i class="fas fa-exclamation-triangle me-2"></i>Lecturer Conflicts
+             </a>
           </div>
         </div>
     </div>
