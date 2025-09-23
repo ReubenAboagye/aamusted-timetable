@@ -82,7 +82,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($conflict) {
                 $error_message = "This time slot and room is already occupied. Please choose a different time or room.";
             } else {
-                // Load class/course/semester/stream for the selected class_course
+                // Check for class conflicts (same class cannot have multiple courses at same time on same day)
+                $class_conflict_sql = "SELECT COUNT(*) as count FROM timetable t 
+                    JOIN class_courses cc ON t.class_course_id = cc.id 
+                    WHERE cc.class_id = (SELECT class_id FROM class_courses WHERE id = ?) 
+                    AND t.day_id = ? AND t.time_slot_id = ? AND t.id != ?";
+                $class_conflict_stmt = $conn->prepare($class_conflict_sql);
+                $class_conflict_stmt->bind_param("iiii", $class_course_id, $day_id, $time_slot_id, $id);
+                $class_conflict_stmt->execute();
+                $class_conflict_result = $class_conflict_stmt->get_result();
+                $class_conflict = $class_conflict_result->fetch_assoc()['count'] > 0;
+                $class_conflict_stmt->close();
+                
+                if ($class_conflict) {
+                    $error_message = "This class already has a course scheduled at the same time on the same day. Please choose a different time slot.";
+                } else {
+                    // Load class/course/semester/stream for the selected class_course
                 $meta_sql = "SELECT cc.class_id, cc.course_id, cc.semester, c.stream_id FROM class_courses cc JOIN classes c ON cc.class_id = c.id WHERE cc.id = ?";
                 $meta_stmt = $conn->prepare($meta_sql);
                 $meta_stmt->bind_param('i', $class_course_id);
@@ -179,7 +194,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($conflict) {
                 $error_message = "This time slot and room is already occupied. Please choose a different time or room.";
             } else {
-                // Load class/course/semester/stream for the selected class_course
+                // Check for class conflicts (same class cannot have multiple courses at same time on same day)
+                $class_conflict_sql = "SELECT COUNT(*) as count FROM timetable t 
+                    JOIN class_courses cc ON t.class_course_id = cc.id 
+                    WHERE cc.class_id = (SELECT class_id FROM class_courses WHERE id = ?) 
+                    AND t.day_id = ? AND t.time_slot_id = ?";
+                $class_conflict_stmt = $conn->prepare($class_conflict_sql);
+                $class_conflict_stmt->bind_param("iii", $class_course_id, $day_id, $time_slot_id);
+                $class_conflict_stmt->execute();
+                $class_conflict_result = $class_conflict_stmt->get_result();
+                $class_conflict = $class_conflict_result->fetch_assoc()['count'] > 0;
+                $class_conflict_stmt->close();
+                
+                if ($class_conflict) {
+                    $error_message = "This class already has a course scheduled at the same time on the same day. Please choose a different time slot.";
+                } else {
+                    // Load class/course/semester/stream for the selected class_course
                 $meta_sql = "SELECT cc.class_id, cc.course_id, cc.semester, c.stream_id FROM class_courses cc JOIN classes c ON cc.class_id = c.id WHERE cc.id = ?";
                 $meta_stmt = $conn->prepare($meta_sql);
                 $meta_stmt->bind_param('i', $class_course_id);

@@ -211,16 +211,19 @@ class ConstraintChecker {
                     
                     // Check class conflicts for each class in the combination
                     $divLabel = $classCourse['division_label'] ?? ($gene['division_label'] ?? '');
-                    $classKey = $classId . '|' . $gene['day_id'] . '|' . $gene['time_slot_id'];
-                    if (!empty($divLabel)) { $classKey .= '|' . $divLabel; }
-                    if (isset($classSlots[$classKey])) {
-                        $violations['class_conflict'][] = [
-                            'class_course_id' => $classCourseId,
-                            'class_id' => $classId,
-                            'conflict_with' => $classSlots[$classKey],
-                            'message' => 'Class already has a course at this time (in combined assignment)'
-                        ];
+                    $combinedGene = array_merge($gene, [
+                        'class_id' => $classId,
+                        'division_label' => $divLabel
+                    ]);
+                    
+                    $classConflict = $this->checkClassConflict($combinedGene, $classSlots, $classCourseId);
+                    if ($classConflict) {
+                        $classConflict['message'] = 'Class already has a course scheduled at the same time on the same day (in combined assignment)';
+                        $violations['class_conflict'][] = $classConflict;
+                        error_log("Class conflict in combined assignment: Class $classId has multiple courses at day {$gene['day_id']}, time {$gene['time_slot_id']}");
                     } else {
+                        $classKey = $classId . '|' . $gene['day_id'] . '|' . $gene['time_slot_id'];
+                        if (!empty($divLabel)) { $classKey .= '|' . $divLabel; }
                         $classSlots[$classKey] = $classCourseId;
                     }
                 }
@@ -278,16 +281,14 @@ class ConstraintChecker {
                     }
                 }
                 
-                // Check class conflicts (per-division time clash)
-                $classKey = $gene['class_id'] . '|' . $gene['day_id'] . '|' . $gene['time_slot_id'];
-                if (!empty($gene['division_label'])) { $classKey .= '|' . $gene['division_label']; }
-                if (isset($classSlots[$classKey])) {
-                    $violations['class_conflict'][] = [
-                        'class_course_id' => $classCourseId,
-                        'conflict_with' => $classSlots[$classKey],
-                        'message' => 'Class already has a course at this time'
-                    ];
+                // Check class conflicts (per-division time clash on same day)
+                $classConflict = $this->checkClassConflict($gene, $classSlots, $classCourseId);
+                if ($classConflict) {
+                    $violations['class_conflict'][] = $classConflict;
+                    error_log("Class conflict detected: Class {$gene['class_id']} has multiple courses at day {$gene['day_id']}, time {$gene['time_slot_id']}");
                 } else {
+                    $classKey = $gene['class_id'] . '|' . $gene['day_id'] . '|' . $gene['time_slot_id'];
+                    if (!empty($gene['division_label'])) { $classKey .= '|' . $gene['division_label']; }
                     $classSlots[$classKey] = $classCourseId;
                 }
 
@@ -485,6 +486,32 @@ class ConstraintChecker {
                 'preferred' => $preferred
             ];
         }
+        return null;
+    }
+
+    /**
+     * Check for class conflicts - ensures no class has multiple courses scheduled simultaneously
+     * on the same day and time slot
+     */
+    private function checkClassConflict(array $gene, array $classSlots, string $classCourseId): ?array {
+        $classKey = $gene['class_id'] . '|' . $gene['day_id'] . '|' . $gene['time_slot_id'];
+        if (!empty($gene['division_label'])) { 
+            $classKey .= '|' . $gene['division_label']; 
+        }
+        
+        if (isset($classSlots[$classKey])) {
+            return [
+                'class_course_id' => $classCourseId,
+                'class_id' => $gene['class_id'],
+                'day_id' => $gene['day_id'],
+                'time_slot_id' => $gene['time_slot_id'],
+                'division_label' => $gene['division_label'] ?? null,
+                'conflict_with' => $classSlots[$classKey],
+                'message' => 'Class already has a course scheduled at the same time on the same day',
+                'details' => "Class {$gene['class_id']} cannot have multiple courses simultaneously on day {$gene['day_id']} at time slot {$gene['time_slot_id']}"
+            ];
+        }
+        
         return null;
     }
 
