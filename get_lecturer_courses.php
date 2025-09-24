@@ -2,81 +2,74 @@
 header('Content-Type: application/json');
 include 'connect.php';
 
-$response = ['success' => false, 'data' => null, 'error' => null];
+$response = ['success' => false, 'message' => '', 'lecturers' => []];
 
 try {
-    if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
-        throw new Exception('Invalid request method');
-    }
-
-    $lecturer_id = isset($_GET['lecturer_id']) ? (int)$_GET['lecturer_id'] : 0;
+    $course_id = isset($_GET['course_id']) ? (int)$_GET['course_id'] : 0;
+    $class_course_id = isset($_GET['class_course_id']) ? (int)$_GET['class_course_id'] : 0;
     
-    if ($lecturer_id <= 0) {
-        throw new Exception('Invalid lecturer ID');
+    if ($course_id <= 0 && $class_course_id <= 0) {
+        throw new Exception('Invalid course ID or class course ID');
     }
-
-    // Get all available courses
-    $available_courses_query = "SELECT c.id, c.code, c.name 
-                               FROM courses c 
-                               WHERE c.is_active = 1 
-                               ORDER BY c.code";
     
-    $available_courses = $conn->query($available_courses_query);
-    if (!$available_courses) {
-        throw new Exception('Failed to fetch available courses: ' . $conn->error);
+    // If class_course_id is provided, get the course_id from it
+    if ($class_course_id > 0 && $course_id <= 0) {
+        $course_query = "SELECT course_id FROM class_courses WHERE id = ? AND is_active = 1";
+        $course_stmt = $conn->prepare($course_query);
+        $course_stmt->bind_param('i', $class_course_id);
+        $course_stmt->execute();
+        $course_result = $course_stmt->get_result();
+        
+        if ($course_result->num_rows === 0) {
+            throw new Exception('Class course not found');
+        }
+        
+        $course_row = $course_result->fetch_assoc();
+        $course_id = $course_row['course_id'];
+        $course_stmt->close();
     }
-
-    $available_courses_data = [];
-    while ($course = $available_courses->fetch_assoc()) {
-        $available_courses_data[] = [
-            'id' => $course['id'],
-            'code' => $course['code'],
-            'name' => $course['name']
-        ];
-    }
-
-    // Get assigned courses for this lecturer
-    $assigned_courses_query = "SELECT c.id, c.code, c.name 
-                              FROM courses c 
-                              INNER JOIN lecturer_courses lc ON c.id = lc.course_id 
-                              WHERE lc.lecturer_id = ? AND c.is_active = 1 
-                              ORDER BY c.code";
     
-    $stmt = $conn->prepare($assigned_courses_query);
+    // Get all lecturers assigned to this course
+    $query = "
+        SELECT 
+            lc.id as lecturer_course_id,
+            l.id as lecturer_id,
+            l.name as lecturer_name
+        FROM lecturer_courses lc
+        JOIN lecturers l ON lc.lecturer_id = l.id
+        WHERE lc.course_id = ? 
+        AND lc.is_active = 1 
+        AND l.is_active = 1
+        ORDER BY l.name
+    ";
+    
+    $stmt = $conn->prepare($query);
     if (!$stmt) {
-        throw new Exception('Failed to prepare assigned courses query: ' . $conn->error);
+        throw new Exception('Failed to prepare query: ' . $conn->error);
     }
-
-    $stmt->bind_param('i', $lecturer_id);
+    
+    $stmt->bind_param('i', $course_id);
     $stmt->execute();
-    $assigned_courses_result = $stmt->get_result();
-    $stmt->close();
-
-    $assigned_courses_data = [];
-    while ($course = $assigned_courses_result->fetch_assoc()) {
-        $assigned_courses_data[] = [
-            'id' => $course['id'],
-            'code' => $course['code'],
-            'name' => $course['name']
+    $result = $stmt->get_result();
+    
+    $lecturers = [];
+    while ($row = $result->fetch_assoc()) {
+        $lecturers[] = [
+            'lecturer_course_id' => $row['lecturer_course_id'],
+            'lecturer_id' => $row['lecturer_id'],
+            'lecturer_name' => $row['lecturer_name']
         ];
     }
-
-    // Remove assigned courses from available courses
-    $assigned_course_ids = array_column($assigned_courses_data, 'id');
-    $available_courses_data = array_filter($available_courses_data, function($course) use ($assigned_course_ids) {
-        return !in_array($course['id'], $assigned_course_ids);
-    });
-
+    
+    $stmt->close();
+    
     $response['success'] = true;
-    $response['data'] = [
-        'available_courses' => array_values($available_courses_data),
-        'assigned_courses' => $assigned_courses_data
-    ];
-
+    $response['lecturers'] = $lecturers;
+    $response['message'] = 'Lecturers loaded successfully';
+    
 } catch (Exception $e) {
-    $response['error'] = $e->getMessage();
-} catch (Error $e) {
-    $response['error'] = 'System error: ' . $e->getMessage();
+    $response['success'] = false;
+    $response['message'] = $e->getMessage();
 }
 
 echo json_encode($response);

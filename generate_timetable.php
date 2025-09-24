@@ -1634,7 +1634,8 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                     l.name as lecturer_name,
                     l.id as lecturer_id,
                     s.name as stream_name,
-                    s.id as stream_id
+                    s.id as stream_id,
+                    (SELECT COUNT(*) FROM lecturer_courses lc2 WHERE lc2.course_id = co.id AND lc2.is_active = 1) as lecturer_count
                 FROM timetable t
                 JOIN class_courses cc ON t.class_course_id = cc.id
                 JOIN classes c ON cc.class_id = c.id
@@ -1661,13 +1662,25 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                 $time_slot_id = $row['time_slot_id'];
                 $room_id = $row['room_id'];
                 
+                // Determine lecturer display based on lecturer count
+                $lecturer_display = '';
+                if ($row['lecturer_count'] > 1) {
+                    $lecturer_display = 'Lecturer: multiple lecturers';
+                } elseif ($row['lecturer_name']) {
+                    $lecturer_display = $row['lecturer_name'];
+                } else {
+                    $lecturer_display = 'Not assigned';
+                }
+
                 // Store the entry directly in its slot (no spanning needed)
                 $timetable_data[$day_id][$time_slot_id][$room_id] = [
                     'id' => $row['id'],
                     'class_name' => $row['class_name'],
                     'course_code' => $row['course_code'],
                     'course_name' => $row['course_name'],
-                    'lecturer_name' => $row['lecturer_name'],
+                    'lecturer_name' => $lecturer_display,
+                    'lecturer_count' => $row['lecturer_count'],
+                    'course_id' => $row['course_id'],
                     'division_label' => $row['division_label'],
                     'hours_per_week' => $row['hours_per_week'] ?? 1,
                     'day_id' => $day_id,
@@ -1917,6 +1930,8 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                                                                      data-course-code="<?php echo htmlspecialchars($entry['course_code']); ?>"
                                                                      data-class-name="<?php echo htmlspecialchars($entry['class_name']); ?>"
                                                                      data-lecturer-name="<?php echo htmlspecialchars($entry['lecturer_name']); ?>"
+                                                                     data-lecturer-count="<?php echo $entry['lecturer_count']; ?>"
+                                                                     data-course-id="<?php echo $entry['course_id']; ?>"
                                                                      data-hours="<?php echo $entry['hours_per_week']; ?>"
                                                                      onclick="editTimetableCell(this)">
                                                                     <div class="fw-bold text-primary" style="font-size: 0.8em;">
@@ -2143,6 +2158,105 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                                 </div>
                             </div>
                         </div>
+                        
+                        <?php if ($unscheduled_assignments > 0): ?>
+                        <div class="mt-4">
+                            <h6 class="mb-3">
+                                <i class="fas fa-exclamation-triangle me-2 text-warning"></i>Unscheduled Courses
+                                <span class="badge bg-warning ms-2"><?php echo $unscheduled_assignments; ?></span>
+                            </h6>
+                            
+                            <?php
+                            // Get unscheduled courses with details and reasons
+                            $unscheduled_query = "
+                                SELECT 
+                                    cc.id as class_course_id,
+                                    c.name as class_name,
+                                    co.code as course_code,
+                                    co.name as course_name,
+                                    co.hours_per_week,
+                                    l.name as lecturer_name,
+                                    (SELECT COUNT(*) FROM lecturer_courses lc2 WHERE lc2.course_id = co.id AND lc2.is_active = 1) as lecturer_count,
+                                    CASE 
+                                        WHEN (SELECT COUNT(*) FROM lecturer_courses lc3 WHERE lc3.course_id = co.id AND lc3.is_active = 1) = 0 THEN 'No lecturer assigned'
+                                        WHEN (SELECT COUNT(*) FROM lecturer_courses lc3 WHERE lc3.course_id = co.id AND lc3.is_active = 1) > 1 THEN 'Multiple lecturers assigned'
+                                        WHEN (SELECT COUNT(*) FROM rooms r WHERE r.is_active = 1) = 0 THEN 'No rooms available'
+                                        WHEN (SELECT COUNT(*) FROM time_slots ts WHERE ts.is_active = 1) = 0 THEN 'No time slots available'
+                                        ELSE 'Scheduling conflict or insufficient resources'
+                                    END as reason
+                                FROM class_courses cc
+                                LEFT JOIN classes c ON cc.class_id = c.id
+                                LEFT JOIN courses co ON cc.course_id = co.id
+                                LEFT JOIN lecturers l ON cc.lecturer_id = l.id
+                                WHERE cc.is_active = 1 
+                                AND c.stream_id = ?
+                                AND cc.id NOT IN (
+                                    SELECT DISTINCT t.class_course_id 
+                                    FROM timetable t 
+                                    WHERE t.class_course_id IS NOT NULL
+                                )
+                                ORDER BY c.name, co.code
+                            ";
+                            
+                            $unscheduled_stmt = $conn->prepare($unscheduled_query);
+                            $unscheduled_stmt->bind_param("i", $current_stream_id);
+                            $unscheduled_stmt->execute();
+                            $unscheduled_result = $unscheduled_stmt->get_result();
+                            ?>
+                            
+                            <div class="table-responsive">
+                                <table class="table table-sm table-hover">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>Class</th>
+                                            <th>Course</th>
+                                            <th>Lecturer</th>
+                                            <th>Hours</th>
+                                            <th>Reason</th>
+                                            <th>Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php while ($unscheduled = $unscheduled_result->fetch_assoc()): ?>
+                                        <tr>
+                                            <td>
+                                                <strong><?php echo htmlspecialchars($unscheduled['class_name']); ?></strong>
+                                            </td>
+                                            <td>
+                                                <span class="fw-bold text-primary"><?php echo htmlspecialchars($unscheduled['course_code']); ?></span><br>
+                                                <small class="text-muted"><?php echo htmlspecialchars($unscheduled['course_name']); ?></small>
+                                            </td>
+                                            <td>
+                                                <?php if ($unscheduled['lecturer_count'] > 1): ?>
+                                                    <span class="badge bg-info">Multiple lecturers</span>
+                                                <?php elseif ($unscheduled['lecturer_name']): ?>
+                                                    <?php echo htmlspecialchars($unscheduled['lecturer_name']); ?>
+                                                <?php else: ?>
+                                                    <span class="text-muted">Not assigned</span>
+                                                <?php endif; ?>
+                                            </td>
+                                            <td>
+                                                <span class="badge bg-secondary"><?php echo $unscheduled['hours_per_week']; ?>h</span>
+                                            </td>
+                                            <td>
+                                                <span class="badge bg-warning"><?php echo htmlspecialchars($unscheduled['reason']); ?></span>
+                                            </td>
+                                            <td>
+                                                <button class="btn btn-sm btn-success" 
+                                                        onclick="openManualSchedulingModal(<?php echo $unscheduled['class_course_id']; ?>, '<?php echo htmlspecialchars($unscheduled['class_name']); ?>', '<?php echo htmlspecialchars($unscheduled['course_code']); ?>', '<?php echo htmlspecialchars($unscheduled['course_name']); ?>', <?php echo $unscheduled['hours_per_week']; ?>, <?php echo $unscheduled['lecturer_count']; ?>)">
+                                                    <i class="fas fa-plus me-1"></i>Add to Timetable
+                                                </button>
+                                            </td>
+                                        </tr>
+                                        <?php endwhile; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <?php
+                            $unscheduled_stmt->close();
+                            ?>
+                        </div>
+                        <?php endif; ?>
                     </div>
                 </div>
             </div>
@@ -2917,9 +3031,11 @@ function editTimetableCell(element) {
     const className = element.dataset.className;
     const lecturerName = element.dataset.lecturerName;
     const hours = element.dataset.hours;
+    const lecturerCount = element.dataset.lecturerCount || 1;
+    const courseId = element.dataset.courseId;
     
     // Show edit modal
-    showEditModal(entryId, dayId, timeSlotId, roomId, courseCode, className, lecturerName, hours);
+    showEditModal(entryId, dayId, timeSlotId, roomId, courseCode, className, lecturerName, hours, lecturerCount, courseId);
 }
 
 // Generate room options for the edit modal
@@ -2940,29 +3056,29 @@ function generateRoomOptions(selectedRoomId) {
 }
 
 // Show edit modal
-function showEditModal(entryId, dayId, timeSlotId, roomId, courseCode, className, lecturerName, hours) {
+function showEditModal(entryId, dayId, timeSlotId, roomId, courseCode, className, lecturerName, hours, lecturerCount, courseId) {
     // Fetch time slots from database
     fetch('get_stream_time_slots.php')
         .then(response => response.json())
         .then(data => {
             if (data.success) {
                 const timeSlots = data.data;
-                showEditModalWithTimeSlots(entryId, dayId, timeSlotId, roomId, courseCode, className, lecturerName, hours, timeSlots);
+                showEditModalWithTimeSlots(entryId, dayId, timeSlotId, roomId, courseCode, className, lecturerName, hours, lecturerCount, courseId, timeSlots);
             } else {
                 console.error('Failed to fetch time slots:', data.error);
                 // Fallback to hardcoded time slots
-                showEditModalWithTimeSlots(entryId, dayId, timeSlotId, roomId, courseCode, className, lecturerName, hours, []);
+                showEditModalWithTimeSlots(entryId, dayId, timeSlotId, roomId, courseCode, className, lecturerName, hours, lecturerCount, courseId, []);
             }
         })
         .catch(error => {
             console.error('Error fetching time slots:', error);
             // Fallback to hardcoded time slots
-            showEditModalWithTimeSlots(entryId, dayId, timeSlotId, roomId, courseCode, className, lecturerName, hours, []);
+            showEditModalWithTimeSlots(entryId, dayId, timeSlotId, roomId, courseCode, className, lecturerName, hours, lecturerCount, courseId, []);
         });
 }
 
 // Show edit modal with time slots data
-function showEditModalWithTimeSlots(entryId, dayId, timeSlotId, roomId, courseCode, className, lecturerName, hours, timeSlots) {
+function showEditModalWithTimeSlots(entryId, dayId, timeSlotId, roomId, courseCode, className, lecturerName, hours, lecturerCount, courseId, timeSlots) {
     // Generate time slot options
     let timeSlotOptions = '<option value="">Select Time Slot</option>';
     if (timeSlots.length > 0) {
@@ -3044,6 +3160,20 @@ function showEditModalWithTimeSlots(entryId, dayId, timeSlotId, roomId, courseCo
                                 </div>
                             </div>
                             
+                            ${lecturerCount > 1 ? `
+                            <div class="row">
+                                <div class="col-md-12">
+                                    <div class="mb-3">
+                                        <label for="edit_lecturer" class="form-label">Select Lecturer</label>
+                                        <select class="form-select" id="edit_lecturer" name="lecturer_course_id">
+                                            <option value="">Loading lecturers...</option>
+                                        </select>
+                                        <small class="form-text text-muted">This course has multiple lecturers assigned. Please select one.</small>
+                                    </div>
+                                </div>
+                            </div>
+                            ` : ''}
+                            
                             <div class="mb-3">
                                 <label class="form-label">Current Information</label>
                                 <div class="alert alert-info">
@@ -3078,6 +3208,36 @@ function showEditModalWithTimeSlots(entryId, dayId, timeSlotId, roomId, courseCo
     // Show modal
     const modal = new bootstrap.Modal(document.getElementById('editTimetableModal'));
     modal.show();
+    
+    // Load lecturers if multiple lecturers are available
+    if (lecturerCount > 1 && courseId) {
+        loadCourseLecturers(courseId);
+    }
+}
+
+// Load lecturers for a course
+function loadCourseLecturers(courseId) {
+    fetch(`get_lecturer_courses.php?course_id=${courseId}`)
+        .then(response => response.json())
+        .then(data => {
+            const lecturerSelect = document.getElementById('edit_lecturer');
+            if (lecturerSelect && data.success) {
+                lecturerSelect.innerHTML = '<option value="">Select Lecturer</option>';
+                data.lecturers.forEach(lecturer => {
+                    lecturerSelect.innerHTML += `<option value="${lecturer.lecturer_course_id}">${lecturer.lecturer_name}</option>`;
+                });
+            } else {
+                console.error('Failed to load lecturers:', data.error);
+                lecturerSelect.innerHTML = '<option value="">Error loading lecturers</option>';
+            }
+        })
+        .catch(error => {
+            console.error('Error loading lecturers:', error);
+            const lecturerSelect = document.getElementById('edit_lecturer');
+            if (lecturerSelect) {
+                lecturerSelect.innerHTML = '<option value="">Error loading lecturers</option>';
+            }
+        });
 }
 
 // Save timetable edit
@@ -3115,6 +3275,221 @@ function saveTimetableEdit() {
     .catch(error => {
         console.error('Error:', error);
         showErrorMessage('Error updating timetable entry. Please try again.');
+    })
+    .finally(() => {
+        // Restore button state
+        saveBtn.innerHTML = originalText;
+        saveBtn.disabled = false;
+    });
+}
+
+// Manual scheduling modal functions
+function openManualSchedulingModal(classCourseId, className, courseCode, courseName, hoursPerWeek, lecturerCount) {
+    // Create modal HTML
+    const modalHtml = `
+        <div class="modal fade" id="manualSchedulingModal" tabindex="-1" aria-labelledby="manualSchedulingModalLabel" aria-hidden="true">
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="manualSchedulingModalLabel">
+                            <i class="fas fa-plus-circle me-2"></i>Add Course to Timetable
+                        </h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <form id="manualSchedulingForm">
+                            <input type="hidden" id="manual_class_course_id" name="class_course_id" value="${classCourseId}">
+                            
+                            <div class="mb-3">
+                                <label class="form-label">Course Information</label>
+                                <div class="alert alert-info">
+                                    <strong>Class:</strong> ${className}<br>
+                                    <strong>Course:</strong> ${courseCode} - ${courseName}<br>
+                                    <strong>Duration:</strong> ${hoursPerWeek} hour(s)
+                                </div>
+                            </div>
+                            
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="manual_day" class="form-label">Day</label>
+                                        <select class="form-select" id="manual_day" name="day_id" required>
+                                            <option value="">Select Day</option>
+                                            <option value="1">Monday</option>
+                                            <option value="2">Tuesday</option>
+                                            <option value="3">Wednesday</option>
+                                            <option value="4">Thursday</option>
+                                            <option value="5">Friday</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="manual_time_slot" class="form-label">Time Slot</label>
+                                        <select class="form-select" id="manual_time_slot" name="time_slot_id" required>
+                                            <option value="">Select Time Slot</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="manual_room" class="form-label">Room</label>
+                                        <select class="form-select" id="manual_room" name="room_id" required>
+                                            <option value="">Select Room</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="manual_lecturer" class="form-label">Lecturer</label>
+                                        <select class="form-select" id="manual_lecturer" name="lecturer_course_id">
+                                            <option value="">Loading lecturers...</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="manual_semester" class="form-label">Semester</label>
+                                <select class="form-select" id="manual_semester" name="semester" required>
+                                    <option value="1" selected>First Semester</option>
+                                    <option value="2">Second Semester</option>
+                                </select>
+                            </div>
+                        </form>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="button" class="btn btn-success" onclick="saveManualScheduling()">
+                            <i class="fas fa-plus me-1"></i>Add to Timetable
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Remove existing modal if any
+    const existingModal = document.getElementById('manualSchedulingModal');
+    if (existingModal) {
+        existingModal.remove();
+    }
+    
+    // Add modal to body
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    
+    // Load time slots and rooms
+    loadTimeSlotsForManualScheduling();
+    loadRoomsForManualScheduling();
+    
+    // Load lecturers if multiple are available
+    if (lecturerCount > 1) {
+        loadLecturersForManualScheduling(classCourseId);
+    } else {
+        document.getElementById('manual_lecturer').innerHTML = '<option value="">No lecturer selection needed</option>';
+    }
+    
+    // Show modal
+    const modal = new bootstrap.Modal(document.getElementById('manualSchedulingModal'));
+    modal.show();
+}
+
+function loadTimeSlotsForManualScheduling() {
+    fetch('get_stream_time_slots.php')
+        .then(response => response.json())
+        .then(data => {
+            const timeSlotSelect = document.getElementById('manual_time_slot');
+            if (timeSlotSelect && data.success) {
+                timeSlotSelect.innerHTML = '<option value="">Select Time Slot</option>';
+                data.data.forEach(slot => {
+                    const startTime = slot.start_time.substring(0, 5);
+                    const endTime = slot.end_time.substring(0, 5);
+                    timeSlotSelect.innerHTML += `<option value="${slot.id}">${startTime} - ${endTime}</option>`;
+                });
+            }
+        })
+        .catch(error => {
+            console.error('Error loading time slots:', error);
+        });
+}
+
+function loadRoomsForManualScheduling() {
+    fetch('api_timetable_template.php?action=get_rooms')
+        .then(response => response.json())
+        .then(data => {
+            const roomSelect = document.getElementById('manual_room');
+            if (roomSelect && data.success) {
+                roomSelect.innerHTML = '<option value="">Select Room</option>';
+                data.data.forEach(room => {
+                    roomSelect.innerHTML += `<option value="${room.id}">${room.name} (Capacity: ${room.capacity})</option>`;
+                });
+            }
+        })
+        .catch(error => {
+            console.error('Error loading rooms:', error);
+        });
+}
+
+function loadLecturersForManualScheduling(classCourseId) {
+    fetch(`get_lecturer_courses.php?class_course_id=${classCourseId}`)
+        .then(response => response.json())
+        .then(data => {
+            const lecturerSelect = document.getElementById('manual_lecturer');
+            if (lecturerSelect && data.success) {
+                lecturerSelect.innerHTML = '<option value="">Select Lecturer</option>';
+                data.lecturers.forEach(lecturer => {
+                    lecturerSelect.innerHTML += `<option value="${lecturer.lecturer_course_id}">${lecturer.lecturer_name}</option>`;
+                });
+            } else {
+                lecturerSelect.innerHTML = '<option value="">No lecturers available</option>';
+            }
+        })
+        .catch(error => {
+            console.error('Error loading lecturers:', error);
+            const lecturerSelect = document.getElementById('manual_lecturer');
+            if (lecturerSelect) {
+                lecturerSelect.innerHTML = '<option value="">Error loading lecturers</option>';
+            }
+        });
+}
+
+function saveManualScheduling() {
+    const form = document.getElementById('manualSchedulingForm');
+    const formData = new FormData(form);
+    
+    // Add action
+    formData.append('action', 'add_manual_timetable_entry');
+    
+    // Show loading state
+    const saveBtn = document.querySelector('#manualSchedulingModal .btn-success');
+    const originalText = saveBtn.innerHTML;
+    saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Adding...';
+    saveBtn.disabled = true;
+    
+    // Send AJAX request
+    fetch('api_timetable_edit.php', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showSuccessMessage('Course added to timetable successfully!');
+            // Close modal
+            const modal = bootstrap.Modal.getInstance(document.getElementById('manualSchedulingModal'));
+            modal.hide();
+            // Reload page to show updated data
+            location.reload();
+        } else {
+            showErrorMessage('Failed to add course to timetable: ' + data.message);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        showErrorMessage('Error adding course to timetable. Please try again.');
     })
     .finally(() => {
         // Restore button state
