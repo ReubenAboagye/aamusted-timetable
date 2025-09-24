@@ -77,7 +77,8 @@ if ($can_query) {
 		"co.name AS course_name",
 		"IFNULL(l.name, '') AS lecturer_name",
 		"r.name AS room_name",
-		"r.capacity AS room_capacity"
+		"r.capacity AS room_capacity",
+		"(SELECT COUNT(*) FROM lecturer_courses lc2 WHERE lc2.course_id = co.id AND lc2.is_active = 1) as lecturer_count"
 	];
 
 	$joins = [];
@@ -452,7 +453,13 @@ if (!$do_export) {
 											echo '<td><strong>' . htmlspecialchars($row['class_name']) . '</strong></td>';
 											echo '<td><span class="badge bg-primary division-badge">' . htmlspecialchars($division) . '</span></td>';
 											echo '<td>' . htmlspecialchars(($row['course_code'] ? ($row['course_code'] . ' - ') : '') . $row['course_name']) . '</td>';
-											echo '<td>' . htmlspecialchars($row['lecturer_name']) . '</td>';
+											echo '<td>';
+											if ($row['lecturer_count'] > 1) {
+												echo 'Lecturer: multiple lecturers';
+											} else {
+												echo htmlspecialchars($row['lecturer_name']);
+											}
+											echo '</td>';
 											echo '<td>' . htmlspecialchars($row['room_name']) . '</td>';
 											echo '</tr>';
 										$lastDay = $row['day_name'];
