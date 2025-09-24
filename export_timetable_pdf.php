@@ -47,7 +47,8 @@ $select_parts = [
     "co.name AS course_name",
     "IFNULL(l.name, '') AS lecturer_name",
     "r.name AS room_name",
-    "r.capacity AS room_capacity"
+    "r.capacity AS room_capacity",
+    "(SELECT COUNT(*) FROM lecturer_courses lc2 WHERE lc2.course_id = co.id AND lc2.is_active = 1) as lecturer_count"
 ];
 
 $joins = [];
@@ -164,10 +165,17 @@ foreach ($dayToRows as $dayName => $dayRows) {
         if (!$isDivisionView) {
             $rowsHtml .= '<td><strong>' . htmlspecialchars($r['class_name'] . (isset($r['division_label']) && $r['division_label'] ? ' ' . $r['division_label'] : '')) . '</strong></td>';
         }
+        $lecturerDisplay = '';
+        if (isset($r['lecturer_count']) && $r['lecturer_count'] > 1) {
+            $lecturerDisplay = 'Lecturer: multiple lecturers';
+        } else {
+            $lecturerDisplay = htmlspecialchars($r['lecturer_name']);
+        }
+        
         $rowsHtml
             .= '<td>' . htmlspecialchars(($r['course_code'] ? ($r['course_code'] . ' - ') : '') . $r['course_name']) . '</td>'
             . '<td>' . htmlspecialchars($r['room_name']) . '</td>'
-            . '<td>' . htmlspecialchars($r['lecturer_name']) . '</td>'
+            . '<td>' . $lecturerDisplay . '</td>'
             . '</tr>';
         $first = false;
         $lastPeriod = $period;
