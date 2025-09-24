@@ -1057,7 +1057,7 @@ $level_result = $conn->query($level_sql);
                         <input type="text" name="name" id="edit_class_name" class="form-control" required>
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">Total Capacity</label>
+                        <label class="form-label">Total Students</label>
                         <input type="number" name="total_capacity" id="edit_total_capacity" class="form-control" min="1">
                     </div>
                     <div class="mb-3">
