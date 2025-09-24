@@ -131,6 +131,7 @@ foreach ($conflictGroups as $conflictGroup) {
 }
 
 include 'includes/header.php';
+include 'includes/sidebar.php';
 ?>
 
 <div id="mainContent" class="main-content">
