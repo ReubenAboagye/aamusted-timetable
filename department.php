@@ -47,30 +47,7 @@ $departments = [];
         outline: none;
     }
     
-    .btn-loading {
-        position: relative;
-        pointer-events: none;
-    }
     
-    .btn-loading::after {
-        content: "";
-        position: absolute;
-        width: 16px;
-        height: 16px;
-        top: 50%;
-        left: 50%;
-        margin-left: -8px;
-        margin-top: -8px;
-        border: 2px solid transparent;
-        border-top-color: #ffffff;
-        border-radius: 50%;
-        animation: spin 1s linear infinite;
-    }
-    
-    @keyframes spin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
-    }
     
     .fade-in {
         animation: fadeInRow 0.5s ease-in;
@@ -571,6 +548,7 @@ function loadInitialData() {
     });
 }
 
+
 function renderTable() {
     const tbody = $('#tableBody');
     tbody.empty();
@@ -578,7 +556,7 @@ function renderTable() {
     if (departments.length === 0) {
         tbody.append(`
             <tr>
-                <td colspan="6" class="empty-state">
+                <td colspan="5" class="empty-state">
                     <i class="fas fa-info-circle"></i>
                     <p>No departments found</p>
                 </td>
@@ -590,7 +568,6 @@ function renderTable() {
                 <tr data-id="${dept.id}">
                     <td><strong>${AjaxUtils.escapeHtml(dept.code)}</strong></td>
                     <td>${AjaxUtils.escapeHtml(dept.name)}</td>
-                    <td>${AjaxUtils.escapeHtml(dept.description || '')}</td>
                     <td><span class="badge bg-info">${dept.course_count || 0}</span></td>
                     <td>
                         <span class="badge ${dept.is_active ? 'bg-success' : 'bg-secondary'}">
@@ -599,7 +576,7 @@ function renderTable() {
                     </td>
                     <td>
                         <button class="btn btn-warning btn-sm me-1" 
-                                onclick="openEditModal(${dept.id}, '${AjaxUtils.escapeHtml(dept.name)}', '${AjaxUtils.escapeHtml(dept.code)}', '${AjaxUtils.escapeHtml(dept.description || '')}', ${dept.is_active})">
+                                onclick="openEditModal(${dept.id}, '${AjaxUtils.escapeHtml(dept.name)}', '${AjaxUtils.escapeHtml(dept.code)}', ${dept.is_active})">
                             <i class="fas fa-edit"></i>
                         </button>
                         <button class="btn btn-danger btn-sm" 
