@@ -16,7 +16,7 @@ try {
     // Remove server-side form processing - now handled by AJAX
     // All CRUD operations are now handled by ajax_programs.php
 
-} catch (Exception $e) {
+        } catch (Exception $e) {
     // Log the exception
     error_log("Exception in programs.php: " . $e->getMessage());
     
@@ -26,7 +26,7 @@ try {
     echo '<p>Please contact the administrator or try refreshing the page.</p>';
     echo '<small>Error details have been logged.</small>';
     echo '</div>';
-} finally {
+        } finally {
     if (isset($conn)) {
         $conn->close();
     }
@@ -83,8 +83,8 @@ try {
                                 <span class="visually-hidden">Loading...</span>
                             </div>
                             <p class="mt-2">Loading programs...</p>
-                        </td>
-                    </tr>
+                                </td>
+                            </tr>
                 </tbody>
             </table>
         </div>
@@ -414,7 +414,7 @@ async function handleAddProgram(e) {
             bootstrap.Modal.getInstance(document.getElementById('addProgramModal')).hide();
             e.target.reset();
             loadPrograms(); // Reload the table
-        } else {
+            } else {
             showAlert('error', result.message, 'addFormAlert');
         }
     } catch (error) {
@@ -514,7 +514,7 @@ async function deleteProgram(id) {
         if (result.success) {
             showAlert('success', result.message);
             loadPrograms(); // Reload the table
-        } else {
+    } else {
             showAlert('error', result.message);
         }
     } catch (error) {

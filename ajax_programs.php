@@ -47,7 +47,7 @@ try {
         $department_id = (int)$_POST['department_id'];
         $code = trim($_POST['code']);
         $duration = (int)$_POST['duration'];
-        $is_active = isset($_POST['is_active']) ? 1 : 0;
+        $is_active = isset($_POST['is_active']) ? 1 : 1; // Default to active for new programs
 
         // Validate department exists
         $dept_check = $conn->prepare("SELECT id FROM departments WHERE id = ? AND is_active = 1");
@@ -122,7 +122,6 @@ try {
         } else {
             throw new Exception("Error adding program: " . $stmt->error);
         }
-        $stmt->close();
 
     } elseif ($action === 'edit') {
         // Validate required fields

@@ -396,6 +396,7 @@ $departments = [];
 </div>
 
 <script>
+<<<<<<< HEAD
 $(document).ready(function() {
     // Global variables
     let courses = [];
@@ -418,6 +419,15 @@ $(document).ready(function() {
 
     // Load initial data from server
     function loadInitialData() {
+=======
+// Cache bust: <?php echo time(); ?>
+// Global variables
+let courses = [];
+let departments = [];
+
+// Load initial data from server - defined globally
+window.loadInitialData = function() {
+>>>>>>> b447de458b35e6b4d85299dba59d57fddd00ea6a
         // Set a timeout for loading
         const timeoutId = setTimeout(() => {
             const loadingRow = document.getElementById('loadingRow');
@@ -427,7 +437,7 @@ $(document).ready(function() {
                         <div class="alert alert-warning">
                             <i class="fas fa-exclamation-triangle me-2"></i>
                             Loading is taking longer than expected. 
-                            <button class="btn btn-sm btn-outline-warning ms-2" onclick="loadInitialData()">
+                            <button class="btn btn-sm btn-outline-warning ms-2" onclick="window.loadInitialData()">
                                 <i class="fas fa-redo me-1"></i>Retry
                             </button>
                         </div>
@@ -466,7 +476,7 @@ $(document).ready(function() {
                         <div class="alert alert-danger">
                             <i class="fas fa-exclamation-circle me-2"></i>
                             Failed to load data: ${error.message}
-                            <button class="btn btn-sm btn-outline-danger ms-2" onclick="loadInitialData()">
+                            <button class="btn btn-sm btn-outline-danger ms-2" onclick="window.loadInitialData()">
                                 <i class="fas fa-redo me-1"></i>Retry
                             </button>
                         </div>
@@ -474,177 +484,188 @@ $(document).ready(function() {
                 </tr>
             `;
         });
-    }
+}
 
-    // Populate department dropdowns
-    function populateDepartmentDropdowns() {
-        const addSelect = $('#course_department');
-        const editSelect = $('#edit_course_department');
-        
-        // Clear existing options except the first one
-        addSelect.find('option:not(:first)').remove();
-        editSelect.find('option:not(:first)').remove();
-        
-        departments.forEach(dept => {
-            if (dept.is_active) {
-                addSelect.append(`<option value="${dept.id}">${AjaxUtils.escapeHtml(dept.name)}</option>`);
-                editSelect.append(`<option value="${dept.id}">${AjaxUtils.escapeHtml(dept.name)}</option>`);
-            }
-        });
-    }
+// Populate department dropdowns - moved to global scope
+window.populateDepartmentDropdowns = function() {
+    const addSelect = $('#course_department');
+    const editSelect = $('#edit_course_department');
+    
+    // Clear existing options except the first one
+    addSelect.find('option:not(:first)').remove();
+    editSelect.find('option:not(:first)').remove();
+    
+    departments.forEach(dept => {
+        if (dept.is_active) {
+            addSelect.append(`<option value="${dept.id}">${AjaxUtils.escapeHtml(dept.name)}</option>`);
+            editSelect.append(`<option value="${dept.id}">${AjaxUtils.escapeHtml(dept.name)}</option>`);
+        }
+    });
+}
 
-    // Render table data
-    function renderTable() {
-        const tbody = $('#tableBody');
-        tbody.empty();
+// Render table data - moved to global scope
+window.renderTable = function() {
+    const tbody = $('#tableBody');
+    tbody.empty();
 
-        if (courses.length === 0) {
+    if (courses.length === 0) {
+        tbody.append(`
+            <tr>
+                <td colspan="6" class="empty-state">
+                    <i class="fas fa-info-circle"></i>
+                    <p>No courses found</p>
+                </td>
+            </tr>
+        `);
+    } else {
+        courses.forEach(course => {
             tbody.append(`
-                <tr>
-                    <td colspan="6" class="empty-state">
-                        <i class="fas fa-info-circle"></i>
-                        <p>No courses found</p>
+                <tr data-id="${course.id}">
+                    <td><strong>${AjaxUtils.escapeHtml(course.code)}</strong></td>
+                    <td>${AjaxUtils.escapeHtml(course.name)}</td>
+                    <td>${AjaxUtils.escapeHtml(course.department_name || 'N/A')}</td>
+                    <td><span class="badge bg-info">${course.hours_per_week}</span></td>
+                    <td>
+                        <span class="badge ${course.is_active ? 'bg-success' : 'bg-secondary'}">
+                            ${course.is_active ? 'Active' : 'Inactive'}
+                        </span>
+                    </td>
+                    <td>
+                        <button class="btn btn-warning btn-sm me-1" 
+                                onclick="openEditModal(${course.id}, '${AjaxUtils.escapeHtml(course.name)}', '${AjaxUtils.escapeHtml(course.code)}', ${course.department_id}, ${course.hours_per_week}, ${course.is_active})">
+                            <i class="fas fa-edit"></i>
+                        </button>
+                        <button class="btn btn-danger btn-sm" 
+                                onclick="deleteCourse(${course.id})">
+                            <i class="fas fa-trash"></i>
+                        </button>
                     </td>
                 </tr>
             `);
-        } else {
-            courses.forEach(course => {
-                tbody.append(`
-                    <tr data-id="${course.id}">
-                        <td><strong>${AjaxUtils.escapeHtml(course.code)}</strong></td>
-                        <td>${AjaxUtils.escapeHtml(course.name)}</td>
-                        <td>${AjaxUtils.escapeHtml(course.department_name || 'N/A')}</td>
-                        <td><span class="badge bg-info">${course.hours_per_week}</span></td>
-                        <td>
-                            <span class="badge ${course.is_active ? 'bg-success' : 'bg-secondary'}">
-                                ${course.is_active ? 'Active' : 'Inactive'}
-                            </span>
-                        </td>
-                        <td>
-                            <button class="btn btn-warning btn-sm me-1" 
-                                    onclick="openEditModal(${course.id}, '${AjaxUtils.escapeHtml(course.name)}', '${AjaxUtils.escapeHtml(course.code)}', ${course.department_id}, ${course.hours_per_week}, ${course.is_active})">
-                                <i class="fas fa-edit"></i>
-                            </button>
-                            <button class="btn btn-danger btn-sm" 
-                                    onclick="deleteCourse(${course.id})">
-                                <i class="fas fa-trash"></i>
-                            </button>
-                        </td>
-                    </tr>
-                `);
-            });
-        }
+        });
     }
+}
 
-    // Handle add course form submission
-    function handleAddCourse(e) {
-        e.preventDefault();
-        
-        // Validate form
-        if (!AjaxUtils.validateForm('addCourseForm')) {
-            AjaxUtils.showAlert('Please fill in all required fields.', 'warning');
-            return;
+$(document).ready(function() {
+    // Load initial data
+    window.loadInitialData();
+
+    // Form submission handlers
+    $('#addCourseForm').on('submit', handleAddCourse);
+    $('#editCourseForm').on('submit', handleEditCourse);
+    
+    // Initialize search functionality
+    AjaxUtils.initSearch('searchInput', 'tableBody');
+});
+
+// Handle add course form submission
+function handleAddCourse(e) {
+    e.preventDefault();
+    
+    // Validate form
+    if (!AjaxUtils.validateForm('addCourseForm')) {
+        AjaxUtils.showAlert('Please fill in all required fields.', 'warning');
+        return;
+    }
+    
+    const formData = {
+        name: $('#course_name').val(),
+        code: $('#course_code').val(),
+        department_id: $('#course_department').val(),
+        hours_per_week: $('#course_hours').val(),
+        is_active: $('#course_is_active').is(':checked') ? 1 : 0
+    };
+    
+    // Show loading state
+    AjaxUtils.setButtonLoading('addSubmitBtn', true, 'Adding...');
+    
+    AjaxUtils.makeRequest('course', 'add', formData)
+    .then(data => {
+        if (data.success) {
+            AjaxUtils.showAlert(data.message, 'success');
+            $('#addCourseModal').modal('hide');
+            e.target.reset();
+            AjaxUtils.clearFormValidation('addCourseForm');
+            
+            // Add new course to list
+            courses.push({
+                id: data.data.id,
+                name: formData.name,
+                code: formData.code,
+                department_id: formData.department_id,
+                hours_per_week: formData.hours_per_week,
+                is_active: formData.is_active,
+                department_name: departments.find(d => d.id == formData.department_id)?.name || 'N/A'
+            });
+            renderTable();
+            AjaxUtils.addRowAnimation(data.data.id);
+        } else {
+            AjaxUtils.showAlert(data.message, 'danger');
         }
-        
-        const formData = {
-            name: $('#course_name').val(),
-            code: $('#course_code').val(),
-            department_id: $('#course_department').val(),
-            hours_per_week: $('#course_hours').val(),
-            is_active: $('#course_is_active').is(':checked') ? 1 : 0
-        };
-        
-        // Show loading state
-        AjaxUtils.setButtonLoading('addSubmitBtn', true, 'Adding...');
-        
-        AjaxUtils.makeRequest('course', 'add', formData)
-        .then(data => {
-            if (data.success) {
-                AjaxUtils.showAlert(data.message, 'success');
-                $('#addCourseModal').modal('hide');
-                e.target.reset();
-                AjaxUtils.clearFormValidation('addCourseForm');
-                
-                // Add new course to list
-                courses.push({
-                    id: data.data.id,
+    })
+    .catch(error => {
+        AjaxUtils.showAlert('Error adding course: ' + error.message, 'danger');
+    })
+    .finally(() => {
+        AjaxUtils.setButtonLoading('addSubmitBtn', false);
+    });
+}
+
+// Handle edit course form submission
+function handleEditCourse(e) {
+    e.preventDefault();
+    
+    // Validate form
+    if (!AjaxUtils.validateForm('editCourseForm')) {
+        AjaxUtils.showAlert('Please fill in all required fields.', 'warning');
+        return;
+    }
+    
+    const formData = {
+        id: $('#edit_course_id').val(),
+        name: $('#edit_course_name').val(),
+        code: $('#edit_course_code').val(),
+        department_id: $('#edit_course_department').val(),
+        hours_per_week: $('#edit_course_hours').val(),
+        is_active: $('#edit_course_is_active').is(':checked') ? 1 : 0
+    };
+    
+    // Show loading state
+    AjaxUtils.setButtonLoading('editSubmitBtn', true, 'Updating...');
+    
+    AjaxUtils.makeRequest('course', 'edit', formData)
+    .then(data => {
+        if (data.success) {
+            AjaxUtils.showAlert(data.message, 'success');
+            $('#editCourseModal').modal('hide');
+            AjaxUtils.clearFormValidation('editCourseForm');
+            
+            // Update course in list
+            const index = courses.findIndex(course => course.id == formData.id);
+            if (index !== -1) {
+                courses[index] = {
+                    ...courses[index],
                     name: formData.name,
                     code: formData.code,
                     department_id: formData.department_id,
                     hours_per_week: formData.hours_per_week,
                     is_active: formData.is_active,
                     department_name: departments.find(d => d.id == formData.department_id)?.name || 'N/A'
-                });
+                };
                 renderTable();
-                AjaxUtils.addRowAnimation(data.data.id);
-            } else {
-                AjaxUtils.showAlert(data.message, 'danger');
+                AjaxUtils.addRowAnimation(formData.id);
             }
-        })
-        .catch(error => {
-            AjaxUtils.showAlert('Error adding course: ' + error.message, 'danger');
-        })
-        .finally(() => {
-            AjaxUtils.setButtonLoading('addSubmitBtn', false);
-        });
-    }
-
-    // Handle edit course form submission
-    function handleEditCourse(e) {
-        e.preventDefault();
-        
-        // Validate form
-        if (!AjaxUtils.validateForm('editCourseForm')) {
-            AjaxUtils.showAlert('Please fill in all required fields.', 'warning');
-            return;
+        } else {
+            AjaxUtils.showAlert(data.message, 'danger');
         }
-        
-        const formData = {
-            id: $('#edit_course_id').val(),
-            name: $('#edit_course_name').val(),
-            code: $('#edit_course_code').val(),
-            department_id: $('#edit_course_department').val(),
-            hours_per_week: $('#edit_course_hours').val(),
-            is_active: $('#edit_course_is_active').is(':checked') ? 1 : 0
-        };
-        
-        // Show loading state
-        AjaxUtils.setButtonLoading('editSubmitBtn', true, 'Updating...');
-        
-        AjaxUtils.makeRequest('course', 'edit', formData)
-        .then(data => {
-            if (data.success) {
-                AjaxUtils.showAlert(data.message, 'success');
-                $('#editCourseModal').modal('hide');
-                AjaxUtils.clearFormValidation('editCourseForm');
-                
-                // Update course in list
-                const index = courses.findIndex(course => course.id == formData.id);
-                if (index !== -1) {
-                    courses[index] = {
-                        ...courses[index],
-                        name: formData.name,
-                        code: formData.code,
-                        department_id: formData.department_id,
-                        hours_per_week: formData.hours_per_week,
-                        is_active: formData.is_active,
-                        department_name: departments.find(d => d.id == formData.department_id)?.name || 'N/A'
-                    };
-                    renderTable();
-                    AjaxUtils.addRowAnimation(formData.id);
-                }
-            } else {
-                AjaxUtils.showAlert(data.message, 'danger');
-            }
-        })
-        .catch(error => {
-            AjaxUtils.showAlert('Error updating course: ' + error.message, 'danger');
-        })
-        .finally(() => {
-            AjaxUtils.setButtonLoading('editSubmitBtn', false);
-        });
-    }
-});
+    })
+    .catch(error => {
+        AjaxUtils.showAlert('Error updating course: ' + error.message, 'danger');
+    })
+    .finally(() => {
+        AjaxUtils.setButtonLoading('editSubmitBtn', false);
+    });
+}
 
 // Global functions for button clicks
 function refreshData() {
