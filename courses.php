@@ -656,26 +656,7 @@ function deleteCourse(id) {
         deleteBtn.innerHTML = originalContent;
         deleteBtn.disabled = false;
     });
-<<<<<<< Current (Your changes)
-<<<<<<< Current (Your changes)
-<<<<<<< Current (Your changes)
-});
-</script>
-=======
 }
 </script>
 
 <?php include 'includes/footer.php'; ?>
->>>>>>> Incoming (Background Agent changes)
-=======
-}
-</script>
-
-<?php include 'includes/footer.php'; ?>
->>>>>>> Incoming (Background Agent changes)
-=======
-}
-</script>
-
-<?php include 'includes/footer.php'; ?>
->>>>>>> Incoming (Background Agent changes)
