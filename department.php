@@ -35,7 +35,10 @@ $departments = [];
         padding: 10px 20px;
         width: 100%;
         max-width: 400px;
+        height: 38px; /* Match button height */
         transition: all 0.3s ease;
+        display: flex;
+        align-items: center;
     }
     
     .search-input:focus {
@@ -88,13 +91,88 @@ $departments = [];
         border-color: #dc3545;
         box-shadow: 0 0 0 0.2rem rgba(220, 53, 69, 0.25);
     }
+    
+    /* Enhanced header styling for better alignment */
+    .table-header {
+        min-height: 60px;
+        flex-wrap: wrap;
+    }
+    
+    .table-header h4 {
+        margin-bottom: 0;
+        flex-shrink: 0;
+    }
+    
+    .table-header .d-flex {
+        flex-wrap: wrap;
+        gap: 0.5rem;
+    }
+    
+    .search-container {
+        flex-shrink: 0;
+        min-width: 200px;
+        display: flex;
+        align-items: center;
+    }
+    
+    /* Ensure buttons and search input have consistent height */
+    .table-header .btn {
+        height: 38px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    
+    
+    @media (max-width: 768px) {
+        .table-header {
+            flex-direction: column;
+            align-items: stretch !important;
+            gap: 1rem;
+        }
+        
+        .table-header h4 {
+            text-align: center;
+        }
+        
+        .table-header .d-flex {
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        
+        .search-container {
+            order: 1;
+            margin-bottom: 0.5rem;
+        }
+        
+        .search-input {
+            max-width: 100%;
+        }
+    }
+    
+    @media (max-width: 576px) {
+        .table-header .d-flex {
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        
+        .search-container {
+            order: 0;
+            margin-bottom: 0.5rem;
+        }
+        
+        .btn {
+            width: 100%;
+            margin-bottom: 0.25rem;
+        }
+    }
 </style>
 
 <div class="main-content" id="mainContent">
     <div class="table-container">
         <div class="table-header d-flex justify-content-between align-items-center">
             <h4><i class="fas fa-building me-2"></i>Department Management</h4>
-            <div class="d-flex gap-2">
+            <div class="d-flex gap-2 align-items-center">
                 <!-- Search functionality -->
                 <div class="search-container me-3">
                     <input type="text" id="searchInput" class="form-control search-input" placeholder="Search departments...">
@@ -102,7 +180,7 @@ $departments = [];
                 <button class="btn btn-outline-light me-2" onclick="refreshData()" title="Refresh Data">
                     <i class="fas fa-sync-alt me-1"></i>Refresh
                 </button>
-                <button class="btn btn-light" data-bs-toggle="modal" data-bs-target="#addDepartmentModal">
+                <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addDepartmentModal">
                     <i class="fas fa-plus me-1"></i>Add Department
                 </button>
             </div>
