@@ -94,24 +94,110 @@ $table_data = [];
             transform: translateY(0);
         }
     }
+    
+    /* Enhanced button styling */
+    .btn-enhanced {
+        border-radius: 8px;
+        font-weight: 500;
+        transition: all 0.3s ease;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    .btn-enhanced:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+    }
+    
+    .btn-enhanced:active {
+        transform: translateY(0);
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    /* Search input styling */
+    .search-input {
+        border-radius: 0 8px 8px 0;
+        border: 2px solid #e9ecef;
+        border-left: none;
+        padding: 0.5rem 1rem;
+        transition: all 0.3s ease;
+        min-width: 250px;
+    }
+    
+    .search-input:focus {
+        border-color: #0d6efd;
+        box-shadow: 0 0 0 0.2rem rgba(13, 110, 253, 0.25);
+        outline: none;
+    }
+    
+    .input-group-text {
+        border-radius: 8px 0 0 8px;
+        border: 2px solid #e9ecef;
+        border-right: none;
+        background-color: #f8f9fa;
+    }
+    
+    .input-group:focus-within .input-group-text {
+        border-color: #0d6efd;
+    }
+    
+    /* Button group styling */
+    .btn-group-enhanced {
+        display: flex;
+        gap: 0.5rem;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+    
+    /* Responsive adjustments */
+    @media (max-width: 768px) {
+        .table-header {
+            flex-direction: column;
+            gap: 1rem;
+            align-items: stretch !important;
+        }
+        
+        .btn-group-enhanced {
+            justify-content: center;
+            flex-direction: column;
+            width: 100%;
+        }
+        
+        .search-container {
+            width: 100%;
+            margin-bottom: 0.5rem;
+        }
+        
+        .search-input {
+            min-width: 100%;
+        }
+        
+        .btn-enhanced {
+            width: 100%;
+            margin-bottom: 0.25rem;
+        }
+    }
 </style>
 
 <div class="main-content" id="mainContent">
     <div class="table-container">
         <div class="table-header d-flex justify-content-between align-items-center">
             <h4><i class="fas fa-building me-2"></i>Course Room Type Management</h4>
-            <div class="d-flex gap-2">
+            <div class="btn-group-enhanced">
                 <!-- Search functionality -->
-                <div class="search-container me-3">
-                    <input type="text" id="searchInput" class="form-control search-input" placeholder="Search courses...">
+                <div class="search-container">
+                    <div class="input-group">
+                        <span class="input-group-text bg-light border-end-0">
+                            <i class="fas fa-search text-muted"></i>
+                        </span>
+                        <input type="text" id="searchInput" class="form-control search-input border-start-0" placeholder="Search courses...">
+                    </div>
                 </div>
-                <button class="btn btn-outline-light me-2" data-bs-toggle="modal" data-bs-target="#bulkCourseModal">
-                    <i class="fas fa-layer-group me-1"></i>Bulk Add
+                
+                <!-- Action buttons -->
+                <button class="btn btn-success btn-enhanced" data-bs-toggle="modal" data-bs-target="#bulkCourseModal">
+                    <i class="fas fa-layer-group me-1"></i>Bulk Upload
                 </button>
-                <button class="btn btn-outline-light me-2" onclick="refreshData()" title="Refresh Data">
-                    <i class="fas fa-sync-alt me-1"></i>Refresh
-                </button>
-                <button class="btn btn-light" data-bs-toggle="modal" data-bs-target="#addCourseModal">
+                <button class="btn btn-primary btn-enhanced" data-bs-toggle="modal" data-bs-target="#addCourseModal">
                     <i class="fas fa-plus me-1"></i>Add Single
                 </button>
             </div>
@@ -432,24 +518,31 @@ $(document).ready(function() {
 
     // Enhanced AJAX call with retry functionality
     function makeAjaxCall(url, data, retries = 3) {
+        console.log('Making AJAX call to:', url, 'with action:', data.get('action'));
+        
         return fetch(url, {
             method: 'POST',
             body: data
         })
         .then(response => {
+            console.log('Response received:', response.status, response.statusText);
+            
             if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
+                throw new Error(`HTTP error! status: ${response.status} - ${response.statusText}`);
             }
             
             // Check if response is JSON
             const contentType = response.headers.get('content-type');
             if (!contentType || !contentType.includes('application/json')) {
-                throw new Error('Response is not JSON');
+                throw new Error('Response is not JSON. Content-Type: ' + contentType);
             }
             
             return response.text().then(text => {
+                console.log('Raw response text:', text.substring(0, 200) + '...');
                 try {
-                    return JSON.parse(text);
+                    const jsonData = JSON.parse(text);
+                    console.log('Parsed JSON response:', jsonData);
+                    return jsonData;
                 } catch (e) {
                     console.error('Invalid JSON response:', text);
                     throw new Error('Invalid JSON response: ' + text.substring(0, 100));
@@ -457,6 +550,7 @@ $(document).ready(function() {
             });
         })
         .catch(error => {
+            console.error('AJAX call failed:', error);
             if (retries > 0) {
                 console.warn(`Request failed, retrying... (${retries} attempts left)`);
                 return new Promise(resolve => {
@@ -471,6 +565,7 @@ $(document).ready(function() {
 
     // Load courses data
     function loadCourses() {
+        console.log('Loading courses...');
         const formData = new FormData();
         formData.append('action', 'get_courses');
         
@@ -478,14 +573,21 @@ $(document).ready(function() {
         .then(data => {
             if (data.success) {
                 courses = data.data;
+                console.log('Courses loaded:', courses.length, 'courses');
             } else {
+                console.error('Failed to load courses:', data.message);
                 throw new Error(data.message);
             }
+        })
+        .catch(error => {
+            console.error('Error loading courses:', error);
+            throw error;
         });
     }
 
     // Load room types data
     function loadRoomTypes() {
+        console.log('Loading room types...');
         const formData = new FormData();
         formData.append('action', 'get_room_types');
         
@@ -493,14 +595,21 @@ $(document).ready(function() {
         .then(data => {
             if (data.success) {
                 roomTypes = data.data;
+                console.log('Room types loaded:', roomTypes.length, 'types');
             } else {
+                console.error('Failed to load room types:', data.message);
                 throw new Error(data.message);
             }
+        })
+        .catch(error => {
+            console.error('Error loading room types:', error);
+            throw error;
         });
     }
 
     // Load table data
     function loadTableData() {
+        console.log('Loading table data...');
         const formData = new FormData();
         formData.append('action', 'get_table_data');
         
@@ -508,9 +617,15 @@ $(document).ready(function() {
         .then(data => {
             if (data.success) {
                 tableData = data.data;
+                console.log('Table data loaded:', tableData.length, 'records');
             } else {
+                console.error('Failed to load table data:', data.message);
                 throw new Error(data.message);
             }
+        })
+        .catch(error => {
+            console.error('Error loading table data:', error);
+            throw error;
         });
     }
 
@@ -619,10 +734,15 @@ $(document).ready(function() {
                 e.target.reset();
                 clearFormValidation('singleAddForm');
                 
-                // Add new row to table with animation
-                tableData.push(data.data);
-                renderTable();
-                addRowAnimation(data.data.course_id);
+                // Reload table data to ensure we have the latest data
+                console.log('Single add successful, reloading table data...');
+                loadTableData().then(() => {
+                    renderTable();
+                    console.log('Table refreshed after single add');
+                }).catch(error => {
+                    console.error('Error reloading table after single add:', error);
+                    showAlert('Record added but failed to refresh table. Please refresh manually.', 'warning');
+                });
             } else {
                 showAlert(data.message, 'danger');
             }
@@ -767,29 +887,6 @@ $(document).ready(function() {
         return text.replace(/[&<>"']/g, function(m) { return map[m]; });
     }
 });
-
-// Global functions for button clicks
-function refreshData() {
-    const refreshBtn = document.querySelector('button[onclick="refreshData()"]');
-    const originalContent = refreshBtn.innerHTML;
-    refreshBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Refreshing...';
-    refreshBtn.disabled = true;
-    
-    Promise.all([
-        loadCourses(),
-        loadRoomTypes(),
-        loadTableData()
-    ]).then(() => {
-        populateDropdowns();
-        renderTable();
-        showAlert('Data refreshed successfully!', 'success');
-    }).catch(error => {
-        showAlert('Error refreshing data: ' + error.message, 'danger');
-    }).finally(() => {
-        refreshBtn.innerHTML = originalContent;
-        refreshBtn.disabled = false;
-    });
-}
 
 function openEditModal(courseId, courseCode, roomType) {
     document.getElementById('edit_course_id').value = courseId;
