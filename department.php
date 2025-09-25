@@ -195,7 +195,6 @@ $departments = [];
                     <tr>
                         <th>Code</th>
                         <th>Name</th>
-                        <th>Description</th>
                         <th>Courses</th>
                         <th>Status</th>
                         <th>Actions</th>
@@ -204,7 +203,7 @@ $departments = [];
                 <tbody id="tableBody">
                     <!-- Table content will be loaded via AJAX -->
                     <tr id="loadingRow">
-                        <td colspan="6" class="text-center py-4">
+                        <td colspan="5" class="text-center py-4">
                             <div class="spinner-border text-primary" role="status">
                                 <span class="visually-hidden">Loading...</span>
                             </div>
@@ -241,10 +240,6 @@ $departments = [];
                         <div class="form-text">Enter a unique code for this department</div>
                     </div>
                     
-                    <div class="mb-3">
-                        <label for="dept_description" class="form-label">Description</label>
-                        <textarea class="form-control" id="dept_description" name="description" rows="3"></textarea>
-                    </div>
                     
                     <div class="mb-3">
                         <div class="form-check">
@@ -288,10 +283,6 @@ $departments = [];
                         <input type="text" class="form-control" id="edit_dept_code" name="code" required>
                     </div>
                     
-                    <div class="mb-3">
-                        <label for="edit_dept_description" class="form-label">Description</label>
-                        <textarea class="form-control" id="edit_dept_description" name="description" rows="3"></textarea>
-                    </div>
                     
                     <div class="mb-3">
                         <div class="form-check">
@@ -336,7 +327,7 @@ $(document).ready(function() {
             const loadingRow = document.getElementById('loadingRow');
             if (loadingRow) {
                 loadingRow.innerHTML = `
-                    <td colspan="6" class="text-center py-4">
+                    <td colspan="5" class="text-center py-4">
                         <div class="alert alert-warning">
                             <i class="fas fa-exclamation-triangle me-2"></i>
                             Loading is taking longer than expected. 
@@ -369,7 +360,7 @@ $(document).ready(function() {
             const tbody = document.getElementById('tableBody');
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="6" class="text-center py-4">
+                    <td colspan="5" class="text-center py-4">
                         <div class="alert alert-danger">
                             <i class="fas fa-exclamation-circle me-2"></i>
                             Failed to load departments: ${error.message}
@@ -403,7 +394,6 @@ $(document).ready(function() {
                     <tr data-id="${dept.id}">
                         <td><strong>${AjaxUtils.escapeHtml(dept.code)}</strong></td>
                         <td>${AjaxUtils.escapeHtml(dept.name)}</td>
-                        <td>${AjaxUtils.escapeHtml(dept.description || '')}</td>
                         <td><span class="badge bg-info">${dept.course_count || 0}</span></td>
                         <td>
                             <span class="badge ${dept.is_active ? 'bg-success' : 'bg-secondary'}">
@@ -412,7 +402,7 @@ $(document).ready(function() {
                         </td>
                         <td>
                             <button class="btn btn-warning btn-sm me-1" 
-                                    onclick="openEditModal(${dept.id}, '${AjaxUtils.escapeHtml(dept.name)}', '${AjaxUtils.escapeHtml(dept.code)}', '${AjaxUtils.escapeHtml(dept.description || '')}', ${dept.is_active})">
+                                    onclick="openEditModal(${dept.id}, '${AjaxUtils.escapeHtml(dept.name)}', '${AjaxUtils.escapeHtml(dept.code)}', ${dept.is_active})">
                                 <i class="fas fa-edit"></i>
                             </button>
                             <button class="btn btn-danger btn-sm" 
@@ -439,7 +429,6 @@ $(document).ready(function() {
         const formData = {
             name: $('#dept_name').val(),
             code: $('#dept_code').val(),
-            description: $('#dept_description').val(),
             is_active: $('#dept_is_active').is(':checked') ? 1 : 0
         };
         
@@ -459,7 +448,6 @@ $(document).ready(function() {
                     id: data.data.id,
                     name: formData.name,
                     code: formData.code,
-                    description: formData.description,
                     is_active: formData.is_active,
                     course_count: 0
                 });
@@ -491,7 +479,6 @@ $(document).ready(function() {
             id: $('#edit_dept_id').val(),
             name: $('#edit_dept_name').val(),
             code: $('#edit_dept_code').val(),
-            description: $('#edit_dept_description').val(),
             is_active: $('#edit_dept_is_active').is(':checked') ? 1 : 0
         };
         
@@ -512,7 +499,6 @@ $(document).ready(function() {
                         ...departments[index],
                         name: formData.name,
                         code: formData.code,
-                        description: formData.description,
                         is_active: formData.is_active
                     };
                     renderTable();
@@ -652,11 +638,10 @@ function refreshData() {
     });
 }
 
-function openEditModal(id, name, code, description, isActive) {
+function openEditModal(id, name, code, isActive) {
     document.getElementById('edit_dept_id').value = id;
     document.getElementById('edit_dept_name').value = name;
     document.getElementById('edit_dept_code').value = code;
-    document.getElementById('edit_dept_description').value = description;
     document.getElementById('edit_dept_is_active').checked = isActive == 1;
     
     const modal = new bootstrap.Modal(document.getElementById('editDepartmentModal'));
