@@ -11,11 +11,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 	if ($action === 'add') {
 		$name = $conn->real_escape_string($_POST['name']);
 		$code = $conn->real_escape_string($_POST['code']);
-		$description = $conn->real_escape_string($_POST['description']);
 		$is_active = isset($_POST['is_active']) ? 1 : 0;
 
-		$stmt = $conn->prepare("INSERT INTO levels (name, code, description, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, NOW(), NOW())");
-		$stmt->bind_param('sssi', $name, $code, $description, $is_active);
+		$stmt = $conn->prepare("INSERT INTO levels (name, code, is_active, created_at, updated_at) VALUES (?, ?, ?, NOW(), NOW())");
+		$stmt->bind_param('ssi', $name, $code, $is_active);
 		if ($stmt->execute()) {
 			$success_message = 'Level added successfully.';
 		} else {
@@ -26,11 +25,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 		$id = (int)$_POST['id'];
 		$name = $conn->real_escape_string($_POST['name']);
 		$code = $conn->real_escape_string($_POST['code']);
-		$description = $conn->real_escape_string($_POST['description']);
 		$is_active = isset($_POST['is_active']) ? 1 : 0;
 
-		$stmt = $conn->prepare("UPDATE levels SET name = ?, code = ?, description = ?, is_active = ?, updated_at = NOW() WHERE id = ?");
-		$stmt->bind_param('ssiii', $name, $code, $description, $is_active, $id);
+		$stmt = $conn->prepare("UPDATE levels SET name = ?, code = ?, is_active = ?, updated_at = NOW() WHERE id = ?");
+		$stmt->bind_param('ssii', $name, $code, $is_active, $id);
 		if ($stmt->execute()) {
 			$success_message = 'Level updated successfully.';
 		} else {
@@ -51,7 +49,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 }
 
 // Fetch levels
-$levels_rs = $conn->query("SELECT id, name, code, description, is_active FROM levels ORDER BY id");
+$levels_rs = $conn->query("SELECT id, name, code, is_active FROM levels ORDER BY id");
 ?>
 
 <div class="main-content" id="mainContent">
@@ -71,16 +69,15 @@ $levels_rs = $conn->query("SELECT id, name, code, description, is_active FROM le
 		<?php endif; ?>
 
 		<table class="table table-striped m-3">
-			<thead>
-				<tr><th>Name</th><th>Code</th><th>Description</th><th>Active</th><th>Actions</th></tr>
-			</thead>
+				<thead>
+					<tr><th>Name</th><th>Code</th><th>Active</th><th>Actions</th></tr>
+				</thead>
 			<tbody>
 				<?php while ($lvl = $levels_rs->fetch_assoc()): ?>
-					<tr>
-						<td><?php echo htmlspecialchars($lvl['name']); ?></td>
-						<td><?php echo htmlspecialchars($lvl['code']); ?></td>
-						<td><?php echo htmlspecialchars($lvl['description']); ?></td>
-						<td><?php echo $lvl['is_active'] ? 'Yes' : 'No'; ?></td>
+						<tr>
+							<td><?php echo htmlspecialchars($lvl['name']); ?></td>
+							<td><?php echo htmlspecialchars($lvl['code']); ?></td>
+							<td><?php echo $lvl['is_active'] ? 'Yes' : 'No'; ?></td>
 						<td>
 							<button class="btn btn-sm btn-secondary" data-bs-toggle="modal" data-bs-target="#editLevelModal<?php echo $lvl['id']; ?>">Edit</button>
 							<form method="post" style="display:inline-block;" onsubmit="return confirm('Delete this level?');">
@@ -100,9 +97,8 @@ $levels_rs = $conn->query("SELECT id, name, code, description, is_active FROM le
 									<div class="modal-body">
 										<input type="hidden" name="action" value="edit">
 										<input type="hidden" name="id" value="<?php echo $lvl['id']; ?>">
-										<div class="mb-3"><label class="form-label">Name</label><input name="name" class="form-control" value="<?php echo htmlspecialchars($lvl['name']); ?>"></div>
-										<div class="mb-3"><label class="form-label">Code</label><input name="code" class="form-control" value="<?php echo htmlspecialchars($lvl['code']); ?>"></div>
-										<div class="mb-3"><label class="form-label">Description</label><textarea name="description" class="form-control"><?php echo htmlspecialchars($lvl['description']); ?></textarea></div>
+								<div class="mb-3"><label class="form-label">Name</label><input name="name" class="form-control" value="<?php echo htmlspecialchars($lvl['name']); ?>"></div>
+								<div class="mb-3"><label class="form-label">Code</label><input name="code" class="form-control" value="<?php echo htmlspecialchars($lvl['code']); ?>"></div>
 										<div class="form-check mb-3"><input type="checkbox" name="is_active" class="form-check-input" id="lvl_active_<?php echo $lvl['id']; ?>" <?php echo $lvl['is_active'] ? 'checked' : ''; ?>><label class="form-check-label" for="lvl_active_<?php echo $lvl['id']; ?>">Active</label></div>
 									</div>
 									<div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button type="submit" class="btn btn-primary">Save</button></div>
@@ -124,9 +120,8 @@ $levels_rs = $conn->query("SELECT id, name, code, description, is_active FROM le
 			<form method="post">
 				<div class="modal-body">
 					<input type="hidden" name="action" value="add">
-					<div class="mb-3"><label class="form-label">Name</label><input name="name" class="form-control" required></div>
-					<div class="mb-3"><label class="form-label">Code</label><input name="code" class="form-control"></div>
-					<div class="mb-3"><label class="form-label">Description</label><textarea name="description" class="form-control"></textarea></div>
+						<div class="mb-3"><label class="form-label">Name</label><input name="name" class="form-control" required></div>
+						<div class="mb-3"><label class="form-label">Code</label><input name="code" class="form-control"></div>
 					<div class="form-check mb-3"><input type="checkbox" name="is_active" class="form-check-input" id="add_lvl_active" checked><label class="form-check-label" for="add_lvl_active">Active</label></div>
 				</div>
 				<div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button type="submit" class="btn btn-primary">Add</button></div>
