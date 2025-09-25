@@ -12,3 +12,4 @@ DROP INDEX `idx_timetable_lecturer_conflict_check`;
 -- Verify the constraint has been removed
 SHOW CREATE TABLE timetable;
 
+
