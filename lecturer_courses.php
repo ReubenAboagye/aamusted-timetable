@@ -1,428 +1,410 @@
 <?php
 $pageTitle = 'Map Courses to Lecturers';
+$show_admin_jobs_modal = false; // Disable admin jobs modal to prevent fetchJobs errors
+
+include 'connect.php';
+include 'includes/flash.php';
+
+// Start session for CSRF protection
+if (session_status() == PHP_SESSION_NONE) {
+    session_start();
+}
+
+// Generate CSRF token if not exists
+if (!isset($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
+
 include 'includes/header.php';
 include 'includes/sidebar.php';
 
-$success_message = '';
-$error_message = '';
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $action = $_POST['action'] ?? null;
-    if ($action === 'add') {
-        $lecturer_id = (int)($_POST['lecturer_id'] ?? 0);
-        $course_id = (int)($_POST['course_id'] ?? 0);
-        if ($lecturer_id > 0 && $course_id > 0) {
-            $stmt = $conn->prepare("INSERT IGNORE INTO lecturer_courses (lecturer_id, course_id) VALUES (?, ?)");
-            if ($stmt) {
-                $stmt->bind_param('ii', $lecturer_id, $course_id);
-                if ($stmt->execute()) { $stmt->close(); redirect_with_flash('lecturer_courses.php', 'success', 'Mapping added.'); } else { $error_message = 'Insert failed: ' . $conn->error; }
-                $stmt->close();
-            } else { $error_message = 'Prepare failed: ' . $conn->error; }
-        }
-    } elseif ($action === 'bulk_add') {
-        $lecturer_id = (int)($_POST['lecturer_id'] ?? 0);
-        $course_ids = isset($_POST['course_ids']) && is_array($_POST['course_ids']) ? array_map('intval', $_POST['course_ids']) : [];
-        if ($lecturer_id > 0 && !empty($course_ids)) {
-            $stmt = $conn->prepare("INSERT IGNORE INTO lecturer_courses (lecturer_id, course_id) VALUES (?, ?)");
-            if ($stmt) {
-                foreach ($course_ids as $course_id) {
-                    $stmt->bind_param('ii', $lecturer_id, $course_id);
-                    $stmt->execute();
-                }
-                $stmt->close();
-                redirect_with_flash('lecturer_courses.php', 'success', 'Bulk mappings added.');
-            } else { $error_message = 'Prepare failed: ' . $conn->error; }
-        }
-    }
-}
-
-// Get filter parameters
-$selected_department = isset($_GET['department_id']) ? (int)$_GET['department_id'] : 0;
-$search_name = isset($_GET['search_name']) ? trim($_GET['search_name']) : '';
-
-// Data for UI
-$departments = $conn->query("SELECT id, name FROM departments WHERE is_active = 1 ORDER BY name");
-$lecturers = $conn->query("SELECT id, name, department_id FROM lecturers WHERE is_active = 1 ORDER BY name");
-
-// Build courses query defensively: some DB schemas include department_id on courses, others don't
-$courses_query = "SELECT c.id, c.name, c.code FROM courses c WHERE c.is_active = 1 ORDER BY c.name";
-$courses = $conn->query($courses_query);
-if ($courses === false) {
-    error_log('courses query failed: ' . $conn->error . ' -- Query: ' . $courses_query);
-}
-// If the above failed (schema mismatch), fall back to a simpler courses query
-if ($courses === false) {
-    // Log error for debugging (do not expose DB errors to users in production)
-    error_log('courses query failed: ' . $conn->error . ' -- Query: ' . $courses_query);
-    $courses = $conn->query("SELECT c.id, c.name, c.code, NULL AS department_name FROM courses c WHERE c.is_active = 1 ORDER BY c.name");
-}
-
-// Build mappings query with filters
-$mappings_query = "SELECT l.id as lecturer_id, l.name AS lecturer_name, 
-                   d.name AS department_name,
-                   GROUP_CONCAT(c.code ORDER BY c.code SEPARATOR ', ') AS course_codes
-                   FROM lecturers l
-                   LEFT JOIN departments d ON l.department_id = d.id
-                   LEFT JOIN lecturer_courses lc ON l.id = lc.lecturer_id
-                   LEFT JOIN courses c ON c.id = lc.course_id
-                   WHERE l.is_active = 1";
-
-$params = [];
-$types = '';
-
-// Add department filter
-if ($selected_department > 0) {
-    $mappings_query .= " AND l.department_id = ?";
-    $params[] = $selected_department;
-    $types .= 'i';
-}
-
-// Add name search filter
-if (!empty($search_name)) {
-    $mappings_query .= " AND l.name LIKE ?";
-    $params[] = '%' . $search_name . '%';
-    $types .= 's';
-}
-
-$mappings_query .= " GROUP BY l.id, l.name, d.name ORDER BY l.name";
-
-// Execute the query with parameters if any
-if (!empty($params)) {
-    $stmt = $conn->prepare($mappings_query);
-    if ($stmt) {
-        $stmt->bind_param($types, ...$params);
-        $stmt->execute();
-        $mappings = $stmt->get_result();
-        $stmt->close();
-    } else {
-        $mappings = false;
-        error_log('mappings query prepare failed: ' . $conn->error);
-    }
-} else {
-    $mappings = $conn->query($mappings_query);
-}
+// Initialize empty arrays for data - will be populated via AJAX
+$mappings = [];
+$lecturers = [];
+$courses = [];
 ?>
 
 <div class="main-content" id="mainContent">
     <div class="table-container">
         <div class="table-header d-flex justify-content-between align-items-center">
-            <h4><i class="fas fa-user-plus me-2"></i>Map Courses to Lecturers</h4>
-            <div>
-                <a href="download_lecturer_courses.php?department_id=<?php echo $selected_department; ?>&search_name=<?php echo urlencode($search_name); ?>" class="btn btn-outline-success btn-sm">
-                    <i class="fas fa-download me-1"></i> Download Records
-                </a>
+            <h4><i class="fas fa-link me-2"></i>Map Courses to Lecturers</h4>
+            <div class="d-flex gap-2">
+                <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addMappingModal">
+                    <i class="fas fa-plus me-1"></i>Add Mapping
+                </button>
+                <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#bulkAddModal">
+                    <i class="fas fa-layer-group me-1"></i>Bulk Add
+                </button>
             </div>
         </div>
+        
+        <!-- Dynamic Alert Container -->
+        <div id="alertContainer" class="m-3"></div>
 
-        <?php if ($success_message): ?>
-            <div class="alert alert-success alert-dismissible fade show m-3" role="alert">
-                <?php echo $success_message; ?>
-                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-            </div>
-        <?php endif; ?>
-
-        <?php if ($error_message): ?>
-            <div class="alert alert-danger alert-dismissible fade show m-3" role="alert">
-                <?php echo $error_message; ?>
-                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-            </div>
-        <?php endif; ?>
-
-        <!-- Filter Section -->
-        <div class="card m-3">
-            <div class="card-body">
-                <form method="GET" action="lecturer_courses.php" class="row g-3" id="filterForm">
-                    <div class="col-md-4">
-                        <label for="department_id" class="form-label">Filter by Department</label>
-                        <select class="form-select" id="department_id" name="department_id">
-                            <option value="0">All Departments</option>
-                            <?php if ($departments && $departments->num_rows > 0): ?>
-                                <?php while ($dept = $departments->fetch_assoc()): ?>
-                                    <option value="<?php echo $dept['id']; ?>" <?php echo ($selected_department == $dept['id']) ? 'selected' : ''; ?>>
-                                        <?php echo htmlspecialchars($dept['name']); ?>
-                                    </option>
-                                <?php endwhile; ?>
-                            <?php endif; ?>
-                        </select>
-                    </div>
-                    <div class="col-md-4">
-                        <label for="search_name" class="form-label">Search by Lecturer Name</label>
-                        <input type="text" class="form-control" id="search_name" name="search_name" 
-                               value="<?php echo htmlspecialchars($search_name); ?>" 
-                               placeholder="Enter lecturer name...">
-                    </div>
-                    <div class="col-md-4 d-flex align-items-end">
-                        <div class="d-flex gap-2">
-                            <a href="lecturer_courses.php" class="btn btn-outline-secondary">
-                                <i class="fas fa-times me-1"></i>Clear
-                            </a>
-                        </div>
-                    </div>
-                </form>
-            </div>
-        </div>
-
-        <div class="table-responsive m-3">
-            <table class="table">
+        <div class="table-responsive">
+            <table class="table" id="mappingTable">
                 <thead>
                     <tr>
                         <th>Lecturer</th>
                         <th>Department</th>
                         <th>Course</th>
+                        <th>Course Code</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
-                <tbody>
-                    <?php if ($mappings && $mappings->num_rows > 0): ?>
-                        <?php while ($m = $mappings->fetch_assoc()): ?>
-                            <tr>
-                                <td><?php echo htmlspecialchars($m['lecturer_name'] ?? ''); ?></td>
-                                <td><?php echo htmlspecialchars($m['department_name'] ?? 'N/A'); ?></td>
-                                <td><?php echo htmlspecialchars($m['course_codes'] ?? ''); ?></td>
-                                <td>
-                                    <button class="btn btn-sm btn-outline-primary" onclick="editMapping(<?php echo $m['lecturer_id']; ?>)">
-                                        <i class="fas fa-edit"></i>
-                                    </button>
-                                </td>
-                            </tr>
-                        <?php endwhile; ?>
-                    <?php else: ?>
-                        <tr>
-                            <td colspan="4" class="empty-state">
-                                <i class="fas fa-info-circle"></i>
-                                <p>No mappings found. <?php if (!empty($search_name) || $selected_department > 0): ?>Try adjusting your filters.<?php else: ?>Add some mappings above.<?php endif; ?></p>
-                            </td>
-                        </tr>
-                    <?php endif; ?>
+                <tbody id="tableBody">
+                    <!-- Table content will be loaded via AJAX -->
+                    <tr id="loadingRow">
+                        <td colspan="5" class="text-center py-4">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                            <div class="mt-2">Loading mapping data...</div>
+                        </td>
+                    </tr>
                 </tbody>
             </table>
         </div>
     </div>
 </div>
 
-<!-- Edit Course Assignment Modal -->
-<div class="modal fade" id="editModal" tabindex="-1" aria-labelledby="editModalLabel" aria-hidden="true">
+<!-- Add Mapping Modal -->
+<div class="modal fade" id="addMappingModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Add Lecturer-Course Mapping</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="addMappingForm">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="mapping_lecturer" class="form-label">Lecturer *</label>
+                        <select class="form-select" id="mapping_lecturer" name="lecturer_id" required>
+                            <option value="">Select Lecturer</option>
+                            <!-- Options will be loaded via AJAX -->
+                        </select>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="mapping_course" class="form-label">Course *</label>
+                        <select class="form-select" id="mapping_course" name="course_id" required>
+                            <option value="">Select Course</option>
+                            <!-- Options will be loaded via AJAX -->
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary" id="addSubmitBtn">
+                        <i class="fas fa-save me-1"></i>Add Mapping
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Bulk Add Modal -->
+<div class="modal fade" id="bulkAddModal" tabindex="-1">
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title" id="editModalLabel">Edit Course Assignments</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                <h5 class="modal-title">Bulk Add Lecturer-Course Mappings</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
-            <div class="modal-body">
-                <div class="row">
-                    <!-- Available Courses (Left Side) -->
-                    <div class="col-md-6">
-                        <h6>Available Courses</h6>
-                        <div class="mb-3">
-                            <input type="text" class="form-control" id="courseSearch" placeholder="Search courses...">
-                        </div>
-                        <div class="border rounded p-2" style="height: 300px; overflow-y: auto;">
-                            <div id="availableCoursesList">
-                                <!-- Available courses will be populated here -->
-                            </div>
-                        </div>
+            <form id="bulkAddForm">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="bulk_lecturer" class="form-label">Lecturer *</label>
+                        <select class="form-select" id="bulk_lecturer" name="lecturer_id" required>
+                            <option value="">Select Lecturer</option>
+                            <!-- Options will be loaded via AJAX -->
+                        </select>
                     </div>
                     
-                    <!-- Assigned Courses (Right Side) -->
-                    <div class="col-md-6">
-                        <h6>Assigned Courses</h6>
-                        <div class="border rounded p-2" style="height: 300px; overflow-y: auto;">
-                            <div id="assignedCoursesList">
-                                <!-- Assigned courses will be populated here -->
-                            </div>
+                    <div class="mb-3">
+                        <label class="form-label">Select Courses *</label>
+                        <div id="coursesList" class="border rounded p-3" style="max-height: 300px; overflow-y: auto;">
+                            <!-- Course checkboxes will be loaded via AJAX -->
                         </div>
                     </div>
                 </div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-primary" onclick="saveAssignments()">Save Changes</button>
-            </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-success" id="bulkSubmitBtn">
+                        <i class="fas fa-save me-1"></i>Bulk Add Mappings
+                    </button>
+                </div>
+            </form>
         </div>
     </div>
 </div>
 
 <script>
-let currentLecturerId = null;
-let availableCourses = [];
-let assignedCourses = [];
+// Global variables
+let mappings = [];
+let lecturers = [];
+let courses = [];
 
-function editMapping(lecturerId) {
-    currentLecturerId = lecturerId;
-    
-    // Show loading state
-    const availableList = document.getElementById('availableCoursesList');
-    const assignedList = document.getElementById('assignedCoursesList');
-    availableList.innerHTML = '<div class="text-center p-3"><i class="fas fa-spinner fa-spin"></i> Loading courses...</div>';
-    assignedList.innerHTML = '<div class="text-center p-3"><i class="fas fa-spinner fa-spin"></i> Loading courses...</div>';
-    
-    // Fetch courses from database
-    fetch(`get_lecturer_courses.php?lecturer_id=${lecturerId}`)
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                availableCourses = data.data.available_courses;
-                assignedCourses = data.data.assigned_courses;
-                populateCourseLists();
+$(document).ready(function() {
+    // Load initial data
+    loadInitialData();
+
+    // Form submission handlers
+    $('#addMappingForm').on('submit', handleAddMapping);
+    $('#bulkAddForm').on('submit', handleBulkAdd);
+
+    // Load initial data from server
+    function loadInitialData() {
+        Promise.all([
+            AjaxUtils.makeRequest('lecturer_course', 'get_list'),
+            AjaxUtils.makeRequest('lecturer_course', 'get_lecturers'),
+            AjaxUtils.makeRequest('lecturer_course', 'get_courses')
+        ])
+        .then(([mappingsData, lecturersData, coursesData]) => {
+            if (mappingsData.success && lecturersData.success && coursesData.success) {
+                mappings = mappingsData.data;
+                lecturers = lecturersData.data;
+                courses = coursesData.data;
+                populateDropdowns();
+                renderTable();
+                console.log('Data loaded successfully:', { mappings: mappings.length, lecturers: lecturers.length, courses: courses.length });
             } else {
-                throw new Error(data.error || 'Failed to fetch courses');
+                throw new Error(mappingsData.message || lecturersData.message || coursesData.message);
             }
         })
         .catch(error => {
-            console.error('Error fetching courses:', error);
-            availableList.innerHTML = '<div class="text-center p-3 text-danger"><i class="fas fa-exclamation-triangle"></i> Error loading courses</div>';
-            assignedList.innerHTML = '<div class="text-center p-3 text-danger"><i class="fas fa-exclamation-triangle"></i> Error loading courses</div>';
+            console.error('Error loading data:', error);
+            AjaxUtils.showAlert('Error loading data: ' + error.message, 'danger');
+            
+            // Show error in table
+            const tbody = document.getElementById('tableBody');
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="5" class="text-center py-4">
+                        <div class="alert alert-danger">
+                            <i class="fas fa-exclamation-circle me-2"></i>
+                            Failed to load data: ${error.message}
+                        </div>
+                    </td>
+                </tr>
+            `;
         });
-    
-    // Use Bootstrap 5 modal methods instead of jQuery
-    const el = document.getElementById('editModal');
-    if (!el) return console.error('editModal element missing');
-    if (typeof bootstrap === 'undefined' || !bootstrap.Modal) return console.error('Bootstrap Modal not available');
-    bootstrap.Modal.getOrCreateInstance(el).show();
-}
-
-function populateCourseLists() {
-    // Populate available courses
-    const availableList = document.getElementById('availableCoursesList');
-    availableList.innerHTML = '';
-    
-    availableCourses.forEach(course => {
-        const courseDiv = document.createElement('div');
-        courseDiv.className = 'course-item p-2 border-bottom';
-        courseDiv.innerHTML = `
-            <div class="d-flex justify-content-between align-items-center">
-                <span>${course.code} - ${course.name}</span>
-                <button class="btn btn-sm btn-outline-primary" onclick="assignCourse('${course.id}')">
-                    <i class="fas fa-plus"></i>
-                </button>
-            </div>
-        `;
-        availableList.appendChild(courseDiv);
-    });
-    
-    // Populate assigned courses
-    const assignedList = document.getElementById('assignedCoursesList');
-    assignedList.innerHTML = '';
-    
-    assignedCourses.forEach(course => {
-        const courseDiv = document.createElement('div');
-        courseDiv.className = 'course-item p-2 border-bottom';
-        courseDiv.innerHTML = `
-            <div class="d-flex justify-content-between align-items-center">
-                <span>${course.code} - ${course.name}</span>
-                <button class="btn btn-sm btn-outline-danger" onclick="unassignCourse('${course.id}')">
-                    <i class="fas fa-minus"></i>
-                </button>
-            </div>
-        `;
-        assignedList.appendChild(courseDiv);
-    });
-}
-
-function assignCourse(courseId) {
-    const course = availableCourses.find(c => c.id === courseId);
-    if (course) {
-        assignedCourses.push(course);
-        availableCourses = availableCourses.filter(c => c.id !== courseId);
-        populateCourseLists();
     }
-}
 
-function unassignCourse(courseId) {
-    const course = assignedCourses.find(c => c.id === courseId);
-    if (course) {
-        availableCourses.push(course);
-        assignedCourses = assignedCourses.filter(c => c.id !== courseId);
-        populateCourseLists();
+    // Populate dropdowns
+    function populateDropdowns() {
+        const addLecturerSelect = $('#mapping_lecturer');
+        const bulkLecturerSelect = $('#bulk_lecturer');
+        const addCourseSelect = $('#mapping_course');
+        
+        // Clear existing options except the first one
+        addLecturerSelect.find('option:not(:first)').remove();
+        bulkLecturerSelect.find('option:not(:first)').remove();
+        addCourseSelect.find('option:not(:first)').remove();
+        
+        lecturers.forEach(lecturer => {
+            addLecturerSelect.append(`<option value="${lecturer.id}">${AjaxUtils.escapeHtml(lecturer.name)} (${AjaxUtils.escapeHtml(lecturer.department_name || 'N/A')})</option>`);
+            bulkLecturerSelect.append(`<option value="${lecturer.id}">${AjaxUtils.escapeHtml(lecturer.name)} (${AjaxUtils.escapeHtml(lecturer.department_name || 'N/A')})</option>`);
+        });
+        
+        courses.forEach(course => {
+            addCourseSelect.append(`<option value="${course.id}">${AjaxUtils.escapeHtml(course.name)} (${AjaxUtils.escapeHtml(course.code)})</option>`);
+        });
+        
+        // Populate bulk courses list
+        populateBulkCoursesList();
     }
-}
 
-function saveAssignments() {
-    const courseIds = assignedCourses.map(c => c.id);
-    
-    // Show loading state
-    const saveButton = document.querySelector('#editModal .btn-primary');
-    const originalText = saveButton.innerHTML;
-    saveButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
-    saveButton.disabled = true;
-    
-    // Send data to server
-    fetch('save_lecturer_courses.php', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-            lecturer_id: currentLecturerId,
-            assigned_course_ids: courseIds
+    // Populate bulk courses list
+    function populateBulkCoursesList() {
+        const coursesList = $('#coursesList');
+        coursesList.empty();
+        
+        courses.forEach(course => {
+            coursesList.append(`
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" value="${course.id}" id="course_${course.id}" name="course_ids[]">
+                    <label class="form-check-label" for="course_${course.id}">
+                        ${AjaxUtils.escapeHtml(course.name)} (${AjaxUtils.escapeHtml(course.code)}) - ${AjaxUtils.escapeHtml(course.department_name || 'N/A')}
+                    </label>
+                </div>
+            `);
+        });
+    }
+
+    // Render table data
+    function renderTable() {
+        const tbody = $('#tableBody');
+        tbody.empty();
+
+        if (mappings.length === 0) {
+            tbody.append(`
+                <tr>
+                    <td colspan="5" class="empty-state">
+                        <i class="fas fa-info-circle"></i>
+                        <p>No mappings found</p>
+                    </td>
+                </tr>
+            `);
+        } else {
+            mappings.forEach(mapping => {
+                tbody.append(`
+                    <tr data-id="${mapping.id}">
+                        <td>${AjaxUtils.escapeHtml(mapping.lecturer_name || 'N/A')}</td>
+                        <td>${AjaxUtils.escapeHtml(mapping.department_name || 'N/A')}</td>
+                        <td>${AjaxUtils.escapeHtml(mapping.course_name || 'N/A')}</td>
+                        <td><strong>${AjaxUtils.escapeHtml(mapping.course_code || 'N/A')}</strong></td>
+                        <td>
+                            <button class="btn btn-danger btn-sm" 
+                                    onclick="deleteMapping(${mapping.id})">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </td>
+                    </tr>
+                `);
+            });
+        }
+    }
+
+    // Handle add mapping form submission
+    function handleAddMapping(e) {
+        e.preventDefault();
+        
+        // Validate form
+        if (!AjaxUtils.validateForm('addMappingForm')) {
+            AjaxUtils.showAlert('Please fill in all required fields.', 'warning');
+            return;
+        }
+        
+        const formData = {
+            lecturer_id: $('#mapping_lecturer').val(),
+            course_id: $('#mapping_course').val()
+        };
+        
+        // Show loading state
+        AjaxUtils.setButtonLoading('addSubmitBtn', true, 'Adding...');
+        
+        AjaxUtils.makeRequest('lecturer_course', 'add', formData)
+        .then(data => {
+            if (data.success) {
+                AjaxUtils.showAlert(data.message, 'success');
+                $('#addMappingModal').modal('hide');
+                e.target.reset();
+                AjaxUtils.clearFormValidation('addMappingForm');
+                
+                // Reload data to get updated mappings
+                loadInitialData();
+            } else {
+                AjaxUtils.showAlert(data.message, 'danger');
+            }
         })
-    })
-    .then(response => response.json())
+        .catch(error => {
+            AjaxUtils.showAlert('Error adding mapping: ' + error.message, 'danger');
+        })
+        .finally(() => {
+            AjaxUtils.setButtonLoading('addSubmitBtn', false);
+        });
+    }
+
+    // Handle bulk add form submission
+    function handleBulkAdd(e) {
+        e.preventDefault();
+        
+        // Validate form
+        if (!AjaxUtils.validateForm('bulkAddForm')) {
+            AjaxUtils.showAlert('Please select a lecturer.', 'warning');
+            return;
+        }
+        
+        const selectedCourses = $('input[name="course_ids[]"]:checked').map(function() {
+            return $(this).val();
+        }).get();
+        
+        if (selectedCourses.length === 0) {
+            AjaxUtils.showAlert('Please select at least one course.', 'warning');
+            return;
+        }
+        
+        const formData = {
+            lecturer_id: $('#bulk_lecturer').val(),
+            course_ids: selectedCourses
+        };
+        
+        // Show loading state
+        AjaxUtils.setButtonLoading('bulkSubmitBtn', true, 'Adding...');
+        
+        AjaxUtils.makeRequest('lecturer_course', 'bulk_add', formData)
+        .then(data => {
+            if (data.success) {
+                AjaxUtils.showAlert(data.message, 'success');
+                $('#bulkAddModal').modal('hide');
+                e.target.reset();
+                AjaxUtils.clearFormValidation('bulkAddForm');
+                
+                // Uncheck all course checkboxes
+                $('input[name="course_ids[]"]').prop('checked', false);
+                
+                // Reload data to get updated mappings
+                loadInitialData();
+            } else {
+                AjaxUtils.showAlert(data.message, 'danger');
+            }
+        })
+        .catch(error => {
+            AjaxUtils.showAlert('Error adding bulk mappings: ' + error.message, 'danger');
+        })
+        .finally(() => {
+            AjaxUtils.setButtonLoading('bulkSubmitBtn', false);
+        });
+    }
+});
+
+// Global functions for button clicks
+function deleteMapping(id) {
+    if (!confirm('Are you sure you want to delete this lecturer-course mapping? This action cannot be undone.')) {
+        return;
+    }
+    
+    const deleteBtn = document.querySelector(`button[onclick="deleteMapping(${id})"]`);
+    const originalContent = deleteBtn.innerHTML;
+    deleteBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+    deleteBtn.disabled = true;
+    
+    AjaxUtils.makeRequest('lecturer_course', 'delete', { id: id })
     .then(data => {
         if (data.success) {
-            // Show success message
-            const modal = bootstrap.Modal.getInstance(document.getElementById('editModal'));
-            modal.hide();
+            AjaxUtils.showAlert(data.message, 'success');
             
-            // Show success alert
-            const alertDiv = document.createElement('div');
-            alertDiv.className = 'alert alert-success alert-dismissible fade show m-3';
-            alertDiv.innerHTML = `
-                ${data.message}
-                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-            `;
-            document.querySelector('.table-container').insertBefore(alertDiv, document.querySelector('.table-responsive'));
+            // Remove mapping from list
+            mappings = mappings.filter(mapping => mapping.id != id);
+            renderTable();
             
-            // Reload the page after a short delay to show updated data
-            setTimeout(() => {
-                window.location.reload();
-            }, 1500);
+            // Check if table is empty
+            if (mappings.length === 0) {
+                const tbody = document.getElementById('tableBody');
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="5" class="empty-state">
+                            <i class="fas fa-info-circle"></i>
+                            <p>No mappings found</p>
+                        </td>
+                    </tr>
+                `;
+            }
         } else {
-            throw new Error(data.error || 'Failed to save assignments');
+            AjaxUtils.showAlert(data.message, 'danger');
         }
     })
     .catch(error => {
-        console.error('Error saving assignments:', error);
-        alert('Error saving assignments: ' + error.message);
+        AjaxUtils.showAlert('Error deleting mapping: ' + error.message, 'danger');
     })
     .finally(() => {
-        // Restore button state
-        saveButton.innerHTML = originalText;
-        saveButton.disabled = false;
+        deleteBtn.innerHTML = originalContent;
+        deleteBtn.disabled = false;
     });
 }
-
-// Course search functionality
-document.getElementById('courseSearch').addEventListener('input', function(e) {
-    const searchTerm = e.target.value.toLowerCase();
-    const courseItems = document.querySelectorAll('#availableCoursesList .course-item');
-    
-    courseItems.forEach(item => {
-        const courseText = item.textContent.toLowerCase();
-        if (courseText.includes(searchTerm)) {
-            item.style.display = 'block';
-        } else {
-            item.style.display = 'none';
-        }
-    });
-});
-
-// Auto-filter functionality
-let searchTimeout;
-
-// Department dropdown auto-filter
-document.getElementById('department_id').addEventListener('change', function() {
-    document.getElementById('filterForm').submit();
-});
-
-// Name search auto-filter with debouncing
-document.getElementById('search_name').addEventListener('input', function(e) {
-    clearTimeout(searchTimeout);
-    searchTimeout = setTimeout(() => {
-        document.getElementById('filterForm').submit();
-    }, 500); // Wait 500ms after user stops typing
-});
 </script>
 
 <?php include 'includes/footer.php'; ?>
-

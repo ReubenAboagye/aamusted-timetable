@@ -651,12 +651,232 @@ function handleClassActions($action, $conn) {
     }
 }
 
+// Room Actions
 function handleRoomActions($action, $conn) {
-    sendResponse(false, 'Room actions not yet implemented');
+    switch ($action) {
+        case 'add':
+            $name = sanitizeInput($_POST['name'] ?? '');
+            $code = sanitizeInput($_POST['code'] ?? '');
+            $capacity = (int)($_POST['capacity'] ?? 0);
+            $room_type_id = (int)($_POST['room_type_id'] ?? 0);
+            $is_active = isset($_POST['is_active']) ? 1 : 0;
+            
+            if (empty($name) || empty($code) || $capacity <= 0 || $room_type_id <= 0) {
+                sendResponse(false, 'Name, code, capacity, and room type are required');
+            }
+            
+            // Check if room code already exists
+            $check_sql = "SELECT id FROM rooms WHERE code = ?";
+            $check_stmt = $conn->prepare($check_sql);
+            $check_stmt->bind_param("s", $code);
+            $check_stmt->execute();
+            $result = $check_stmt->get_result();
+            
+            if ($result->num_rows > 0) {
+                sendResponse(false, 'Room code already exists');
+            }
+            
+            $sql = "INSERT INTO rooms (name, code, capacity, room_type_id, is_active) VALUES (?, ?, ?, ?, ?)";
+            $stmt = $conn->prepare($sql);
+            $stmt->bind_param("ssiii", $name, $code, $capacity, $room_type_id, $is_active);
+            
+            if ($stmt->execute()) {
+                $new_id = $conn->insert_id;
+                sendResponse(true, 'Room added successfully!', ['id' => $new_id]);
+            } else {
+                sendResponse(false, 'Error adding room: ' . $stmt->error);
+            }
+            break;
+            
+        case 'edit':
+            $id = (int)($_POST['id'] ?? 0);
+            $name = sanitizeInput($_POST['name'] ?? '');
+            $code = sanitizeInput($_POST['code'] ?? '');
+            $capacity = (int)($_POST['capacity'] ?? 0);
+            $room_type_id = (int)($_POST['room_type_id'] ?? 0);
+            $is_active = isset($_POST['is_active']) ? 1 : 0;
+            
+            if ($id <= 0 || empty($name) || empty($code) || $capacity <= 0 || $room_type_id <= 0) {
+                sendResponse(false, 'Invalid input');
+            }
+            
+            // Check if room code already exists (excluding current record)
+            $check_sql = "SELECT id FROM rooms WHERE code = ? AND id != ?";
+            $check_stmt = $conn->prepare($check_sql);
+            $check_stmt->bind_param("si", $code, $id);
+            $check_stmt->execute();
+            $result = $check_stmt->get_result();
+            
+            if ($result->num_rows > 0) {
+                sendResponse(false, 'Room code already exists');
+            }
+            
+            $sql = "UPDATE rooms SET name = ?, code = ?, capacity = ?, room_type_id = ?, is_active = ? WHERE id = ?";
+            $stmt = $conn->prepare($sql);
+            $stmt->bind_param("ssiiii", $name, $code, $capacity, $room_type_id, $is_active, $id);
+            
+            if ($stmt->execute()) {
+                sendResponse(true, 'Room updated successfully!');
+            } else {
+                sendResponse(false, 'Error updating room: ' . $stmt->error);
+            }
+            break;
+            
+        case 'delete':
+            $id = (int)($_POST['id'] ?? 0);
+            
+            if ($id <= 0) {
+                sendResponse(false, 'Invalid room ID');
+            }
+            
+            $sql = "DELETE FROM rooms WHERE id = ?";
+            $stmt = $conn->prepare($sql);
+            $stmt->bind_param("i", $id);
+            
+            if ($stmt->execute()) {
+                sendResponse(true, 'Room deleted successfully!');
+            } else {
+                sendResponse(false, 'Error deleting room: ' . $stmt->error);
+            }
+            break;
+            
+        case 'get_list':
+            $sql = "SELECT r.*, rt.name as room_type_name FROM rooms r LEFT JOIN room_types rt ON r.room_type_id = rt.id ORDER BY r.name";
+            $result = $conn->query($sql);
+            
+            $rooms = [];
+            if ($result) {
+                while ($row = $result->fetch_assoc()) {
+                    $rooms[] = $row;
+                }
+            }
+            
+            sendResponse(true, 'Rooms retrieved successfully', $rooms);
+            break;
+            
+        case 'get_room_types':
+            $sql = "SELECT * FROM room_types ORDER BY name";
+            $result = $conn->query($sql);
+            
+            $room_types = [];
+            if ($result) {
+                while ($row = $result->fetch_assoc()) {
+                    $room_types[] = $row;
+                }
+            }
+            
+            sendResponse(true, 'Room types retrieved successfully', $room_types);
+            break;
+            
+        default:
+            sendResponse(false, 'Invalid room action');
+    }
 }
 
+// Level Actions
 function handleLevelActions($action, $conn) {
-    sendResponse(false, 'Level actions not yet implemented');
+    switch ($action) {
+        case 'add':
+            $name = sanitizeInput($_POST['name'] ?? '');
+            $code = sanitizeInput($_POST['code'] ?? '');
+            $description = sanitizeInput($_POST['description'] ?? '');
+            $is_active = isset($_POST['is_active']) ? 1 : 0;
+            
+            if (empty($name) || empty($code)) {
+                sendResponse(false, 'Name and code are required');
+            }
+            
+            // Check if level code already exists
+            $check_sql = "SELECT id FROM levels WHERE code = ?";
+            $check_stmt = $conn->prepare($check_sql);
+            $check_stmt->bind_param("s", $code);
+            $check_stmt->execute();
+            $result = $check_stmt->get_result();
+            
+            if ($result->num_rows > 0) {
+                sendResponse(false, 'Level code already exists');
+            }
+            
+            $sql = "INSERT INTO levels (name, code, description, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, NOW(), NOW())";
+            $stmt = $conn->prepare($sql);
+            $stmt->bind_param("sssi", $name, $code, $description, $is_active);
+            
+            if ($stmt->execute()) {
+                $new_id = $conn->insert_id;
+                sendResponse(true, 'Level added successfully!', ['id' => $new_id]);
+            } else {
+                sendResponse(false, 'Error adding level: ' . $stmt->error);
+            }
+            break;
+            
+        case 'edit':
+            $id = (int)($_POST['id'] ?? 0);
+            $name = sanitizeInput($_POST['name'] ?? '');
+            $code = sanitizeInput($_POST['code'] ?? '');
+            $description = sanitizeInput($_POST['description'] ?? '');
+            $is_active = isset($_POST['is_active']) ? 1 : 0;
+            
+            if ($id <= 0 || empty($name) || empty($code)) {
+                sendResponse(false, 'Invalid input');
+            }
+            
+            // Check if level code already exists (excluding current record)
+            $check_sql = "SELECT id FROM levels WHERE code = ? AND id != ?";
+            $check_stmt = $conn->prepare($check_sql);
+            $check_stmt->bind_param("si", $code, $id);
+            $check_stmt->execute();
+            $result = $check_stmt->get_result();
+            
+            if ($result->num_rows > 0) {
+                sendResponse(false, 'Level code already exists');
+            }
+            
+            $sql = "UPDATE levels SET name = ?, code = ?, description = ?, is_active = ?, updated_at = NOW() WHERE id = ?";
+            $stmt = $conn->prepare($sql);
+            $stmt->bind_param("sssii", $name, $code, $description, $is_active, $id);
+            
+            if ($stmt->execute()) {
+                sendResponse(true, 'Level updated successfully!');
+            } else {
+                sendResponse(false, 'Error updating level: ' . $stmt->error);
+            }
+            break;
+            
+        case 'delete':
+            $id = (int)($_POST['id'] ?? 0);
+            
+            if ($id <= 0) {
+                sendResponse(false, 'Invalid level ID');
+            }
+            
+            $sql = "DELETE FROM levels WHERE id = ?";
+            $stmt = $conn->prepare($sql);
+            $stmt->bind_param("i", $id);
+            
+            if ($stmt->execute()) {
+                sendResponse(true, 'Level deleted successfully!');
+            } else {
+                sendResponse(false, 'Error deleting level: ' . $stmt->error);
+            }
+            break;
+            
+        case 'get_list':
+            $sql = "SELECT * FROM levels ORDER BY name";
+            $result = $conn->query($sql);
+            
+            $levels = [];
+            if ($result) {
+                while ($row = $result->fetch_assoc()) {
+                    $levels[] = $row;
+                }
+            }
+            
+            sendResponse(true, 'Levels retrieved successfully', $levels);
+            break;
+            
+        default:
+            sendResponse(false, 'Invalid level action');
+    }
 }
 
 // Stream Actions
@@ -763,12 +983,313 @@ function handleStreamActions($action, $conn) {
     }
 }
 
+// Lecturer Course Actions
 function handleLecturerCourseActions($action, $conn) {
-    sendResponse(false, 'Lecturer course actions not yet implemented');
+    switch ($action) {
+        case 'add':
+            $lecturer_id = (int)($_POST['lecturer_id'] ?? 0);
+            $course_id = (int)($_POST['course_id'] ?? 0);
+            
+            if ($lecturer_id <= 0 || $course_id <= 0) {
+                sendResponse(false, 'Lecturer and course are required');
+            }
+            
+            // Check if mapping already exists
+            $check_sql = "SELECT id FROM lecturer_courses WHERE lecturer_id = ? AND course_id = ?";
+            $check_stmt = $conn->prepare($check_sql);
+            $check_stmt->bind_param("ii", $lecturer_id, $course_id);
+            $check_stmt->execute();
+            $result = $check_stmt->get_result();
+            
+            if ($result->num_rows > 0) {
+                sendResponse(false, 'This lecturer-course mapping already exists');
+            }
+            
+            $sql = "INSERT INTO lecturer_courses (lecturer_id, course_id) VALUES (?, ?)";
+            $stmt = $conn->prepare($sql);
+            $stmt->bind_param("ii", $lecturer_id, $course_id);
+            
+            if ($stmt->execute()) {
+                $new_id = $conn->insert_id;
+                sendResponse(true, 'Lecturer-course mapping added successfully!', ['id' => $new_id]);
+            } else {
+                sendResponse(false, 'Error adding lecturer-course mapping: ' . $stmt->error);
+            }
+            break;
+            
+        case 'bulk_add':
+            $lecturer_id = (int)($_POST['lecturer_id'] ?? 0);
+            $course_ids = isset($_POST['course_ids']) && is_array($_POST['course_ids']) ? array_map('intval', $_POST['course_ids']) : [];
+            
+            if ($lecturer_id <= 0 || empty($course_ids)) {
+                sendResponse(false, 'Lecturer and courses are required');
+            }
+            
+            $success_count = 0;
+            $error_count = 0;
+            
+            foreach ($course_ids as $course_id) {
+                if ($course_id <= 0) continue;
+                
+                // Check if mapping already exists
+                $check_sql = "SELECT id FROM lecturer_courses WHERE lecturer_id = ? AND course_id = ?";
+                $check_stmt = $conn->prepare($check_sql);
+                $check_stmt->bind_param("ii", $lecturer_id, $course_id);
+                $check_stmt->execute();
+                $result = $check_stmt->get_result();
+                
+                if ($result->num_rows > 0) {
+                    $error_count++;
+                    continue;
+                }
+                
+                $sql = "INSERT INTO lecturer_courses (lecturer_id, course_id) VALUES (?, ?)";
+                $stmt = $conn->prepare($sql);
+                $stmt->bind_param("ii", $lecturer_id, $course_id);
+                
+                if ($stmt->execute()) {
+                    $success_count++;
+                } else {
+                    $error_count++;
+                }
+            }
+            
+            if ($success_count > 0) {
+                $message = "Successfully added $success_count lecturer-course mappings!";
+                if ($error_count > 0) {
+                    $message .= " $error_count mappings already existed.";
+                }
+                sendResponse(true, $message);
+            } else {
+                sendResponse(false, 'No new mappings were added. All selected mappings may already exist.');
+            }
+            break;
+            
+        case 'delete':
+            $id = (int)($_POST['id'] ?? 0);
+            
+            if ($id <= 0) {
+                sendResponse(false, 'Invalid mapping ID');
+            }
+            
+            $sql = "DELETE FROM lecturer_courses WHERE id = ?";
+            $stmt = $conn->prepare($sql);
+            $stmt->bind_param("i", $id);
+            
+            if ($stmt->execute()) {
+                sendResponse(true, 'Lecturer-course mapping deleted successfully!');
+            } else {
+                sendResponse(false, 'Error deleting lecturer-course mapping: ' . $stmt->error);
+            }
+            break;
+            
+        case 'get_list':
+            $sql = "SELECT lc.*, l.name as lecturer_name, c.name as course_name, c.code as course_code, d.name as department_name 
+                    FROM lecturer_courses lc 
+                    LEFT JOIN lecturers l ON lc.lecturer_id = l.id 
+                    LEFT JOIN courses c ON lc.course_id = c.id 
+                    LEFT JOIN departments d ON l.department_id = d.id 
+                    ORDER BY l.name, c.name";
+            $result = $conn->query($sql);
+            
+            $mappings = [];
+            if ($result) {
+                while ($row = $result->fetch_assoc()) {
+                    $mappings[] = $row;
+                }
+            }
+            
+            sendResponse(true, 'Lecturer-course mappings retrieved successfully', $mappings);
+            break;
+            
+        case 'get_lecturers':
+            $sql = "SELECT l.*, d.name as department_name FROM lecturers l LEFT JOIN departments d ON l.department_id = d.id WHERE l.is_active = 1 ORDER BY l.name";
+            $result = $conn->query($sql);
+            
+            $lecturers = [];
+            if ($result) {
+                while ($row = $result->fetch_assoc()) {
+                    $lecturers[] = $row;
+                }
+            }
+            
+            sendResponse(true, 'Lecturers retrieved successfully', $lecturers);
+            break;
+            
+        case 'get_courses':
+            $sql = "SELECT c.*, d.name as department_name FROM courses c LEFT JOIN departments d ON c.department_id = d.id WHERE c.is_active = 1 ORDER BY c.name";
+            $result = $conn->query($sql);
+            
+            $courses = [];
+            if ($result) {
+                while ($row = $result->fetch_assoc()) {
+                    $courses[] = $row;
+                }
+            }
+            
+            sendResponse(true, 'Courses retrieved successfully', $courses);
+            break;
+            
+        default:
+            sendResponse(false, 'Invalid lecturer course action');
+    }
 }
 
+// Class Course Actions
 function handleClassCourseActions($action, $conn) {
-    sendResponse(false, 'Class course actions not yet implemented');
+    switch ($action) {
+        case 'assign_single':
+            $class_id = (int)($_POST['class_id'] ?? 0);
+            $course_id = (int)($_POST['course_id'] ?? 0);
+            
+            if ($class_id <= 0 || $course_id <= 0) {
+                sendResponse(false, 'Class and course are required');
+            }
+            
+            // Check if assignment already exists
+            $check_sql = "SELECT id FROM class_courses WHERE class_id = ? AND course_id = ?";
+            $check_stmt = $conn->prepare($check_sql);
+            $check_stmt->bind_param("ii", $class_id, $course_id);
+            $check_stmt->execute();
+            $result = $check_stmt->get_result();
+            
+            if ($result->num_rows > 0) {
+                sendResponse(false, 'This class-course assignment already exists');
+            }
+            
+            $sql = "INSERT INTO class_courses (class_id, course_id) VALUES (?, ?)";
+            $stmt = $conn->prepare($sql);
+            $stmt->bind_param("ii", $class_id, $course_id);
+            
+            if ($stmt->execute()) {
+                $new_id = $conn->insert_id;
+                sendResponse(true, 'Course assigned to class successfully!', ['id' => $new_id]);
+            } else {
+                sendResponse(false, 'Error assigning course to class: ' . $stmt->error);
+            }
+            break;
+            
+        case 'assign_bulk':
+            $class_ids = isset($_POST['class_ids']) && is_array($_POST['class_ids']) ? array_map('intval', $_POST['class_ids']) : [];
+            $course_ids = isset($_POST['course_ids']) && is_array($_POST['course_ids']) ? array_map('intval', $_POST['course_ids']) : [];
+            
+            if (empty($class_ids) || empty($course_ids)) {
+                sendResponse(false, 'Classes and courses are required');
+            }
+            
+            $success_count = 0;
+            $error_count = 0;
+            
+            foreach ($class_ids as $class_id) {
+                if ($class_id <= 0) continue;
+                
+                foreach ($course_ids as $course_id) {
+                    if ($course_id <= 0) continue;
+                    
+                    // Check if assignment already exists
+                    $check_sql = "SELECT id FROM class_courses WHERE class_id = ? AND course_id = ?";
+                    $check_stmt = $conn->prepare($check_sql);
+                    $check_stmt->bind_param("ii", $class_id, $course_id);
+                    $check_stmt->execute();
+                    $result = $check_stmt->get_result();
+                    
+                    if ($result->num_rows > 0) {
+                        $error_count++;
+                        continue;
+                    }
+                    
+                    $sql = "INSERT INTO class_courses (class_id, course_id) VALUES (?, ?)";
+                    $stmt = $conn->prepare($sql);
+                    $stmt->bind_param("ii", $class_id, $course_id);
+                    
+                    if ($stmt->execute()) {
+                        $success_count++;
+                    } else {
+                        $error_count++;
+                    }
+                }
+            }
+            
+            if ($success_count > 0) {
+                $message = "Successfully assigned $success_count class-course assignments!";
+                if ($error_count > 0) {
+                    $message .= " $error_count assignments already existed.";
+                }
+                sendResponse(true, $message);
+            } else {
+                sendResponse(false, 'No new assignments were made. All selected assignments may already exist.');
+            }
+            break;
+            
+        case 'delete':
+            $id = (int)($_POST['id'] ?? 0);
+            
+            if ($id <= 0) {
+                sendResponse(false, 'Invalid assignment ID');
+            }
+            
+            $sql = "DELETE FROM class_courses WHERE id = ?";
+            $stmt = $conn->prepare($sql);
+            $stmt->bind_param("i", $id);
+            
+            if ($stmt->execute()) {
+                sendResponse(true, 'Class-course assignment deleted successfully!');
+            } else {
+                sendResponse(false, 'Error deleting class-course assignment: ' . $stmt->error);
+            }
+            break;
+            
+        case 'get_list':
+            $sql = "SELECT cc.*, c.name as class_name, c.code as class_code, co.name as course_name, co.code as course_code, p.name as program_name, s.name as stream_name
+                    FROM class_courses cc 
+                    LEFT JOIN classes c ON cc.class_id = c.id 
+                    LEFT JOIN courses co ON cc.course_id = co.id 
+                    LEFT JOIN programs p ON c.program_id = p.id 
+                    LEFT JOIN streams s ON c.stream_id = s.id 
+                    ORDER BY c.name, co.name";
+            $result = $conn->query($sql);
+            
+            $assignments = [];
+            if ($result) {
+                while ($row = $result->fetch_assoc()) {
+                    $assignments[] = $row;
+                }
+            }
+            
+            sendResponse(true, 'Class-course assignments retrieved successfully', $assignments);
+            break;
+            
+        case 'get_classes':
+            $sql = "SELECT c.*, p.name as program_name, s.name as stream_name FROM classes c LEFT JOIN programs p ON c.program_id = p.id LEFT JOIN streams s ON c.stream_id = s.id WHERE c.is_active = 1 ORDER BY c.name";
+            $result = $conn->query($sql);
+            
+            $classes = [];
+            if ($result) {
+                while ($row = $result->fetch_assoc()) {
+                    $classes[] = $row;
+                }
+            }
+            
+            sendResponse(true, 'Classes retrieved successfully', $classes);
+            break;
+            
+        case 'get_courses':
+            $sql = "SELECT c.*, d.name as department_name FROM courses c LEFT JOIN departments d ON c.department_id = d.id WHERE c.is_active = 1 ORDER BY c.name";
+            $result = $conn->query($sql);
+            
+            $courses = [];
+            if ($result) {
+                while ($row = $result->fetch_assoc()) {
+                    $courses[] = $row;
+                }
+            }
+            
+            sendResponse(true, 'Courses retrieved successfully', $courses);
+            break;
+            
+        default:
+            sendResponse(false, 'Invalid class course action');
+    }
 }
 
 function handleCourseRoomTypeActions($action, $conn) {
