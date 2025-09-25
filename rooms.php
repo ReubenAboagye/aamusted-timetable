@@ -394,10 +394,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action) {
         }
     }
     
-    // Delete (soft delete: set is_active = 0)
+    // Delete (hard delete: remove from database)
     if ($action === 'delete' && isset($_POST['id'])) {
         $id = (int)$_POST['id'];
-        $sql = "UPDATE rooms SET is_active = 0 WHERE id = ?";
+        $sql = "DELETE FROM rooms WHERE id = ?";
         $stmt = $conn->prepare($sql);
         $stmt->bind_param("i", $id);
         if ($stmt->execute()) {
