@@ -95,14 +95,7 @@ $departments = [];
         <div class="table-header d-flex justify-content-between align-items-center">
             <h4><i class="fas fa-building me-2"></i>Department Management</h4>
             <div class="d-flex gap-2">
-                <!-- Search functionality -->
-                <div class="search-container me-3">
-                    <input type="text" id="searchInput" class="form-control search-input" placeholder="Search departments...">
-                </div>
-                <button class="btn btn-outline-light me-2" onclick="refreshData()" title="Refresh Data">
-                    <i class="fas fa-sync-alt me-1"></i>Refresh
-                </button>
-                <button class="btn btn-light" data-bs-toggle="modal" data-bs-target="#addDepartmentModal">
+                <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addDepartmentModal">
                     <i class="fas fa-plus me-1"></i>Add Department
                 </button>
             </div>
@@ -248,8 +241,6 @@ $(document).ready(function() {
     $('#addDepartmentForm').on('submit', handleAddDepartment);
     $('#editDepartmentForm').on('submit', handleEditDepartment);
     
-    // Initialize search functionality
-    AjaxUtils.initSearch('searchInput', 'tableBody');
 
     // Load initial data from server
     function loadInitialData() {
@@ -549,30 +540,6 @@ function renderTable() {
     }
 }
 
-function refreshData() {
-    const refreshBtn = document.querySelector('button[onclick="refreshData()"]');
-    const originalContent = refreshBtn.innerHTML;
-    refreshBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Refreshing...';
-    refreshBtn.disabled = true;
-    
-    AjaxUtils.makeRequest('department', 'get_list', {}, 3, 'ajax_test_simple.php')
-    .then(data => {
-        if (data.success) {
-            departments = data.data;
-            renderTable();
-            AjaxUtils.showAlert('Data refreshed successfully!', 'success');
-        } else {
-            throw new Error(data.message);
-        }
-    })
-    .catch(error => {
-        AjaxUtils.showAlert('Error refreshing data: ' + error.message, 'danger');
-    })
-    .finally(() => {
-        refreshBtn.innerHTML = originalContent;
-        refreshBtn.disabled = false;
-    });
-}
 
 function openEditModal(id, name, code, description, isActive) {
     document.getElementById('edit_dept_id').value = id;

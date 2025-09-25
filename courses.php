@@ -1,5 +1,6 @@
 <?php
 $pageTitle = 'Courses Management';
+$show_admin_jobs_modal = false; // Disable admin jobs modal to prevent fetchJobs errors
 
 // Database connection and flash functionality
 include 'connect.php';
@@ -95,14 +96,7 @@ $departments = [];
         <div class="table-header d-flex justify-content-between align-items-center">
             <h4><i class="fas fa-book me-2"></i>Courses Management</h4>
             <div class="d-flex gap-2">
-                <!-- Search functionality -->
-                <div class="search-container me-3">
-                    <input type="text" id="searchInput" class="form-control search-input" placeholder="Search courses...">
-                </div>
-                <button class="btn btn-outline-light me-2" onclick="refreshData()" title="Refresh Data">
-                    <i class="fas fa-sync-alt me-1"></i>Refresh
-                </button>
-                <button class="btn btn-light" data-bs-toggle="modal" data-bs-target="#addCourseModal">
+                <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addCourseModal">
                     <i class="fas fa-plus me-1"></i>Add Course
                 </button>
             </div>
@@ -264,8 +258,6 @@ $(document).ready(function() {
     $('#addCourseForm').on('submit', handleAddCourse);
     $('#editCourseForm').on('submit', handleEditCourse);
     
-    // Initialize search functionality
-    AjaxUtils.initSearch('searchInput', 'tableBody');
 
     // Load initial data from server
     function loadInitialData() {
@@ -498,35 +490,6 @@ $(document).ready(function() {
 });
 
 // Global functions for button clicks
-function refreshData() {
-    const refreshBtn = document.querySelector('button[onclick="refreshData()"]');
-    const originalContent = refreshBtn.innerHTML;
-    refreshBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Refreshing...';
-    refreshBtn.disabled = true;
-    
-    Promise.all([
-        AjaxUtils.makeRequest('course', 'get_list'),
-        AjaxUtils.makeRequest('department', 'get_list')
-    ])
-    .then(([coursesData, departmentsData]) => {
-        if (coursesData.success && departmentsData.success) {
-            courses = coursesData.data;
-            departments = departmentsData.data;
-            populateDepartmentDropdowns();
-            renderTable();
-            AjaxUtils.showAlert('Data refreshed successfully!', 'success');
-        } else {
-            throw new Error(coursesData.message || departmentsData.message);
-        }
-    })
-    .catch(error => {
-        AjaxUtils.showAlert('Error refreshing data: ' + error.message, 'danger');
-    })
-    .finally(() => {
-        refreshBtn.innerHTML = originalContent;
-        refreshBtn.disabled = false;
-    });
-}
 
 function openEditModal(id, name, code, departmentId, hoursPerWeek, isActive) {
     document.getElementById('edit_course_id').value = id;
