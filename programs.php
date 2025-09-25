@@ -28,6 +28,9 @@ $departments = [];
         <div class="table-header d-flex justify-content-between align-items-center">
             <h4><i class="fas fa-graduation-cap me-2"></i>Programs Management</h4>
             <div class="d-flex gap-2">
+                <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#importModal">
+                    <i class="fas fa-upload me-1"></i>Import Programs
+                </button>
                 <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addProgramModal">
                     <i class="fas fa-plus me-1"></i>Add Program
                 </button>

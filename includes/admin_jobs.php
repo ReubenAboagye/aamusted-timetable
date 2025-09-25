@@ -44,8 +44,11 @@ function fetchJobs() {
 }
 
 document.addEventListener('DOMContentLoaded', function() {
+  // Only run fetchJobs if admin jobs modal is enabled
+  <?php if (!isset($show_admin_jobs_modal) || $show_admin_jobs_modal !== false): ?>
   fetchJobs();
   setInterval(fetchJobs, 5000);
+  <?php endif; ?>
 });
 </script>
 
