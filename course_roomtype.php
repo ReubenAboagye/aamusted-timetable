@@ -36,30 +36,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($course_id <= 0 || !$room_type_id) {
             $error_message = 'Please select a valid course and room type.';
         } else {
-            // Check if course is already available
-            $check_sql = "SELECT COUNT(*) as count FROM course_room_types WHERE course_id = ?";
-            $check_stmt = $conn->prepare($check_sql);
-            $check_stmt->bind_param("i", $course_id);
-            $check_stmt->execute();
-            $check_result = $check_stmt->get_result();
-            $check_row = $check_result->fetch_assoc();
-
-            if ($check_row['count'] > 0) {
-                $error_message = "This course already has room type preferences set.";
+            // Verify that the room_type_id exists in the database
+            $verify_sql = "SELECT COUNT(*) as count FROM room_types WHERE id = ? AND is_active = 1";
+            $verify_stmt = $conn->prepare($verify_sql);
+            $verify_stmt->bind_param("i", $room_type_id);
+            $verify_stmt->execute();
+            $verify_result = $verify_stmt->get_result();
+            $verify_row = $verify_result->fetch_assoc();
+            $verify_stmt->close();
+            
+            if ($verify_row['count'] == 0) {
+                $error_message = 'Selected room type does not exist or is inactive.';
             } else {
-                $sql = "INSERT INTO course_room_types (course_id, room_type_id) VALUES (?, ?)";
-                $stmt = $conn->prepare($sql);
-                $stmt->bind_param("ii", $course_id, $room_type_id);
+                // Check if course is already available
+                $check_sql = "SELECT COUNT(*) as count FROM course_room_types WHERE course_id = ?";
+                $check_stmt = $conn->prepare($check_sql);
+                $check_stmt->bind_param("i", $course_id);
+                $check_stmt->execute();
+                $check_result = $check_stmt->get_result();
+                $check_row = $check_result->fetch_assoc();
 
-                if ($stmt->execute()) {
-                    $stmt->close();
-                    redirect_with_flash('course_roomtype.php', 'success', 'Course room type preference added successfully!');
+                if ($check_row['count'] > 0) {
+                    $error_message = "This course already has room type preferences set.";
                 } else {
-                    $error_message = "Error adding course room type preference.";
+                    $sql = "INSERT INTO course_room_types (course_id, room_type_id) VALUES (?, ?)";
+                    $stmt = $conn->prepare($sql);
+                    $stmt->bind_param("ii", $course_id, $room_type_id);
+
+                    if ($stmt->execute()) {
+                        $stmt->close();
+                        redirect_with_flash('course_roomtype.php', 'success', 'Course room type preference added successfully!');
+                    } else {
+                        $error_message = "Error adding course room type preference: " . $stmt->error;
+                    }
+                    $stmt->close();
                 }
-                $stmt->close();
+                $check_stmt->close();
             }
-            $check_stmt->close();
         }
 
     } elseif ($action === 'add_bulk') {
@@ -70,15 +83,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (empty($course_ids) || !$room_type_id) {
             $error_message = "Please select courses and specify a valid room type.";
         } else {
-            $stmt = $conn->prepare("INSERT IGNORE INTO course_room_types (course_id, room_type_id) VALUES (?, ?)");
+            // Verify that the room_type_id exists in the database
+            $verify_sql = "SELECT COUNT(*) as count FROM room_types WHERE id = ? AND is_active = 1";
+            $verify_stmt = $conn->prepare($verify_sql);
+            $verify_stmt->bind_param("i", $room_type_id);
+            $verify_stmt->execute();
+            $verify_result = $verify_stmt->get_result();
+            $verify_row = $verify_result->fetch_assoc();
+            $verify_stmt->close();
+            
+            if ($verify_row['count'] == 0) {
+                $error_message = 'Selected room type does not exist or is inactive.';
+            } else {
+                $stmt = $conn->prepare("INSERT IGNORE INTO course_room_types (course_id, room_type_id) VALUES (?, ?)");
 
-            foreach ($course_ids as $course_id) {
-                $cid = (int)$course_id;
-                $stmt->bind_param("ii", $cid, $room_type_id);
-                $stmt->execute();
+                foreach ($course_ids as $course_id) {
+                    $cid = (int)$course_id;
+                    $stmt->bind_param("ii", $cid, $room_type_id);
+                    $stmt->execute();
+                }
+                $stmt->close();
+                redirect_with_flash('course_roomtype.php', 'success', 'All selected courses have been assigned room type preferences!');
             }
-            $stmt->close();
-            redirect_with_flash('course_roomtype.php', 'success', 'All selected courses have been assigned room type preferences!');
         }
 
     } elseif ($action === 'delete' && isset($_POST['course_id'])) {
@@ -91,7 +117,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt->close();
             redirect_with_flash('course_roomtype.php', 'success', 'Course room type preference deleted successfully!');
         } else {
-            $error_message = "Error deleting course room type preference.";
+            $error_message = "Error deleting course room type preference: " . $stmt->error;
         }
         $stmt->close();
 
@@ -103,17 +129,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($course_id <= 0 || !$room_type_id) {
             $error_message = 'Invalid input for update.';
         } else {
-            $sql = "UPDATE course_room_types SET room_type_id = ? WHERE course_id = ?";
-            $stmt = $conn->prepare($sql);
-            $stmt->bind_param("ii", $room_type_id, $course_id);
-
-            if ($stmt->execute()) {
-                $stmt->close();
-                redirect_with_flash('course_roomtype.php', 'success', 'Course room type preference updated successfully!');
+            // Verify that the room_type_id exists in the database
+            $verify_sql = "SELECT COUNT(*) as count FROM room_types WHERE id = ? AND is_active = 1";
+            $verify_stmt = $conn->prepare($verify_sql);
+            $verify_stmt->bind_param("i", $room_type_id);
+            $verify_stmt->execute();
+            $verify_result = $verify_stmt->get_result();
+            $verify_row = $verify_result->fetch_assoc();
+            $verify_stmt->close();
+            
+            if ($verify_row['count'] == 0) {
+                $error_message = 'Selected room type does not exist or is inactive.';
             } else {
-                $error_message = "Error updating course room type preference.";
+                $sql = "UPDATE course_room_types SET room_type_id = ? WHERE course_id = ?";
+                $stmt = $conn->prepare($sql);
+                $stmt->bind_param("ii", $room_type_id, $course_id);
+
+                if ($stmt->execute()) {
+                    $stmt->close();
+                    redirect_with_flash('course_roomtype.php', 'success', 'Course room type preference updated successfully!');
+                } else {
+                    $error_message = "Error updating course room type preference: " . $stmt->error;
+                }
+                $stmt->close();
             }
-            $stmt->close();
         }
     }
 }
