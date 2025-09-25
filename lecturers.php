@@ -615,37 +615,4 @@ function deleteLecturer(id) {
 }
 </script>
 
-<<<<<<< Current (Your changes)
-<<<<<<< Current (Your changes)
-<<<<<<< Current (Your changes)
-// Set up drag/drop and file input
-document.addEventListener('DOMContentLoaded', function() {
-    const uploadArea = document.getElementById('uploadArea');
-    const fileInput = document.getElementById('csvFile');
-    const processBtn = document.getElementById('processBtn');
-
-    uploadArea.addEventListener('click', () => fileInput.click());
-    uploadArea.addEventListener('dragover', function(e){ e.preventDefault(); this.style.borderColor='#007bff'; this.style.background='#e3f2fd'; });
-    uploadArea.addEventListener('dragleave', function(e){ e.preventDefault(); this.style.borderColor='#ccc'; this.style.background='#f8f9fa'; });
-    uploadArea.addEventListener('drop', function(e){ e.preventDefault(); this.style.borderColor='#ccc'; this.style.background='#f8f9fa'; const files = e.dataTransfer.files; if (files.length) { fileInput.files = files; processLecturersFile(files[0]); } });
-    fileInput.addEventListener('change', function(){ if (this.files.length) processLecturersFile(this.files[0]); });
-
-    processBtn.addEventListener('click', function(){
-        const validData = importDataLecturers.filter(r => r.valid);
-        if (validData.length === 0) { alert('No valid records to import'); return; }
-        const form = document.createElement('form'); form.method='POST'; form.style.display='none';
-        const actionInput = document.createElement('input'); actionInput.type='hidden'; actionInput.name='action'; actionInput.value='bulk_import';
-        const dataInput = document.createElement('input'); dataInput.type='hidden'; dataInput.name='import_data'; dataInput.value = JSON.stringify(validData);
-        form.appendChild(actionInput); form.appendChild(dataInput); document.body.appendChild(form); form.submit();
-    });
-});
-</script>
-=======
 <?php include 'includes/footer.php'; ?>
->>>>>>> Incoming (Background Agent changes)
-=======
-<?php include 'includes/footer.php'; ?>
->>>>>>> Incoming (Background Agent changes)
-=======
-<?php include 'includes/footer.php'; ?>
->>>>>>> Incoming (Background Agent changes)
