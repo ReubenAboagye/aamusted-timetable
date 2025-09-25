@@ -235,9 +235,10 @@ $departments = [];
 </div>
 
 <script>
+// Global variables
+let departments = [];
+
 $(document).ready(function() {
-    // Global variables
-    let departments = [];
 
     // Load initial data
     loadInitialData();
@@ -452,13 +453,108 @@ $(document).ready(function() {
 });
 
 // Global functions for button clicks
+function loadInitialData() {
+    // Set a timeout for loading
+    const timeoutId = setTimeout(() => {
+        const loadingRow = document.getElementById('loadingRow');
+        if (loadingRow) {
+            loadingRow.innerHTML = `
+                <td colspan="6" class="text-center py-4">
+                    <div class="alert alert-warning">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        Loading is taking longer than expected. 
+                        <button class="btn btn-sm btn-outline-warning ms-2" onclick="loadInitialData()">
+                            <i class="fas fa-redo me-1"></i>Retry
+                        </button>
+                    </td>
+                </div>
+            `;
+        }
+    }, 10000); // 10 second timeout
+    
+    AjaxUtils.makeRequest('department', 'get_list', {}, 3, 'ajax_test_simple.php')
+    .then(data => {
+        clearTimeout(timeoutId);
+        if (data.success) {
+            departments = data.data;
+            renderTable();
+            console.log('Departments loaded successfully:', departments.length);
+        } else {
+            throw new Error(data.message);
+        }
+    })
+    .catch(error => {
+        clearTimeout(timeoutId);
+        console.error('Error loading departments:', error);
+        AjaxUtils.showAlert('Error loading departments: ' + error.message, 'danger');
+        
+        // Show error in table
+        const tbody = document.getElementById('tableBody');
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="6" class="text-center py-4">
+                    <div class="alert alert-danger">
+                        <i class="fas fa-exclamation-circle me-2"></i>
+                        Failed to load departments: ${error.message}
+                        <button class="btn btn-sm btn-outline-danger ms-2" onclick="loadInitialData()">
+                            <i class="fas fa-redo me-1"></i>Retry
+                        </button>
+                    </td>
+                </tr>
+            `;
+        });
+    });
+}
+
+function renderTable() {
+    const tbody = $('#tableBody');
+    tbody.empty();
+
+    if (departments.length === 0) {
+        tbody.append(`
+            <tr>
+                <td colspan="6" class="empty-state">
+                    <i class="fas fa-info-circle"></i>
+                    <p>No departments found</p>
+                </td>
+            </tr>
+        `);
+    } else {
+        departments.forEach(dept => {
+            tbody.append(`
+                <tr data-id="${dept.id}">
+                    <td><strong>${AjaxUtils.escapeHtml(dept.code)}</strong></td>
+                    <td>${AjaxUtils.escapeHtml(dept.name)}</td>
+                    <td>${AjaxUtils.escapeHtml(dept.description || '')}</td>
+                    <td><span class="badge bg-info">${dept.course_count || 0}</span></td>
+                    <td>
+                        <span class="badge ${dept.is_active ? 'bg-success' : 'bg-secondary'}">
+                            ${dept.is_active ? 'Active' : 'Inactive'}
+                        </span>
+                    </td>
+                    <td>
+                        <button class="btn btn-warning btn-sm me-1" 
+                                onclick="openEditModal(${dept.id}, '${AjaxUtils.escapeHtml(dept.name)}', '${AjaxUtils.escapeHtml(dept.code)}', '${AjaxUtils.escapeHtml(dept.description || '')}', ${dept.is_active})">
+                            <i class="fas fa-edit"></i>
+                        </button>
+                        <button class="btn btn-danger btn-sm" 
+                                onclick="deleteDepartment(${dept.id})">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </td>
+                </tr>
+            `);
+        });
+    }
+}
+
 function refreshData() {
     const refreshBtn = document.querySelector('button[onclick="refreshData()"]');
     const originalContent = refreshBtn.innerHTML;
     refreshBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Refreshing...';
     refreshBtn.disabled = true;
     
-    AjaxUtils.makeRequest('department', 'get_list')
+    AjaxUtils.makeRequest('department', 'get_list', {}, 3, 'ajax_test_simple.php')
     .then(data => {
         if (data.success) {
             departments = data.data;

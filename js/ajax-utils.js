@@ -16,14 +16,8 @@ window.AjaxUtils = {
     // CSRF token management
     csrfToken: null,
 
-    // Initialize CSRF token
-    init: function() {
-        this.csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || 
-                        document.querySelector('input[name="csrf_token"]')?.value;
-    },
-
     // Enhanced AJAX call with retry functionality
-    makeRequest: function(module, action, data = {}, retries = this.config.retryAttempts) {
+    makeRequest: function(module, action, data = {}, retries = this.config.retryAttempts, customUrl = null) {
         const formData = new FormData();
         formData.append('module', module);
         formData.append('action', action);
@@ -40,7 +34,8 @@ window.AjaxUtils = {
             }
         });
 
-        return fetch(this.config.apiUrl, {
+        const url = customUrl || this.config.apiUrl;
+        return fetch(url, {
             method: 'POST',
             body: formData,
             signal: AbortSignal.timeout(this.config.timeout)
@@ -250,9 +245,15 @@ window.AjaxUtils = {
         });
     },
 
+    // Initialize CSRF token
+    initCSRF: function() {
+        this.csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || 
+                        document.querySelector('input[name="csrf_token"]')?.value;
+    },
+
     // Initialize all common functionality
     init: function() {
-        this.init();
+        this.initCSRF();
         this.initFormValidation();
         
         // Add loading button styles if not already present
