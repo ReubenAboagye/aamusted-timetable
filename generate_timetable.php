@@ -791,6 +791,30 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
 <?php include 'includes/sidebar.php'; ?>
 
 <div class="main-content" id="mainContent">
+    <!-- Toast Container -->
+    <div class="toast-container position-fixed top-0 end-0 p-3" style="z-index: 1055;">
+        <div id="successToast" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
+            <div class="toast-header bg-success text-white">
+                <i class="fas fa-check-circle me-2"></i>
+                <strong class="me-auto">Success</strong>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast" aria-label="Close"></button>
+            </div>
+            <div class="toast-body" id="successToastBody">
+                <!-- Toast message will be inserted here -->
+            </div>
+        </div>
+        <div id="errorToast" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
+            <div class="toast-header bg-danger text-white">
+                <i class="fas fa-exclamation-circle me-2"></i>
+                <strong class="me-auto">Error</strong>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast" aria-label="Close"></button>
+            </div>
+            <div class="toast-body" id="errorToastBody">
+                <!-- Toast message will be inserted here -->
+            </div>
+        </div>
+    </div>
+    
     <div class="table-container">
         <div class="table-header d-flex justify-content-between align-items-center">
             <h4>
@@ -2181,7 +2205,7 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                                         WHEN (SELECT COUNT(*) FROM lecturer_courses lc3 WHERE lc3.course_id = co.id AND lc3.is_active = 1) = 0 THEN 'No lecturer assigned'
                                         WHEN (SELECT COUNT(*) FROM lecturer_courses lc3 WHERE lc3.course_id = co.id AND lc3.is_active = 1) > 1 THEN 'Multiple lecturers assigned'
                                         WHEN (SELECT COUNT(*) FROM rooms r WHERE r.is_active = 1) = 0 THEN 'No rooms available'
-                                        WHEN (SELECT COUNT(*) FROM time_slots ts WHERE ts.is_active = 1) = 0 THEN 'No time slots available'
+                                        WHEN (SELECT COUNT(*) FROM stream_time_slots sts WHERE sts.stream_id = c.stream_id AND sts.is_active = 1) = 0 THEN 'No time slots available'
                                         ELSE 'Scheduling conflict or insufficient resources'
                                     END as reason
                                 FROM class_courses cc
@@ -2595,6 +2619,9 @@ const availableRooms = <?php echo json_encode($all_rooms); ?>;
 let generatedTimetableData = null;
 let currentGenerationParams = null;
 
+// Current stream ID for modal functionality
+const currentStreamId = <?php echo $current_stream_id; ?>;
+
 document.addEventListener('DOMContentLoaded', function () {
     // Debug: Log available rooms
     console.log('Available rooms for edit modal:', availableRooms);
@@ -2979,46 +3006,26 @@ function hideGenerationOverlay() {
 
 // Show success message
 function showSuccessMessage(message) {
-    const alertDiv = document.createElement('div');
-    alertDiv.className = 'alert alert-success alert-dismissible fade show';
-    alertDiv.innerHTML = `
-        <i class="fas fa-check-circle me-2"></i>
-        ${message}
-        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-    `;
+    const toastBody = document.getElementById('successToastBody');
+    const toastElement = document.getElementById('successToast');
     
-    // Insert at the top of main content
-    const mainContent = document.getElementById('mainContent');
-    mainContent.insertBefore(alertDiv, mainContent.firstChild);
-    
-    // Auto-dismiss after 5 seconds
-    setTimeout(() => {
-        if (alertDiv.parentNode) {
-            alertDiv.remove();
-        }
-    }, 5000);
+    if (toastBody && toastElement) {
+        toastBody.textContent = message;
+        const toast = new bootstrap.Toast(toastElement);
+        toast.show();
+    }
 }
 
 // Show error message
 function showErrorMessage(message) {
-    const alertDiv = document.createElement('div');
-    alertDiv.className = 'alert alert-danger alert-dismissible fade show';
-    alertDiv.innerHTML = `
-        <i class="fas fa-exclamation-circle me-2"></i>
-        ${message}
-        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-    `;
+    const toastBody = document.getElementById('errorToastBody');
+    const toastElement = document.getElementById('errorToast');
     
-    // Insert at the top of main content
-    const mainContent = document.getElementById('mainContent');
-    mainContent.insertBefore(alertDiv, mainContent.firstChild);
-    
-    // Auto-dismiss after 8 seconds
-    setTimeout(() => {
-        if (alertDiv.parentNode) {
-            alertDiv.remove();
-        }
-    }, 8000);
+    if (toastBody && toastElement) {
+        toastBody.textContent = message;
+        const toast = new bootstrap.Toast(toastElement);
+        toast.show();
+    }
 }
 
 // Edit timetable cell function
@@ -3285,152 +3292,420 @@ function saveTimetableEdit() {
 
 // Manual scheduling modal functions
 function openManualSchedulingModal(classCourseId, className, courseCode, courseName, hoursPerWeek, lecturerCount) {
-    // Create modal HTML
-    const modalHtml = `
-        <div class="modal fade" id="manualSchedulingModal" tabindex="-1" aria-labelledby="manualSchedulingModalLabel" aria-hidden="true">
-            <div class="modal-dialog modal-lg">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h5 class="modal-title" id="manualSchedulingModalLabel">
-                            <i class="fas fa-plus-circle me-2"></i>Add Course to Timetable
-                        </h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+    // Auto-detect semester from course code
+    let detectedSemester = 1; // Default to first semester
+    if (courseCode) {
+        const match = courseCode.match(/(\d{3})/);
+        if (match) {
+            const threeDigit = match[1];
+            const secondDigit = parseInt(threeDigit.charAt(1));
+            detectedSemester = (secondDigit % 2 === 1) ? 1 : 2;
+        }
+    }
+    
+    // Get currently assigned lecturer info
+    fetch(`get_current_lecturer.php?class_course_id=${classCourseId}`)
+        .then(response => response.json())
+        .then(data => {
+            let lecturerInfo = '';
+            if (data.success && data.lecturer) {
+                lecturerInfo = `<br><strong>Current Lecturer:</strong> ${data.lecturer.name}`;
+            }
+            
+            // Create modal HTML with lecturer info
+            const modalHtml = `
+                <div class="modal fade" id="manualSchedulingModal" tabindex="-1" aria-labelledby="manualSchedulingModalLabel" aria-hidden="true">
+                    <div class="modal-dialog modal-lg">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title" id="manualSchedulingModalLabel">
+                                    <i class="fas fa-plus-circle me-2"></i>Add Course to Timetable
+                                </h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                            </div>
+                            <div class="modal-body">
+                                <form id="manualSchedulingForm">
+                                    <input type="hidden" id="manual_class_course_id" name="class_course_id" value="${classCourseId}">
+                                    
+                                    <div class="mb-3">
+                                        <label class="form-label">Course Information</label>
+                                        <div class="alert alert-info">
+                                            <strong>Class:</strong> ${className}<br>
+                                            <strong>Course:</strong> ${courseCode} - ${courseName}<br>
+                                            <strong>Duration:</strong> ${hoursPerWeek} hour(s)<br>
+                                            <strong>Detected Semester:</strong> ${detectedSemester === 1 ? 'First Semester' : 'Second Semester'}${lecturerInfo}
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label for="manual_day" class="form-label">Day</label>
+                                                <select class="form-select" id="manual_day" name="day_id" required>
+                                                    <option value="">Select Day</option>
+                                                    <option value="1">Monday</option>
+                                                    <option value="2">Tuesday</option>
+                                                    <option value="3">Wednesday</option>
+                                                    <option value="4">Thursday</option>
+                                                    <option value="5">Friday</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label for="manual_time_slot" class="form-label">Time Slot</label>
+                                                <select class="form-select" id="manual_time_slot" name="time_slot_id" required>
+                                                    <option value="">Select Time Slot</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label for="manual_room" class="form-label">Room</label>
+                                                <select class="form-select" id="manual_room" name="room_id" required>
+                                                    <option value="">Select Room</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label for="manual_lecturer" class="form-label">Lecturer</label>
+                                                <select class="form-select" id="manual_lecturer" name="lecturer_course_id">
+                                                    <option value="">Loading lecturers...</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="mb-3">
+                                        <label for="manual_semester" class="form-label">Semester</label>
+                                        <select class="form-select" id="manual_semester" name="semester" required>
+                                            <option value="1" ${detectedSemester === 1 ? 'selected' : ''}>First Semester</option>
+                                            <option value="2" ${detectedSemester === 2 ? 'selected' : ''}>Second Semester</option>
+                                        </select>
+                                    </div>
+                                </form>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                                <button type="button" class="btn btn-success" onclick="saveManualScheduling()">
+                                    <i class="fas fa-plus me-1"></i>Add to Timetable
+                                </button>
+                            </div>
+                        </div>
                     </div>
-                    <div class="modal-body">
-                        <form id="manualSchedulingForm">
-                            <input type="hidden" id="manual_class_course_id" name="class_course_id" value="${classCourseId}">
-                            
-                            <div class="mb-3">
-                                <label class="form-label">Course Information</label>
-                                <div class="alert alert-info">
-                                    <strong>Class:</strong> ${className}<br>
-                                    <strong>Course:</strong> ${courseCode} - ${courseName}<br>
-                                    <strong>Duration:</strong> ${hoursPerWeek} hour(s)
-                                </div>
-                            </div>
-                            
-                            <div class="row">
-                                <div class="col-md-6">
-                                    <div class="mb-3">
-                                        <label for="manual_day" class="form-label">Day</label>
-                                        <select class="form-select" id="manual_day" name="day_id" required>
-                                            <option value="">Select Day</option>
-                                            <option value="1">Monday</option>
-                                            <option value="2">Tuesday</option>
-                                            <option value="3">Wednesday</option>
-                                            <option value="4">Thursday</option>
-                                            <option value="5">Friday</option>
-                                        </select>
+                </div>
+            `;
+            
+            // Remove existing modal if any
+            const existingModal = document.getElementById('manualSchedulingModal');
+            if (existingModal) {
+                existingModal.remove();
+            }
+            
+            // Add modal to body
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+            
+            // Initialize lecturer dropdown - will be populated when time slot is selected
+            document.getElementById('manual_lecturer').innerHTML = '<option value="">Select a time slot first</option>';
+            
+            // Add event listeners for day and time slot changes
+            document.getElementById('manual_day').addEventListener('change', function() {
+                const dayId = this.value;
+                if (dayId) {
+                    loadTimeSlotsForManualScheduling(dayId);
+                    // Clear room and lecturer selection when day changes
+                    document.getElementById('manual_room').innerHTML = '<option value="">Select Room</option>';
+                    document.getElementById('manual_lecturer').innerHTML = '<option value="">Select a time slot first</option>';
+                } else {
+                    document.getElementById('manual_time_slot').innerHTML = '<option value="">Select Time Slot</option>';
+                    document.getElementById('manual_room').innerHTML = '<option value="">Select Room</option>';
+                    document.getElementById('manual_lecturer').innerHTML = '<option value="">Select a time slot first</option>';
+                }
+            });
+            
+            document.getElementById('manual_time_slot').addEventListener('change', function() {
+                const dayId = document.getElementById('manual_day').value;
+                const timeSlotId = this.value;
+                if (dayId && timeSlotId) {
+                    loadRoomsForManualScheduling(dayId, timeSlotId);
+                } else {
+                    document.getElementById('manual_room').innerHTML = '<option value="">Select Room</option>';
+                    document.getElementById('manual_lecturer').innerHTML = '<option value="">Select a time slot first</option>';
+                }
+            });
+            
+            // Show modal
+            const modal = new bootstrap.Modal(document.getElementById('manualSchedulingModal'));
+            modal.show();
+        })
+        .catch(error => {
+            console.error('Error loading lecturer info:', error);
+            // Show modal without lecturer info if there's an error
+            showModalWithoutLecturerInfo();
+        });
+    
+    function showModalWithoutLecturerInfo() {
+        // Create modal HTML without lecturer info
+        const modalHtml = `
+            <div class="modal fade" id="manualSchedulingModal" tabindex="-1" aria-labelledby="manualSchedulingModalLabel" aria-hidden="true">
+                <div class="modal-dialog modal-lg">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title" id="manualSchedulingModalLabel">
+                                <i class="fas fa-plus-circle me-2"></i>Add Course to Timetable
+                            </h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                        </div>
+                        <div class="modal-body">
+                            <form id="manualSchedulingForm">
+                                <input type="hidden" id="manual_class_course_id" name="class_course_id" value="${classCourseId}">
+                                
+                                <div class="mb-3">
+                                    <label class="form-label">Course Information</label>
+                                    <div class="alert alert-info">
+                                        <strong>Class:</strong> ${className}<br>
+                                        <strong>Course:</strong> ${courseCode} - ${courseName}<br>
+                                        <strong>Duration:</strong> ${hoursPerWeek} hour(s)<br>
+                                        <strong>Detected Semester:</strong> ${detectedSemester === 1 ? 'First Semester' : 'Second Semester'}
                                     </div>
                                 </div>
-                                <div class="col-md-6">
-                                    <div class="mb-3">
-                                        <label for="manual_time_slot" class="form-label">Time Slot</label>
-                                        <select class="form-select" id="manual_time_slot" name="time_slot_id" required>
-                                            <option value="">Select Time Slot</option>
-                                        </select>
+                                
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label for="manual_day" class="form-label">Day</label>
+                                            <select class="form-select" id="manual_day" name="day_id" required>
+                                                <option value="">Select Day</option>
+                                                <option value="1">Monday</option>
+                                                <option value="2">Tuesday</option>
+                                                <option value="3">Wednesday</option>
+                                                <option value="4">Thursday</option>
+                                                <option value="5">Friday</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label for="manual_time_slot" class="form-label">Time Slot</label>
+                                            <select class="form-select" id="manual_time_slot" name="time_slot_id" required>
+                                                <option value="">Select Time Slot</option>
+                                            </select>
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
-                            
-                            <div class="row">
-                                <div class="col-md-6">
-                                    <div class="mb-3">
-                                        <label for="manual_room" class="form-label">Room</label>
-                                        <select class="form-select" id="manual_room" name="room_id" required>
-                                            <option value="">Select Room</option>
-                                        </select>
+                                
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label for="manual_room" class="form-label">Room</label>
+                                            <select class="form-select" id="manual_room" name="room_id" required>
+                                                <option value="">Select Room</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label for="manual_lecturer" class="form-label">Lecturer</label>
+                                            <select class="form-select" id="manual_lecturer" name="lecturer_course_id">
+                                                <option value="">Loading lecturers...</option>
+                                            </select>
+                                        </div>
                                     </div>
                                 </div>
-                                <div class="col-md-6">
-                                    <div class="mb-3">
-                                        <label for="manual_lecturer" class="form-label">Lecturer</label>
-                                        <select class="form-select" id="manual_lecturer" name="lecturer_course_id">
-                                            <option value="">Loading lecturers...</option>
-                                        </select>
-                                    </div>
+                                
+                                <div class="mb-3">
+                                    <label for="manual_semester" class="form-label">Semester</label>
+                                    <select class="form-select" id="manual_semester" name="semester" required>
+                                        <option value="1" ${detectedSemester === 1 ? 'selected' : ''}>First Semester</option>
+                                        <option value="2" ${detectedSemester === 2 ? 'selected' : ''}>Second Semester</option>
+                                    </select>
                                 </div>
-                            </div>
-                            
-                            <div class="mb-3">
-                                <label for="manual_semester" class="form-label">Semester</label>
-                                <select class="form-select" id="manual_semester" name="semester" required>
-                                    <option value="1" selected>First Semester</option>
-                                    <option value="2">Second Semester</option>
-                                </select>
-                            </div>
-                        </form>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                        <button type="button" class="btn btn-success" onclick="saveManualScheduling()">
-                            <i class="fas fa-plus me-1"></i>Add to Timetable
-                        </button>
+                            </form>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                            <button type="button" class="btn btn-success" onclick="saveManualScheduling()">
+                                <i class="fas fa-plus me-1"></i>Add to Timetable
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
-        </div>
-    `;
-    
-    // Remove existing modal if any
-    const existingModal = document.getElementById('manualSchedulingModal');
-    if (existingModal) {
-        existingModal.remove();
+        `;
+        
+        // Remove existing modal if any
+        const existingModal = document.getElementById('manualSchedulingModal');
+        if (existingModal) {
+            existingModal.remove();
+        }
+        
+        // Add modal to body
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+        
+        // Initialize lecturer dropdown - will be populated when time slot is selected
+        document.getElementById('manual_lecturer').innerHTML = '<option value="">Select a time slot first</option>';
+        
+        // Add event listeners for day and time slot changes
+        document.getElementById('manual_day').addEventListener('change', function() {
+            const dayId = this.value;
+            if (dayId) {
+                loadTimeSlotsForManualScheduling(dayId);
+                // Clear room and lecturer selection when day changes
+                document.getElementById('manual_room').innerHTML = '<option value="">Select Room</option>';
+                document.getElementById('manual_lecturer').innerHTML = '<option value="">Select a time slot first</option>';
+            } else {
+                document.getElementById('manual_time_slot').innerHTML = '<option value="">Select Time Slot</option>';
+                document.getElementById('manual_room').innerHTML = '<option value="">Select Room</option>';
+                document.getElementById('manual_lecturer').innerHTML = '<option value="">Select a time slot first</option>';
+            }
+        });
+        
+        document.getElementById('manual_time_slot').addEventListener('change', function() {
+            const dayId = document.getElementById('manual_day').value;
+            const timeSlotId = this.value;
+            if (dayId && timeSlotId) {
+                loadRoomsForManualScheduling(dayId, timeSlotId);
+            } else {
+                document.getElementById('manual_room').innerHTML = '<option value="">Select Room</option>';
+                document.getElementById('manual_lecturer').innerHTML = '<option value="">Select a time slot first</option>';
+            }
+        });
+        
+        // Show modal
+        const modal = new bootstrap.Modal(document.getElementById('manualSchedulingModal'));
+        modal.show();
     }
-    
-    // Add modal to body
-    document.body.insertAdjacentHTML('beforeend', modalHtml);
-    
-    // Load time slots and rooms
-    loadTimeSlotsForManualScheduling();
-    loadRoomsForManualScheduling();
-    
-    // Load lecturers if multiple are available
-    if (lecturerCount > 1) {
-        loadLecturersForManualScheduling(classCourseId);
-    } else {
-        document.getElementById('manual_lecturer').innerHTML = '<option value="">No lecturer selection needed</option>';
-    }
-    
-    // Show modal
-    const modal = new bootstrap.Modal(document.getElementById('manualSchedulingModal'));
-    modal.show();
 }
 
-function loadTimeSlotsForManualScheduling() {
-    fetch('get_stream_time_slots.php')
+function loadTimeSlotsForManualScheduling(dayId = null) {
+    const timeSlotSelect = document.getElementById('manual_time_slot');
+    if (timeSlotSelect) {
+        timeSlotSelect.innerHTML = '<option value="">Loading time slots...</option>';
+    }
+    
+    let url = 'get_stream_time_slots.php';
+    if (dayId) {
+        url += `?day_id=${dayId}`;
+    }
+    
+    fetch(url)
         .then(response => response.json())
         .then(data => {
-            const timeSlotSelect = document.getElementById('manual_time_slot');
             if (timeSlotSelect && data.success) {
-                timeSlotSelect.innerHTML = '<option value="">Select Time Slot</option>';
-                data.data.forEach(slot => {
-                    const startTime = slot.start_time.substring(0, 5);
-                    const endTime = slot.end_time.substring(0, 5);
-                    timeSlotSelect.innerHTML += `<option value="${slot.id}">${startTime} - ${endTime}</option>`;
-                });
+                // Show all time slots with availability information
+                if (data.data && data.data.length > 0) {
+                    timeSlotSelect.innerHTML = '<option value="">Select Time Slot</option>';
+                    data.data.forEach(slot => {
+                        const startTime = slot.start_time.substring(0, 5);
+                        const endTime = slot.end_time.substring(0, 5);
+                        const roomsCount = slot.available_rooms_count || 0;
+                        const availabilityText = roomsCount > 0 ? ` (${roomsCount} rooms available)` : ' (No rooms available)';
+                        const disabledAttr = roomsCount === 0 ? ' disabled' : '';
+                        timeSlotSelect.innerHTML += `<option value="${slot.id}"${disabledAttr}>${startTime} - ${endTime}${availabilityText}</option>`;
+                    });
+                } else {
+                    timeSlotSelect.innerHTML = '<option value="">No time slots available</option>';
+                }
+            } else {
+                timeSlotSelect.innerHTML = '<option value="">Error loading time slots</option>';
             }
         })
         .catch(error => {
             console.error('Error loading time slots:', error);
+            if (timeSlotSelect) {
+                timeSlotSelect.innerHTML = '<option value="">Error loading time slots</option>';
+            }
         });
 }
 
-function loadRoomsForManualScheduling() {
-    fetch('api_timetable_template.php?action=get_rooms')
+function loadRoomsForManualScheduling(dayId = null, timeSlotId = null) {
+    const roomSelect = document.getElementById('manual_room');
+    const lecturerSelect = document.getElementById('manual_lecturer');
+    const classCourseId = document.getElementById('manual_class_course_id').value;
+    
+    if (roomSelect) {
+        roomSelect.innerHTML = '<option value="">Loading rooms...</option>';
+    }
+    if (lecturerSelect) {
+        lecturerSelect.innerHTML = '<option value="">Loading lecturers...</option>';
+    }
+    
+    // Load rooms
+    let roomUrl = 'api_timetable_template.php?action=get_rooms';
+    if (dayId && timeSlotId) {
+        roomUrl += `&day_id=${dayId}&time_slot_id=${timeSlotId}`;
+    }
+    
+    fetch(roomUrl)
         .then(response => response.json())
         .then(data => {
-            const roomSelect = document.getElementById('manual_room');
             if (roomSelect && data.success) {
-                roomSelect.innerHTML = '<option value="">Select Room</option>';
-                data.data.forEach(room => {
-                    roomSelect.innerHTML += `<option value="${room.id}">${room.name} (Capacity: ${room.capacity})</option>`;
-                });
+                if (data.data && data.data.length > 0) {
+                    roomSelect.innerHTML = '<option value="">Select Room</option>';
+                    data.data.forEach(room => {
+                        roomSelect.innerHTML += `<option value="${room.id}">${room.name}</option>`;
+                    });
+                } else {
+                    roomSelect.innerHTML = '<option value="">No rooms available</option>';
+                }
+            } else {
+                roomSelect.innerHTML = '<option value="">Error loading rooms</option>';
             }
         })
         .catch(error => {
             console.error('Error loading rooms:', error);
+            if (roomSelect) {
+                roomSelect.innerHTML = '<option value="">Error loading rooms</option>';
+            }
         });
+    
+    // Load available lecturers for this time slot
+    if (dayId && timeSlotId && classCourseId) {
+        const lecturerUrl = `check_lecturer_availability.php?day_id=${dayId}&time_slot_id=${timeSlotId}&class_course_id=${classCourseId}`;
+        
+        fetch(lecturerUrl)
+            .then(response => response.json())
+            .then(data => {
+                if (lecturerSelect && data.success) {
+                    if (data.data && data.data.length > 0) {
+                        lecturerSelect.innerHTML = '<option value="">Select Lecturer</option>';
+                        let assignedLecturerId = null;
+                        
+                        data.data.forEach(lecturer => {
+                            const selectedAttr = lecturer.is_currently_assigned ? ' selected' : '';
+                            const assignedText = lecturer.is_currently_assigned ? ' (Currently Assigned)' : '';
+                            lecturerSelect.innerHTML += `<option value="${lecturer.lecturer_course_id}"${selectedAttr}>${lecturer.lecturer_name}${assignedText}</option>`;
+                            
+                            if (lecturer.is_currently_assigned) {
+                                assignedLecturerId = lecturer.lecturer_course_id;
+                            }
+                        });
+                        
+                        // If there's an assigned lecturer, show a note
+                        if (assignedLecturerId) {
+                            const note = document.createElement('small');
+                            note.className = 'text-info';
+                            note.innerHTML = '<i class="fas fa-info-circle me-1"></i>Currently assigned lecturer is pre-selected';
+                            lecturerSelect.parentNode.appendChild(note);
+                        }
+                    } else {
+                        lecturerSelect.innerHTML = '<option value="">No lecturers available at this time</option>';
+                    }
+                } else {
+                    lecturerSelect.innerHTML = '<option value="">Error loading lecturers</option>';
+                }
+            })
+            .catch(error => {
+                console.error('Error loading lecturers:', error);
+                if (lecturerSelect) {
+                    lecturerSelect.innerHTML = '<option value="">Error loading lecturers</option>';
+                }
+            });
+    }
 }
 
 function loadLecturersForManualScheduling(classCourseId) {

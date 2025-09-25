@@ -212,13 +212,69 @@ try {
             break;
             
         case 'get_rooms':
-            $stmt = $conn->prepare("SELECT id, name, building, capacity, room_type FROM rooms ORDER BY building, name");
+            $day_id = $_GET['day_id'] ?? null;
+            $time_slot_id = $_GET['time_slot_id'] ?? null;
+            $stream_id = isset($_SESSION['current_stream_id']) ? $_SESSION['current_stream_id'] : 1;
+            
+            if ($day_id && $time_slot_id) {
+                // Get only available rooms
+                $query = "
+                    SELECT 
+                        r.id, 
+                        r.name, 
+                        r.building_id,
+                        b.name as building_name,
+                        r.capacity, 
+                        r.room_type
+                    FROM rooms r
+                    LEFT JOIN buildings b ON r.building_id = b.id
+                    WHERE r.is_active = 1
+                    AND NOT EXISTS (
+                        SELECT 1 
+                        FROM timetable t 
+                        JOIN class_courses cc ON t.class_course_id = cc.id
+                        JOIN classes c ON cc.class_id = c.id
+                        WHERE t.room_id = r.id 
+                        AND t.day_id = ? 
+                        AND t.time_slot_id = ? 
+                        AND c.stream_id = ?
+                    )
+                    ORDER BY b.name, r.name
+                ";
+                
+                $stmt = $conn->prepare($query);
+                $stmt->bind_param('iii', $day_id, $time_slot_id, $stream_id);
+            } else {
+                // Get all rooms without availability check
+                $query = "
+                    SELECT 
+                        r.id, 
+                        r.name, 
+                        r.building_id,
+                        b.name as building_name,
+                        r.capacity, 
+                        r.room_type
+                    FROM rooms r
+                    LEFT JOIN buildings b ON r.building_id = b.id
+                    WHERE r.is_active = 1
+                    ORDER BY b.name, r.name
+                ";
+                
+                $stmt = $conn->prepare($query);
+            }
+            
             $stmt->execute();
             $result = $stmt->get_result();
             
             $rooms = [];
             while ($row = $result->fetch_assoc()) {
-                $rooms[] = $row;
+                $rooms[] = [
+                    'id' => (int)$row['id'],
+                    'name' => $row['name'],
+                    'building_name' => $row['building_name'],
+                    'capacity' => (int)$row['capacity'],
+                    'room_type' => $row['room_type']
+                ];
             }
             
             $response['success'] = true;

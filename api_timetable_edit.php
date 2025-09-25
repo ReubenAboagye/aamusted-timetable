@@ -1,4 +1,7 @@
 <?php
+if (session_status() == PHP_SESSION_NONE) {
+    session_start();
+}
 header('Content-Type: application/json');
 include 'connect.php';
 
@@ -250,7 +253,7 @@ try {
         $check_day_stmt->close();
 
         // Validate time slot exists
-        $check_time_slot_sql = "SELECT id FROM time_slots WHERE id = ? AND is_active = 1";
+        $check_time_slot_sql = "SELECT id FROM time_slots WHERE id = ?";
         $check_time_slot_stmt = $conn->prepare($check_time_slot_sql);
         $check_time_slot_stmt->bind_param("i", $time_slot_id);
         $check_time_slot_stmt->execute();
@@ -271,16 +274,19 @@ try {
         }
         $check_room_stmt->close();
 
-        // Check if the slot is available (no conflicts)
+        // Check if the slot is available (no conflicts) - check only within the same stream
         $check_conflict_sql = "
             SELECT COUNT(*) as count 
-            FROM timetable 
-            WHERE day_id = ? 
-            AND time_slot_id = ? 
-            AND room_id = ?
+            FROM timetable t
+            JOIN class_courses cc ON t.class_course_id = cc.id
+            JOIN classes c ON cc.class_id = c.id
+            WHERE t.day_id = ? 
+            AND t.time_slot_id = ? 
+            AND t.room_id = ?
+            AND c.stream_id = ?
         ";
         $check_stmt = $conn->prepare($check_conflict_sql);
-        $check_stmt->bind_param("iii", $day_id, $time_slot_id, $room_id);
+        $check_stmt->bind_param("iiii", $day_id, $time_slot_id, $room_id, $_SESSION['current_stream_id']);
         $check_stmt->execute();
         $conflict_result = $check_stmt->get_result();
         $conflict_count = $conflict_result->fetch_assoc()['count'];
@@ -290,13 +296,22 @@ try {
             throw new Exception('The selected time slot and room combination is already occupied');
         }
 
+        // Get the current academic year in proper format
+        $current_year = (int)date('Y');
+        $current_month = (int)date('n');
+        if ($current_month >= 8) {
+            $academic_year = $current_year . '/' . ($current_year + 1);
+        } else {
+            $academic_year = ($current_year - 1) . '/' . $current_year;
+        }
+
         // Insert the new timetable entry
         $insert_sql = "
             INSERT INTO timetable (class_course_id, lecturer_course_id, day_id, time_slot_id, room_id, semester, academic_year, timetable_type, division_label, created_at) 
-            VALUES (?, ?, ?, ?, ?, ?, YEAR(CURDATE()), 'lecture', '', NOW())
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'lecture', '', NOW())
         ";
         $insert_stmt = $conn->prepare($insert_sql);
-        $insert_stmt->bind_param("iiiiii", $class_course_id, $lecturer_course_id, $day_id, $time_slot_id, $room_id, $semester);
+        $insert_stmt->bind_param("iiiiis", $class_course_id, $lecturer_course_id, $day_id, $time_slot_id, $room_id, $semester, $academic_year);
         
         if (!$insert_stmt->execute()) {
             throw new Exception('Failed to add timetable entry: ' . $insert_stmt->error);

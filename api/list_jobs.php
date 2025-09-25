@@ -1,10 +1,21 @@
 <?php
+if (session_status() == PHP_SESSION_NONE) {
+    session_start();
+}
 require_once __DIR__ . '/../connect.php';
 header('Content-Type: application/json');
 
 try {
     $stream_id = isset($_GET['stream_id']) ? intval($_GET['stream_id']) : null;
     $limit = isset($_GET['limit']) ? intval($_GET['limit']) : 100;
+
+    // Check if jobs table exists
+    $table_check = $conn->query("SHOW TABLES LIKE 'jobs'");
+    if ($table_check->num_rows === 0) {
+        // Jobs table doesn't exist, return empty array
+        echo json_encode(['success' => true, 'jobs' => []]);
+        exit;
+    }
 
     $sql = "SELECT id, job_type, stream_id, academic_year, semester, status, progress, result, error_message, created_at, updated_at FROM jobs";
     $params = [];
