@@ -182,104 +182,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action) {
         }
     }
     
-    // Import CSV
-    if ($action === 'import') {
-        if (!isset($_FILES['csv_file']) || $_FILES['csv_file']['error'] !== UPLOAD_ERR_OK) {
-            redirect_with_flash('rooms.php', 'error', 'Invalid import data.');
-        }
-        
-        $file = $_FILES['csv_file']['tmp_name'];
-        $handle = fopen($file, 'r');
-        if (!$handle) {
-            redirect_with_flash('rooms.php', 'error', 'Could not open uploaded file.');
-        }
-        
-        $imported = 0; $skipped = 0; $errors = [];
-        $row = 1; // Start at 1 for human-readable row numbers
-        
-        while (($data = fgetcsv($handle)) !== FALSE) {
-            $row++;
-            if (count($data) < 4) { $errors[] = "Row $row: Insufficient columns"; continue; }
-            
-            $name = trim($data[0]);
-            $building_name = trim($data[1]);
-            $room_type = trim($data[2]);
-            $capacity = (int)$data[3];
-            
-            if (empty($name) || empty($building_name)) { $errors[] = "Row $row: Missing name or building"; continue; }
-            
-            // Get or create building
-            $bst = $conn->prepare("SELECT id FROM buildings WHERE name = ? LIMIT 1");
-            $bst->bind_param('s', $building_name);
-            $bst->execute();
-            $bres = $bst->get_result();
-            
-            if ($bres && $bres->num_rows > 0) {
-                $building_id = $bres->fetch_assoc()['id'];
-            } else {
-                $bst->close();
-                $bst = $conn->prepare("INSERT INTO buildings (name) VALUES (?)");
-                $bst->bind_param('s', $building_name);
-                if ($bst->execute()) {
-                    $building_id = $conn->insert_id;
-                } else {
-                    $errors[] = "Row $row: Could not create building '$building_name'"; continue;
-                }
-            }
-            $bst->close();
-            
-            // Map room type
-            $room_type_mappings = [
-                'Classroom' => 'classroom',
-                'Lecture Hall' => 'lecture_hall',
-                'Laboratory' => 'laboratory',
-                'Computer Lab' => 'computer_lab',
-                'Seminar Room' => 'seminar_room',
-                'Auditorium' => 'auditorium'
-            ];
-            $db_room_type = $room_type_mappings[$room_type] ?? strtolower(str_replace(' ', '_', $room_type));
-            
-            // Check for duplicates
-            $check_sql = "SELECT id FROM rooms WHERE name = ? AND building_id = ?";
-            $check_stmt = $conn->prepare($check_sql);
-            $check_stmt->bind_param("si", $name, $building_id);
-            $check_stmt->execute();
-            $check_result = $check_stmt->get_result();
-            
-            if ($check_result && $check_result->num_rows > 0) {
-                $skipped++;
-                $check_stmt->close();
-                continue;
-            }
-            $check_stmt->close();
-            
-            // Insert room
-            $insert_sql = "INSERT INTO rooms (name, room_type, capacity, building_id, is_active) VALUES (?, ?, ?, ?, 1)";
-            $insert_stmt = $conn->prepare($insert_sql);
-            $insert_stmt->bind_param("ssii", $name, $db_room_type, $capacity, $building_id);
-            
-            if ($insert_stmt->execute()) {
-                $imported++;
-            } else {
-                $errors[] = "Row $row: Insert failed - " . $insert_stmt->error;
-            }
-            $insert_stmt->close();
-        }
-        fclose($handle);
-        
-        $message = "Imported $imported rooms.";
-        if ($skipped > 0) $message .= " Skipped $skipped duplicates.";
-        
-        if (count($errors) > 10) {
-            $short_errors = array_slice($errors, 0, 10);
-            $short_errors[] = "... and " . (count($errors) - 10) . " more errors";
-            redirect_with_flash('rooms.php', 'error', $message . ' Errors: ' . implode(' | ', $short_errors));
-        } else {
-            redirect_with_flash('rooms.php', 'success', $message);
-        }
-        exit;
-    }
-    
     // Handle multi-add (client sets action to 'add_multiple')
     if ($action === 'add_multiple') {
         // Expect building_id, multi_count, multi_start, room_type, capacity, is_active
@@ -288,7 +190,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action) {
         $multi_start = isset($_POST['multi_start']) ? (int)$_POST['multi_start'] : 1;
         $room_type = trim($conn->real_escape_string($_POST['room_type'] ?? 'Classroom'));
         $capacity = isset($_POST['capacity']) ? (int)$_POST['capacity'] : 30;
-        $is_active = isset($_POST['is_active']) ? 1 : 0;
 
         if ($building_id <= 0 || $multi_count <= 0) {
             $_SESSION['error_message'] = 'Invalid building or count for multiple add.';
@@ -323,7 +224,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action) {
         if ($bcode === '') $bcode = 'B' . $building_id;
 
         // Prepare statements
-        $insert_sql = "INSERT INTO rooms (name, room_type, capacity, building_id, is_active) VALUES (?, ?, ?, ?, ?)";
+        $insert_sql = "INSERT INTO rooms (name, room_type, capacity, building_id) VALUES (?, ?, ?, ?)";
         $insert_stmt = $conn->prepare($insert_sql);
         $check_sql = "SELECT id FROM rooms WHERE name = ? AND building_id = ? LIMIT 1";
         $check_stmt = $conn->prepare($check_sql);
@@ -343,7 +244,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action) {
             }
 
             if ($insert_stmt) {
-                $insert_stmt->bind_param('ssiii', $room_name, $db_room_type, $capacity, $building_id, $is_active);
+                $insert_stmt->bind_param('ssii', $room_name, $db_room_type, $capacity, $building_id);
                 if ($insert_stmt->execute()) { $imported++; } else { $errors[] = 'Insert failed for ' . $room_name . ': ' . $insert_stmt->error; }
             } else {
                 $errors[] = 'Insert statement prepare failed';
@@ -370,7 +271,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action) {
             header('Location: rooms.php'); exit;
         } else {
             $capacity = (int)$_POST['capacity'];
-            $is_active = isset($_POST['is_active']) ? 1 : 0;
 
             // Convert room type to database format (hardcoded mapping)
             $room_type_mappings = [
@@ -403,10 +303,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action) {
                 } else {
                     $check_stmt->close();
                     
-                    $sql = "INSERT INTO rooms (name, room_type, capacity, building_id, is_active) VALUES (?, ?, ?, ?, ?)";
+                    $sql = "INSERT INTO rooms (name, room_type, capacity, building_id) VALUES (?, ?, ?, ?)";
                     $stmt = $conn->prepare($sql);
                     if ($stmt) {
-                        $stmt->bind_param("ssiii", $name, $db_room_type, $capacity, $building_id, $is_active);
+                        $stmt->bind_param("ssii", $name, $db_room_type, $capacity, $building_id);
 
                         if ($stmt->execute()) {
                             $stmt->close();
@@ -439,7 +339,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action) {
             header('Location: rooms.php'); exit;
         } else {
             $capacity = (int)$_POST['capacity'];
-            $is_active = isset($_POST['is_active']) ? 1 : 0;
 
             // Convert room type to database format (hardcoded mapping)
             $room_type_mappings = [
@@ -472,10 +371,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action) {
                 } else {
                     $check_stmt->close();
                     
-                    $sql = "UPDATE rooms SET name = ?, room_type = ?, capacity = ?, building_id = ?, is_active = ? WHERE id = ?";
+                    $sql = "UPDATE rooms SET name = ?, room_type = ?, capacity = ?, building_id = ? WHERE id = ?";
                     $stmt = $conn->prepare($sql);
                     if ($stmt) {
-                        $stmt->bind_param("ssiiii", $name, $db_room_type, $capacity, $building_id, $is_active, $id);
+                        $stmt->bind_param("ssiii", $name, $db_room_type, $capacity, $building_id, $id);
 
                         if ($stmt->execute()) {
                             $stmt->close();
@@ -629,9 +528,6 @@ $result = $conn->query($sql);
                 <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addRoomModal">
                     <i class="fas fa-plus me-2"></i>Add New Room
                 </button>
-                <button class="btn btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#importModal">
-                    <i class="fas fa-file-import me-2"></i>Import CSV
-                </button>
             </div>
         </div>
         
@@ -696,10 +592,6 @@ $result = $conn->query($sql);
             <table class="table" id="roomsTable">
                 <thead>
                     <tr>
-                        <th>
-                            <input type="checkbox" id="selectAllRooms" class="form-check-input">
-                            <br><small class="text-muted">Active</small>
-                        </th>
                         <th>Room Name</th>
                         <th>Type</th>
                         <th>Capacity</th>
@@ -712,9 +604,6 @@ $result = $conn->query($sql);
                     <?php if ($result && $result->num_rows > 0): ?>
                         <?php while ($row = $result->fetch_assoc()): ?>
                             <tr>
-                                <td>
-                                    <input type="checkbox" class="form-check-input room-checkbox" value="<?php echo $row['id']; ?>" <?php echo $row['is_active'] ? 'checked' : ''; ?>>
-                                </td>
                                 <td><strong><?php echo htmlspecialchars($row['name']); ?></strong></td>
                                 <td>
                                     <?php 
@@ -741,7 +630,7 @@ $result = $conn->query($sql);
                                     <?php endif; ?>
                                 </td>
                                 <td>
-                                    <button class="btn btn-sm btn-outline-primary me-1" onclick="editRoom(<?php echo (int)$row['id']; ?>, '<?php echo addslashes($row['name']); ?>', <?php echo (int)$row['building_id']; ?>, '<?php echo addslashes(ucwords(str_replace('_', ' ', $row['room_type']))); ?>', <?php echo (int)$row['capacity']; ?>, <?php echo (int)$row['is_active']; ?>)">
+                                    <button class="btn btn-sm btn-outline-primary me-1" onclick="editRoom(<?php echo (int)$row['id']; ?>, '<?php echo addslashes($row['name']); ?>', <?php echo (int)$row['building_id']; ?>, '<?php echo addslashes(ucwords(str_replace('_', ' ', $row['room_type']))); ?>', <?php echo (int)$row['capacity']; ?>)">
                                         <i class="fas fa-edit"></i>
                                     </button>
                                     <form method="POST" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this room?')">
@@ -860,51 +749,12 @@ $result = $conn->query($sql);
                     
                     
 
-                    
-
-                    
-                    <div class="mb-3">
-                        <div class="form-check">
-                            <input class="form-check-input" type="checkbox" id="is_active" name="is_active" checked>
-                            <label class="form-check-label" for="is_active">
-                                Room Available
-                            </label>
-                        </div>
-                    </div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                     <button type="submit" class="btn btn-primary">Add Room</button>
                 </div>
             </form>
-        </div>
-    </div>
-</div>
-<!-- Import Modal -->
-<div class="modal fade" id="importModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Import Rooms (CSV)</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-                <div id="uploadArea" class="p-4 border rounded text-center" style="cursor:pointer;">
-                    <p>Click or drag a CSV file here to upload</p>
-                    <input type="file" id="csvFile" accept=".csv" style="display:none">
-                </div>
-
-                <div class="mt-3">
-                    <table class="table" id="importPreviewTable">
-                        <thead><tr><th>#</th><th>Name</th><th>Type</th><th>Capacity</th><th>Building</th><th>Status</th></tr></thead>
-                        <tbody></tbody>
-                    </table>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-primary" id="processBtn">Import Selected</button>
-            </div>
         </div>
     </div>
 </div>
@@ -984,15 +834,6 @@ $result = $conn->query($sql);
 
                     
 
-                    
-                    <div class="mb-3">
-                        <div class="form-check">
-                            <input class="form-check-input" type="checkbox" id="edit_is_active" name="is_active">
-                            <label class="form-check-label" for="edit_is_active">
-                                Room Available
-                            </label>
-                        </div>
-                    </div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
@@ -1064,12 +905,6 @@ $result = $conn->query($sql);
                             <input class="form-check-input" type="checkbox" id="bulk_edit_status_check">
                             <label class="form-check-label" for="bulk_edit_status_check">Update status</label>
                         </div>
-                        <div class="form-check mt-2">
-                            <input class="form-check-input" type="checkbox" id="bulk_edit_is_active" name="is_active" disabled>
-                            <label class="form-check-label" for="bulk_edit_is_active">
-                                Room Available
-                            </label>
-                                </div>
                             </div>
                                 </div>
                 <div class="modal-footer">
@@ -1261,7 +1096,7 @@ function waitForBootstrap(callback, maxWait = 5000) {
     checkBootstrap();
 }
 
-function editRoom(id, name, buildingId, roomType, capacity, isActive) {
+function editRoom(id, name, buildingId, roomType, capacity) {
     if (!ensureBootstrapLoaded()) return;
 
     document.getElementById('edit_id').value = id;
@@ -1280,11 +1115,6 @@ function editRoom(id, name, buildingId, roomType, capacity, isActive) {
         'auditorium': 'Auditorium'
     };
     editRoomType.value = roomTypeMappings[roomType] || roomType || 'Classroom';
-
-
-
-    // Set is_active checkbox
-    document.getElementById('edit_is_active').checked = !!isActive;
 
     var el = document.getElementById('editRoomModal');
     if (!el) return console.error('editRoomModal element missing');
@@ -1691,10 +1521,7 @@ function setupBulkEditModal() {
     // Setup checkbox controls for enabling/disabling fields
     const checkboxes = [
         { id: 'bulk_edit_room_type_check', target: 'bulk_edit_room_type' },
-        { id: 'bulk_edit_capacity_check', target: 'bulk_edit_capacity' },
-
-
-        { id: 'bulk_edit_status_check', target: 'bulk_edit_is_active' }
+        { id: 'bulk_edit_capacity_check', target: 'bulk_edit_capacity' }
     ];
     
     checkboxes.forEach(item => {
