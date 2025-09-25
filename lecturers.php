@@ -148,11 +148,27 @@ $departments = [];
             margin-bottom: 0.5rem;
         }
         
-        .btn {
-            width: 100%;
-            margin-bottom: 0.25rem;
-        }
+    .btn {
+        width: 100%;
+        margin-bottom: 0.25rem;
     }
+}
+
+/* Upload area styling */
+.upload-area {
+    transition: all 0.3s ease;
+    border: 2px dashed #dee2e6 !important;
+}
+
+.upload-area:hover {
+    border-color: var(--primary-color) !important;
+    background-color: rgba(128, 0, 32, 0.05);
+}
+
+.upload-area.border-primary {
+    border-color: var(--primary-color) !important;
+    background-color: rgba(128, 0, 32, 0.1);
+}
 </style>
 
 <div class="main-content" id="mainContent">
@@ -166,6 +182,9 @@ $departments = [];
                 </div>
                 <button class="btn btn-outline-light me-2" onclick="refreshData()" title="Refresh Data">
                     <i class="fas fa-sync-alt me-1"></i>Refresh
+                </button>
+                <button class="btn btn-success me-2" data-bs-toggle="modal" data-bs-target="#importLecturerModal" title="Import Lecturers">
+                    <i class="fas fa-file-import me-1"></i>Import
                 </button>
                 <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addLecturerModal">
                     <i class="fas fa-plus me-1"></i>Add Lecturer
@@ -293,11 +312,62 @@ $departments = [];
     </div>
 </div>
 
+<!-- Import Lecturer Modal -->
+<div class="modal fade" id="importLecturerModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Import Lecturers (CSV)</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <div id="uploadArea" class="upload-area p-4 text-center border rounded" style="cursor:pointer;">
+                        <i class="fas fa-cloud-upload-alt fa-2x text-muted mb-2"></i>
+                        <p class="mb-1">Drop CSV file here or <strong>click to browse</strong></p>
+                        <small class="text-muted">Expected headers: name,department_id,is_active</small>
+                    </div>
+                    <input type="file" class="form-control d-none" id="csvFile" accept=".csv,text/csv">
+                </div>
+
+                <div class="mb-3">
+                    <h6>Preview (first 10 rows)</h6>
+                    <div class="table-responsive" style="max-height:300px;overflow:auto">
+                        <table class="table table-sm table-bordered">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>#</th>
+                                    <th>Name</th>
+                                    <th>Dept ID</th>
+                                    <th>Status</th>
+                                    <th>Validation</th>
+                                </tr>
+                            </thead>
+                            <tbody id="previewBody">
+                                <tr>
+                                    <td colspan="5" class="text-center text-muted">Upload a CSV file to preview</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div id="importSummary"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="processBtn" disabled>Process File</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
 $(document).ready(function() {
     // Global variables
     let lecturers = [];
     let departments = [];
+    let importDataLecturers = [];
+    let currentImportStep = 1;
 
     // Load initial data
     loadInitialData();
@@ -308,6 +378,9 @@ $(document).ready(function() {
     
     // Initialize search functionality
     AjaxUtils.initSearch('searchInput', 'tableBody');
+
+    // Setup import functionality
+    setupImportFunctionality();
 
     // Load initial data from server
     function loadInitialData() {
@@ -612,6 +685,267 @@ function deleteLecturer(id) {
         deleteBtn.innerHTML = originalContent;
         deleteBtn.disabled = false;
     });
+}
+
+// Import functionality
+let importDataLecturers = [];
+
+// Setup import functionality
+function setupImportFunctionality() {
+    const uploadArea = document.getElementById('uploadArea');
+    const csvFile = document.getElementById('csvFile');
+    const processBtn = document.getElementById('processBtn');
+
+    // Click to browse
+    uploadArea.addEventListener('click', () => csvFile.click());
+
+    // File input change
+    csvFile.addEventListener('change', handleFileSelect);
+
+    // Drag and drop
+    uploadArea.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        uploadArea.classList.add('border-primary');
+    });
+
+    uploadArea.addEventListener('dragleave', () => {
+        uploadArea.classList.remove('border-primary');
+    });
+
+    uploadArea.addEventListener('drop', (e) => {
+        e.preventDefault();
+        uploadArea.classList.remove('border-primary');
+        const files = e.dataTransfer.files;
+        if (files.length > 0) {
+            csvFile.files = files;
+            handleFileSelect();
+        }
+    });
+
+    // Process button
+    processBtn.addEventListener('click', processLecturerImport);
+}
+
+function handleFileSelect() {
+    const file = document.getElementById('csvFile').files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            const data = parseLecturerCSV(e.target.result);
+            if (data.length > 0) {
+                importDataLecturers = validateLecturerData(data);
+                showLecturerPreview();
+                document.getElementById('processBtn').disabled = false;
+            } else {
+                showImportAlert('No data found in the file.', 'warning');
+            }
+        } catch (error) {
+            showImportAlert('Error processing file: ' + error.message, 'danger');
+        }
+    };
+    reader.readAsText(file);
+}
+
+function parseLecturerCSV(csvText) {
+    const lines = csvText.split('\n').filter(l => l.trim());
+    if (lines.length < 2) {
+        throw new Error('CSV file must contain at least a header row and one data row');
+    }
+    
+    // Parse header row
+    const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, '').toLowerCase());
+    
+    // Expected headers
+    const expectedHeaders = ['name', 'department_id', 'is_active'];
+    const missingHeaders = expectedHeaders.filter(h => !headers.includes(h));
+    
+    if (missingHeaders.length > 0) {
+        throw new Error(`Missing required headers: ${missingHeaders.join(', ')}`);
+    }
+    
+    const data = [];
+    
+    // Parse data rows (skip header)
+    for (let i = 1; i < lines.length; i++) {
+        const values = lines[i].split(',').map(v => v.trim().replace(/"/g, ''));
+        if (values.length >= 2) {
+            const row = {};
+            headers.forEach((header, index) => {
+                row[header] = values[index] || '';
+            });
+            data.push(row);
+        }
+    }
+    
+    return data;
+}
+
+function validateLecturerData(data) {
+    return data.map((row, index) => {
+        const validated = {
+            name: row.name.trim(),
+            department_id: parseInt(row.department_id) || 0,
+            is_active: (row.is_active === '1' || row.is_active === 'true' || row.is_active === '') ? 1 : 0
+        };
+        
+        validated.valid = true;
+        validated.errors = [];
+        
+        if (!validated.name) {
+            validated.valid = false;
+            validated.errors.push('Name required');
+        }
+        
+        if (!validated.department_id || validated.department_id <= 0) {
+            validated.valid = false;
+            validated.errors.push('Valid department ID required');
+        } else {
+            // Check if department exists
+            const dept = departments.find(d => d.id == validated.department_id);
+            if (!dept) {
+                validated.valid = false;
+                validated.errors.push('Department does not exist');
+            } else {
+                validated.department_name = dept.name;
+            }
+        }
+        
+        // Check for duplicate name+department
+        const existingLecturer = lecturers.find(l => 
+            l.name.toLowerCase() === validated.name.toLowerCase() && 
+            l.department_id == validated.department_id
+        );
+        if (existingLecturer) {
+            validated.valid = false;
+            validated.errors.push('Lecturer already exists in this department');
+        }
+        
+        return validated;
+    });
+}
+
+function showLecturerPreview() {
+    const tbody = document.getElementById('previewBody');
+    tbody.innerHTML = '';
+    const previewRows = importDataLecturers.slice(0, 10);
+    let validCount = 0;
+    let errorCount = 0;
+
+    previewRows.forEach((row, index) => {
+        const rowClass = row.valid ? 'table-success' : 'table-danger';
+        tbody.innerHTML += `
+            <tr class="${rowClass}">
+                <td>${index + 1}</td>
+                <td>${AjaxUtils.escapeHtml(row.name)}</td>
+                <td>${row.department_id}</td>
+                <td>${row.is_active ? 'Active' : 'Inactive'}</td>
+                <td>
+                    <span class="badge ${row.valid ? 'bg-success' : 'bg-danger'}">
+                        ${row.valid ? 'Valid' : 'Invalid'}
+                    </span>
+                    ${row.errors.length > 0 ? '<br><small>' + row.errors.join(', ') + '</small>' : ''}
+                </td>
+            </tr>
+        `;
+        
+        if (row.valid) validCount++;
+        else errorCount++;
+    });
+
+    // Show summary
+    const summaryDiv = document.getElementById('importSummary');
+    summaryDiv.innerHTML = `
+        <div class="alert alert-info">
+            <strong>Summary:</strong> 
+            <span class="text-success">${validCount} valid</span>, 
+            <span class="text-danger">${errorCount} invalid</span> records
+            ${importDataLecturers.length > 10 ? ` (showing first 10 of ${importDataLecturers.length})` : ''}
+        </div>
+    `;
+}
+
+async function processLecturerImport() {
+    const validRecords = importDataLecturers.filter(row => row.valid);
+    
+    if (validRecords.length === 0) {
+        showImportAlert('No valid records to import.', 'warning');
+        return;
+    }
+    
+    const processBtn = document.getElementById('processBtn');
+    const originalText = processBtn.innerHTML;
+    processBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Processing...';
+    processBtn.disabled = true;
+    
+    try {
+        // Prepare data for import
+        const importData = validRecords.map(row => ({
+            name: row.name,
+            department_id: row.department_id,
+            is_active: row.is_active
+        }));
+        
+        const response = await fetch('ajax_api.php', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: `module=lecturer&action=bulk_import&import_data=${encodeURIComponent(JSON.stringify(importData))}&csrf_token=${getCSRFToken()}`
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            AjaxUtils.showAlert(data.message, 'success');
+            
+            // Add new lecturers to the list
+            if (data.data && data.data.added_lecturers) {
+                data.data.added_lecturers.forEach(lecturer => {
+                    lecturers.push(lecturer);
+                });
+                renderTable();
+            }
+            
+            // Close modal
+            bootstrap.Modal.getInstance(document.getElementById('importLecturerModal')).hide();
+            
+            // Reset form
+            document.getElementById('csvFile').value = '';
+            document.getElementById('previewBody').innerHTML = '<tr><td colspan="5" class="text-center text-muted">Upload a CSV file to preview</td></tr>';
+            document.getElementById('importSummary').innerHTML = '';
+            processBtn.disabled = true;
+        } else {
+            AjaxUtils.showAlert(data.message, 'danger');
+        }
+    } catch (error) {
+        AjaxUtils.showAlert('Error importing lecturers: ' + error.message, 'danger');
+    } finally {
+        processBtn.innerHTML = originalText;
+        processBtn.disabled = false;
+    }
+}
+
+function showImportAlert(message, type) {
+    const alertClass = type === 'warning' ? 'alert-warning' : 'alert-danger';
+    const alertHtml = `
+        <div class="alert ${alertClass} alert-dismissible fade show" role="alert">
+            ${AjaxUtils.escapeHtml(message)}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+    `;
+    
+    const container = document.querySelector('#importLecturerModal .modal-body');
+    const existingAlert = container.querySelector('.alert');
+    if (existingAlert) {
+        existingAlert.remove();
+    }
+    container.insertAdjacentHTML('afterbegin', alertHtml);
+}
+
+function getCSRFToken() {
+    return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
 }
 </script>
 
