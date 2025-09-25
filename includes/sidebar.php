@@ -38,6 +38,9 @@
           <a href="rooms.php" class="nav-link <?= ($currentPage == 'rooms.php') ? 'active' : '' ?>">
             <i class="fas fa-door-open me-2"></i>Rooms
           </a>
+          <a href="room_types.php" class="nav-link <?= ($currentPage == 'room_types.php') ? 'active' : '' ?>">
+            <i class="fas fa-tags me-2"></i>Room Types
+          </a>
         </div>
       </div>
     </div>
