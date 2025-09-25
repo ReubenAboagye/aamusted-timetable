@@ -44,18 +44,50 @@ if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== $_SESSION['csrf_tok
 }
 
 try {
-    if ($module === 'department' && $action === 'get_list') {
-        $sql = "SELECT d.*, COUNT(c.id) as course_count FROM departments d LEFT JOIN courses c ON d.id = c.department_id GROUP BY d.id ORDER BY d.name";
-        $result = $conn->query($sql);
-        
-        $departments = [];
-        if ($result) {
-            while ($row = $result->fetch_assoc()) {
-                $departments[] = $row;
+    if ($module === 'department') {
+        if ($action === 'get_list') {
+            $sql = "SELECT d.*, COUNT(c.id) as course_count FROM departments d LEFT JOIN courses c ON d.id = c.department_id GROUP BY d.id ORDER BY d.name";
+            $result = $conn->query($sql);
+            
+            $departments = [];
+            if ($result) {
+                while ($row = $result->fetch_assoc()) {
+                    $departments[] = $row;
+                }
             }
+            
+            sendResponse(true, 'Departments retrieved successfully', $departments);
+        } elseif ($action === 'delete') {
+            $id = (int)($_POST['id'] ?? 0);
+            
+            if ($id <= 0) {
+                sendResponse(false, 'Invalid department ID');
+            }
+            
+            // Check if department has associated courses
+            $check_sql = "SELECT COUNT(*) as count FROM courses WHERE department_id = ?";
+            $check_stmt = $conn->prepare($check_sql);
+            $check_stmt->bind_param("i", $id);
+            $check_stmt->execute();
+            $result = $check_stmt->get_result();
+            $row = $result->fetch_assoc();
+            
+            if ($row['count'] > 0) {
+                sendResponse(false, 'Cannot delete department with associated courses');
+            }
+            
+            $sql = "DELETE FROM departments WHERE id = ?";
+            $stmt = $conn->prepare($sql);
+            $stmt->bind_param("i", $id);
+            
+            if ($stmt->execute()) {
+                sendResponse(true, 'Department deleted successfully!');
+            } else {
+                sendResponse(false, 'Error deleting department: ' . $stmt->error);
+            }
+        } else {
+            sendResponse(false, 'Invalid department action');
         }
-        
-        sendResponse(true, 'Departments retrieved successfully', $departments);
     } else {
         sendResponse(false, 'Invalid module or action');
     }

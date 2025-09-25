@@ -1,5 +1,6 @@
 <?php
 $pageTitle = 'Department Management';
+$show_admin_jobs_modal = false; // Disable admin jobs modal to prevent fetchJobs errors
 
 // Database connection and flash functionality
 include 'connect.php';
@@ -270,7 +271,7 @@ $(document).ready(function() {
             }
         }, 10000); // 10 second timeout
         
-        AjaxUtils.makeRequest('department', 'get_list')
+        AjaxUtils.makeRequest('department', 'get_list', {}, 3, 'ajax_test_simple.php')
         .then(data => {
             clearTimeout(timeoutId);
             if (data.success) {
@@ -499,10 +500,10 @@ function loadInitialData() {
                         <button class="btn btn-sm btn-outline-danger ms-2" onclick="loadInitialData()">
                             <i class="fas fa-redo me-1"></i>Retry
                         </button>
-                    </td>
-                </tr>
-            `;
-        });
+                    </div>
+                </td>
+            </tr>
+        `;
     });
 }
 
@@ -594,7 +595,7 @@ function deleteDepartment(id) {
     deleteBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
     deleteBtn.disabled = true;
     
-    AjaxUtils.makeRequest('department', 'delete', { id: id })
+    AjaxUtils.makeRequest('department', 'delete', { id: id }, 3, 'ajax_test_simple.php')
     .then(data => {
         if (data.success) {
             AjaxUtils.showAlert(data.message, 'success');
