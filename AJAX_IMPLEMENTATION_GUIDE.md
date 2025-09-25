@@ -1,5 +1,119 @@
+# AJAX Implementation Template and Documentation
+
+## 🎉 **AJAX Implementation Progress**
+
+### ✅ **Completed Pages:**
+1. **course_roomtype.php** - ✅ Fully converted with advanced features
+2. **department.php** - ✅ Converted to AJAX
+3. **courses.php** - ✅ Converted to AJAX  
+4. **lecturers.php** - ✅ Converted to AJAX
+
+### 📋 **Remaining Pages to Convert:**
+- programs.php
+- classes.php
+- rooms.php
+- levels.php
+- streams.php
+- lecturer_courses.php
+- class_courses.php
+
+## 🏗️ **AJAX Infrastructure Created:**
+
+### 1. **Centralized AJAX API** (`ajax_api.php`)
+- ✅ Handles all CRUD operations across modules
+- ✅ CSRF protection
+- ✅ Input sanitization
+- ✅ Error handling
+- ✅ JSON responses
+
+### 2. **Shared JavaScript Utilities** (`js/ajax-utils.js`)
+- ✅ Enhanced AJAX calls with retry logic
+- ✅ Form validation
+- ✅ Loading states
+- ✅ Alert system
+- ✅ Search/filter functionality
+- ✅ Animation utilities
+
+### 3. **Updated Header** (`includes/header.php`)
+- ✅ jQuery included
+- ✅ AJAX utilities loaded
+- ✅ CSRF token meta tag
+
+## 📝 **Template for Converting Remaining Pages:**
+
+### **Step 1: Update AJAX API Handler**
+Add the module handler to `ajax_api.php`:
+
+```php
+// Example for programs module
+function handleProgramActions($action, $conn) {
+    switch ($action) {
+        case 'add':
+            $name = sanitizeInput($_POST['name'] ?? '');
+            $code = sanitizeInput($_POST['code'] ?? '');
+            $is_active = isset($_POST['is_active']) ? 1 : 0;
+            
+            if (empty($name) || empty($code)) {
+                sendResponse(false, 'Name and code are required');
+            }
+            
+            // Check if program code already exists
+            $check_sql = "SELECT id FROM programs WHERE code = ?";
+            $check_stmt = $conn->prepare($check_sql);
+            $check_stmt->bind_param("s", $code);
+            $check_stmt->execute();
+            $result = $check_stmt->get_result();
+            
+            if ($result->num_rows > 0) {
+                sendResponse(false, 'Program code already exists');
+            }
+            
+            $sql = "INSERT INTO programs (name, code, is_active) VALUES (?, ?, ?)";
+            $stmt = $conn->prepare($sql);
+            $stmt->bind_param("ssi", $name, $code, $is_active);
+            
+            if ($stmt->execute()) {
+                $new_id = $conn->insert_id;
+                sendResponse(true, 'Program added successfully!', ['id' => $new_id]);
+            } else {
+                sendResponse(false, 'Error adding program: ' . $stmt->error);
+            }
+            break;
+            
+        case 'edit':
+            // Edit logic here
+            break;
+            
+        case 'delete':
+            // Delete logic here
+            break;
+            
+        case 'get_list':
+            $sql = "SELECT * FROM programs ORDER BY name";
+            $result = $conn->query($sql);
+            
+            $programs = [];
+            if ($result) {
+                while ($row = $result->fetch_assoc()) {
+                    $programs[] = $row;
+                }
+            }
+            
+            sendResponse(true, 'Programs retrieved successfully', $programs);
+            break;
+            
+        default:
+            sendResponse(false, 'Invalid program action');
+    }
+}
+```
+
+### **Step 2: Create AJAX Page Template**
+Use this template for each page:
+
+```php
 <?php
-$pageTitle = 'Department Management';
+$pageTitle = 'Module Management';
 
 // Database connection and flash functionality
 include 'connect.php';
@@ -19,7 +133,8 @@ include 'includes/header.php';
 include 'includes/sidebar.php';
 
 // Initialize empty arrays for data - will be populated via AJAX
-$departments = [];
+$items = [];
+$relatedData = []; // If needed for dropdowns
 ?>
 
 <!-- Additional CSS for enhanced styling -->
@@ -92,17 +207,17 @@ $departments = [];
 <div class="main-content" id="mainContent">
     <div class="table-container">
         <div class="table-header d-flex justify-content-between align-items-center">
-            <h4><i class="fas fa-building me-2"></i>Department Management</h4>
+            <h4><i class="fas fa-icon me-2"></i>Module Management</h4>
             <div class="d-flex gap-2">
                 <!-- Search functionality -->
                 <div class="search-container me-3">
-                    <input type="text" id="searchInput" class="form-control search-input" placeholder="Search departments...">
+                    <input type="text" id="searchInput" class="form-control search-input" placeholder="Search items...">
                 </div>
                 <button class="btn btn-outline-light me-2" onclick="refreshData()" title="Refresh Data">
                     <i class="fas fa-sync-alt me-1"></i>Refresh
                 </button>
-                <button class="btn btn-light" data-bs-toggle="modal" data-bs-target="#addDepartmentModal">
-                    <i class="fas fa-plus me-1"></i>Add Department
+                <button class="btn btn-light" data-bs-toggle="modal" data-bs-target="#addItemModal">
+                    <i class="fas fa-plus me-1"></i>Add Item
                 </button>
             </div>
         </div>
@@ -111,13 +226,11 @@ $departments = [];
         <div id="alertContainer" class="m-3"></div>
 
         <div class="table-responsive">
-            <table class="table" id="departmentTable">
+            <table class="table" id="itemTable">
                 <thead>
                     <tr>
-                        <th>Code</th>
-                        <th>Name</th>
-                        <th>Description</th>
-                        <th>Courses</th>
+                        <th>Column 1</th>
+                        <th>Column 2</th>
                         <th>Status</th>
                         <th>Actions</th>
                     </tr>
@@ -125,11 +238,11 @@ $departments = [];
                 <tbody id="tableBody">
                     <!-- Table content will be loaded via AJAX -->
                     <tr id="loadingRow">
-                        <td colspan="6" class="text-center py-4">
+                        <td colspan="4" class="text-center py-4">
                             <div class="spinner-border text-primary" role="status">
                                 <span class="visually-hidden">Loading...</span>
                             </div>
-                            <div class="mt-2">Loading department data...</div>
+                            <div class="mt-2">Loading data...</div>
                             <div class="mt-2">
                                 <small class="text-muted">If this takes too long, check the browser console for errors</small>
                             </div>
@@ -141,45 +254,22 @@ $departments = [];
     </div>
 </div>
 
-<!-- Add Department Modal -->
-<div class="modal fade" id="addDepartmentModal" tabindex="-1">
+<!-- Add Item Modal -->
+<div class="modal fade" id="addItemModal" tabindex="-1">
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title">Add New Department</h5>
+                <h5 class="modal-title">Add New Item</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
-            <form id="addDepartmentForm">
+            <form id="addItemForm">
                 <div class="modal-body">
-                    <div class="mb-3">
-                        <label for="dept_name" class="form-label">Department Name *</label>
-                        <input type="text" class="form-control" id="dept_name" name="name" required>
-                    </div>
-                    
-                    <div class="mb-3">
-                        <label for="dept_code" class="form-label">Department Code *</label>
-                        <input type="text" class="form-control" id="dept_code" name="code" required>
-                        <div class="form-text">Enter a unique code for this department</div>
-                    </div>
-                    
-                    <div class="mb-3">
-                        <label for="dept_description" class="form-label">Description</label>
-                        <textarea class="form-control" id="dept_description" name="description" rows="3"></textarea>
-                    </div>
-                    
-                    <div class="mb-3">
-                        <div class="form-check">
-                            <input class="form-check-input" type="checkbox" id="dept_is_active" name="is_active" checked>
-                            <label class="form-check-label" for="dept_is_active">
-                                Active
-                            </label>
-                        </div>
-                    </div>
+                    <!-- Form fields here -->
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                     <button type="submit" class="btn btn-primary" id="addSubmitBtn">
-                        <i class="fas fa-save me-1"></i>Add Department
+                        <i class="fas fa-save me-1"></i>Add Item
                     </button>
                 </div>
             </form>
@@ -187,46 +277,23 @@ $departments = [];
     </div>
 </div>
 
-<!-- Edit Department Modal -->
-<div class="modal fade" id="editDepartmentModal" tabindex="-1">
+<!-- Edit Item Modal -->
+<div class="modal fade" id="editItemModal" tabindex="-1">
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title">Edit Department</h5>
+                <h5 class="modal-title">Edit Item</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
-            <form id="editDepartmentForm">
+            <form id="editItemForm">
                 <div class="modal-body">
-                    <input type="hidden" name="id" id="edit_dept_id">
-                    
-                    <div class="mb-3">
-                        <label for="edit_dept_name" class="form-label">Department Name *</label>
-                        <input type="text" class="form-control" id="edit_dept_name" name="name" required>
-                    </div>
-                    
-                    <div class="mb-3">
-                        <label for="edit_dept_code" class="form-label">Department Code *</label>
-                        <input type="text" class="form-control" id="edit_dept_code" name="code" required>
-                    </div>
-                    
-                    <div class="mb-3">
-                        <label for="edit_dept_description" class="form-label">Description</label>
-                        <textarea class="form-control" id="edit_dept_description" name="description" rows="3"></textarea>
-                    </div>
-                    
-                    <div class="mb-3">
-                        <div class="form-check">
-                            <input class="form-check-input" type="checkbox" id="edit_dept_is_active" name="is_active">
-                            <label class="form-check-label" for="edit_dept_is_active">
-                                Active
-                            </label>
-                        </div>
-                    </div>
+                    <input type="hidden" name="id" id="edit_item_id">
+                    <!-- Form fields here -->
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                     <button type="submit" class="btn btn-warning" id="editSubmitBtn">
-                        <i class="fas fa-save me-1"></i>Update Department
+                        <i class="fas fa-save me-1"></i>Update Item
                     </button>
                 </div>
             </form>
@@ -237,14 +304,15 @@ $departments = [];
 <script>
 $(document).ready(function() {
     // Global variables
-    let departments = [];
+    let items = [];
+    let relatedData = []; // If needed
 
     // Load initial data
     loadInitialData();
 
     // Form submission handlers
-    $('#addDepartmentForm').on('submit', handleAddDepartment);
-    $('#editDepartmentForm').on('submit', handleEditDepartment);
+    $('#addItemForm').on('submit', handleAddItem);
+    $('#editItemForm').on('submit', handleEditItem);
     
     // Initialize search functionality
     AjaxUtils.initSearch('searchInput', 'tableBody');
@@ -256,7 +324,7 @@ $(document).ready(function() {
             const loadingRow = document.getElementById('loadingRow');
             if (loadingRow) {
                 loadingRow.innerHTML = `
-                    <td colspan="6" class="text-center py-4">
+                    <td colspan="4" class="text-center py-4">
                         <div class="alert alert-warning">
                             <i class="fas fa-exclamation-triangle me-2"></i>
                             Loading is taking longer than expected. 
@@ -267,32 +335,32 @@ $(document).ready(function() {
                     </td>
                 `;
             }
-        }, 10000); // 10 second timeout
+        }, 10000);
         
-        AjaxUtils.makeRequest('department', 'get_list')
+        AjaxUtils.makeRequest('module_name', 'get_list')
         .then(data => {
             clearTimeout(timeoutId);
             if (data.success) {
-                departments = data.data;
+                items = data.data;
                 renderTable();
-                console.log('Departments loaded successfully:', departments.length);
+                console.log('Items loaded successfully:', items.length);
             } else {
                 throw new Error(data.message);
             }
         })
         .catch(error => {
             clearTimeout(timeoutId);
-            console.error('Error loading departments:', error);
-            AjaxUtils.showAlert('Error loading departments: ' + error.message, 'danger');
+            console.error('Error loading data:', error);
+            AjaxUtils.showAlert('Error loading data: ' + error.message, 'danger');
             
             // Show error in table
             const tbody = document.getElementById('tableBody');
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="6" class="text-center py-4">
+                    <td colspan="4" class="text-center py-4">
                         <div class="alert alert-danger">
                             <i class="fas fa-exclamation-circle me-2"></i>
-                            Failed to load departments: ${error.message}
+                            Failed to load data: ${error.message}
                             <button class="btn btn-sm btn-outline-danger ms-2" onclick="loadInitialData()">
                                 <i class="fas fa-redo me-1"></i>Retry
                             </button>
@@ -308,35 +376,33 @@ $(document).ready(function() {
         const tbody = $('#tableBody');
         tbody.empty();
 
-        if (departments.length === 0) {
+        if (items.length === 0) {
             tbody.append(`
                 <tr>
-                    <td colspan="6" class="empty-state">
+                    <td colspan="4" class="empty-state">
                         <i class="fas fa-info-circle"></i>
-                        <p>No departments found</p>
+                        <p>No items found</p>
                     </td>
                 </tr>
             `);
         } else {
-            departments.forEach(dept => {
+            items.forEach(item => {
                 tbody.append(`
-                    <tr data-id="${dept.id}">
-                        <td><strong>${AjaxUtils.escapeHtml(dept.code)}</strong></td>
-                        <td>${AjaxUtils.escapeHtml(dept.name)}</td>
-                        <td>${AjaxUtils.escapeHtml(dept.description || '')}</td>
-                        <td><span class="badge bg-info">${dept.course_count || 0}</span></td>
+                    <tr data-id="${item.id}">
+                        <td>${AjaxUtils.escapeHtml(item.field1)}</td>
+                        <td>${AjaxUtils.escapeHtml(item.field2)}</td>
                         <td>
-                            <span class="badge ${dept.is_active ? 'bg-success' : 'bg-secondary'}">
-                                ${dept.is_active ? 'Active' : 'Inactive'}
+                            <span class="badge ${item.is_active ? 'bg-success' : 'bg-secondary'}">
+                                ${item.is_active ? 'Active' : 'Inactive'}
                             </span>
                         </td>
                         <td>
                             <button class="btn btn-warning btn-sm me-1" 
-                                    onclick="openEditModal(${dept.id}, '${AjaxUtils.escapeHtml(dept.name)}', '${AjaxUtils.escapeHtml(dept.code)}', '${AjaxUtils.escapeHtml(dept.description || '')}', ${dept.is_active})">
+                                    onclick="openEditModal(${item.id}, '${AjaxUtils.escapeHtml(item.field1)}', '${AjaxUtils.escapeHtml(item.field2)}', ${item.is_active})">
                                 <i class="fas fa-edit"></i>
                             </button>
                             <button class="btn btn-danger btn-sm" 
-                                    onclick="deleteDepartment(${dept.id})">
+                                    onclick="deleteItem(${item.id})">
                                 <i class="fas fa-trash"></i>
                             </button>
                         </td>
@@ -346,42 +412,35 @@ $(document).ready(function() {
         }
     }
 
-    // Handle add department form submission
-    function handleAddDepartment(e) {
+    // Handle add item form submission
+    function handleAddItem(e) {
         e.preventDefault();
         
         // Validate form
-        if (!AjaxUtils.validateForm('addDepartmentForm')) {
+        if (!AjaxUtils.validateForm('addItemForm')) {
             AjaxUtils.showAlert('Please fill in all required fields.', 'warning');
             return;
         }
         
         const formData = {
-            name: $('#dept_name').val(),
-            code: $('#dept_code').val(),
-            description: $('#dept_description').val(),
-            is_active: $('#dept_is_active').is(':checked') ? 1 : 0
+            // Collect form data
         };
         
         // Show loading state
         AjaxUtils.setButtonLoading('addSubmitBtn', true, 'Adding...');
         
-        AjaxUtils.makeRequest('department', 'add', formData)
+        AjaxUtils.makeRequest('module_name', 'add', formData)
         .then(data => {
             if (data.success) {
                 AjaxUtils.showAlert(data.message, 'success');
-                $('#addDepartmentModal').modal('hide');
+                $('#addItemModal').modal('hide');
                 e.target.reset();
-                AjaxUtils.clearFormValidation('addDepartmentForm');
+                AjaxUtils.clearFormValidation('addItemForm');
                 
-                // Add new department to list
-                departments.push({
+                // Add new item to list
+                items.push({
                     id: data.data.id,
-                    name: formData.name,
-                    code: formData.code,
-                    description: formData.description,
-                    is_active: formData.is_active,
-                    course_count: 0
+                    // ... other fields
                 });
                 renderTable();
                 AjaxUtils.addRowAnimation(data.data.id);
@@ -390,50 +449,44 @@ $(document).ready(function() {
             }
         })
         .catch(error => {
-            AjaxUtils.showAlert('Error adding department: ' + error.message, 'danger');
+            AjaxUtils.showAlert('Error adding item: ' + error.message, 'danger');
         })
         .finally(() => {
             AjaxUtils.setButtonLoading('addSubmitBtn', false);
         });
     }
 
-    // Handle edit department form submission
-    function handleEditDepartment(e) {
+    // Handle edit item form submission
+    function handleEditItem(e) {
         e.preventDefault();
         
         // Validate form
-        if (!AjaxUtils.validateForm('editDepartmentForm')) {
+        if (!AjaxUtils.validateForm('editItemForm')) {
             AjaxUtils.showAlert('Please fill in all required fields.', 'warning');
             return;
         }
         
         const formData = {
-            id: $('#edit_dept_id').val(),
-            name: $('#edit_dept_name').val(),
-            code: $('#edit_dept_code').val(),
-            description: $('#edit_dept_description').val(),
-            is_active: $('#edit_dept_is_active').is(':checked') ? 1 : 0
+            id: $('#edit_item_id').val(),
+            // Collect form data
         };
         
         // Show loading state
         AjaxUtils.setButtonLoading('editSubmitBtn', true, 'Updating...');
         
-        AjaxUtils.makeRequest('department', 'edit', formData)
+        AjaxUtils.makeRequest('module_name', 'edit', formData)
         .then(data => {
             if (data.success) {
                 AjaxUtils.showAlert(data.message, 'success');
-                $('#editDepartmentModal').modal('hide');
-                AjaxUtils.clearFormValidation('editDepartmentForm');
+                $('#editItemModal').modal('hide');
+                AjaxUtils.clearFormValidation('editItemForm');
                 
-                // Update department in list
-                const index = departments.findIndex(dept => dept.id == formData.id);
+                // Update item in list
+                const index = items.findIndex(item => item.id == formData.id);
                 if (index !== -1) {
-                    departments[index] = {
-                        ...departments[index],
-                        name: formData.name,
-                        code: formData.code,
-                        description: formData.description,
-                        is_active: formData.is_active
+                    items[index] = {
+                        ...items[index],
+                        // ... updated fields
                     };
                     renderTable();
                     AjaxUtils.addRowAnimation(formData.id);
@@ -443,7 +496,7 @@ $(document).ready(function() {
             }
         })
         .catch(error => {
-            AjaxUtils.showAlert('Error updating department: ' + error.message, 'danger');
+            AjaxUtils.showAlert('Error updating item: ' + error.message, 'danger');
         })
         .finally(() => {
             AjaxUtils.setButtonLoading('editSubmitBtn', false);
@@ -458,10 +511,10 @@ function refreshData() {
     refreshBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Refreshing...';
     refreshBtn.disabled = true;
     
-    AjaxUtils.makeRequest('department', 'get_list')
+    AjaxUtils.makeRequest('module_name', 'get_list')
     .then(data => {
         if (data.success) {
-            departments = data.data;
+            items = data.data;
             renderTable();
             AjaxUtils.showAlert('Data refreshed successfully!', 'success');
         } else {
@@ -477,44 +530,43 @@ function refreshData() {
     });
 }
 
-function openEditModal(id, name, code, description, isActive) {
-    document.getElementById('edit_dept_id').value = id;
-    document.getElementById('edit_dept_name').value = name;
-    document.getElementById('edit_dept_code').value = code;
-    document.getElementById('edit_dept_description').value = description;
-    document.getElementById('edit_dept_is_active').checked = isActive == 1;
+function openEditModal(id, field1, field2, isActive) {
+    document.getElementById('edit_item_id').value = id;
+    document.getElementById('edit_field1').value = field1;
+    document.getElementById('edit_field2').value = field2;
+    document.getElementById('edit_is_active').checked = isActive == 1;
     
-    const modal = new bootstrap.Modal(document.getElementById('editDepartmentModal'));
+    const modal = new bootstrap.Modal(document.getElementById('editItemModal'));
     modal.show();
 }
 
-function deleteDepartment(id) {
-    if (!confirm('Are you sure you want to delete this department? This action cannot be undone.')) {
+function deleteItem(id) {
+    if (!confirm('Are you sure you want to delete this item? This action cannot be undone.')) {
         return;
     }
     
-    const deleteBtn = document.querySelector(`button[onclick="deleteDepartment(${id})"]`);
+    const deleteBtn = document.querySelector(`button[onclick="deleteItem(${id})"]`);
     const originalContent = deleteBtn.innerHTML;
     deleteBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
     deleteBtn.disabled = true;
     
-    AjaxUtils.makeRequest('department', 'delete', { id: id })
+    AjaxUtils.makeRequest('module_name', 'delete', { id: id })
     .then(data => {
         if (data.success) {
             AjaxUtils.showAlert(data.message, 'success');
             
-            // Remove department from list
-            departments = departments.filter(dept => dept.id != id);
+            // Remove item from list
+            items = items.filter(item => item.id != id);
             renderTable();
             
             // Check if table is empty
-            if (departments.length === 0) {
+            if (items.length === 0) {
                 const tbody = document.getElementById('tableBody');
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="6" class="empty-state">
+                        <td colspan="4" class="empty-state">
                             <i class="fas fa-info-circle"></i>
-                            <p>No departments found</p>
+                            <p>No items found</p>
                         </td>
                     </tr>
                 `;
@@ -524,7 +576,7 @@ function deleteDepartment(id) {
         }
     })
     .catch(error => {
-        AjaxUtils.showAlert('Error deleting department: ' + error.message, 'danger');
+        AjaxUtils.showAlert('Error deleting item: ' + error.message, 'danger');
     })
     .finally(() => {
         deleteBtn.innerHTML = originalContent;
@@ -534,3 +586,34 @@ function deleteDepartment(id) {
 </script>
 
 <?php include 'includes/footer.php'; ?>
+```
+
+## 🚀 **Benefits of AJAX Implementation:**
+
+### **User Experience:**
+- ✅ **No Page Refreshes** - All operations happen seamlessly
+- ✅ **Real-time Feedback** - Immediate success/error messages
+- ✅ **Smooth Animations** - Professional transitions
+- ✅ **Search Functionality** - Instant filtering
+- ✅ **Loading States** - Clear visual feedback
+
+### **Performance:**
+- ✅ **Faster Interactions** - No full page reloads
+- ✅ **Reduced Server Load** - Only necessary data transferred
+- ✅ **Better Caching** - Static assets cached separately
+- ✅ **Parallel Loading** - Multiple operations can run simultaneously
+
+### **Maintainability:**
+- ✅ **Centralized API** - Single endpoint for all operations
+- ✅ **Reusable Components** - Shared utilities across pages
+- ✅ **Consistent Error Handling** - Uniform error management
+- ✅ **Easy Testing** - AJAX endpoints can be tested independently
+
+## 📋 **Next Steps:**
+
+1. **Use the template above** to convert remaining pages
+2. **Add module handlers** to `ajax_api.php` for each page
+3. **Test each conversion** thoroughly
+4. **Update any dependent pages** that reference the converted pages
+
+The infrastructure is now in place to quickly convert the remaining pages using the established patterns and utilities!
