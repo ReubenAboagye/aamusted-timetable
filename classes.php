@@ -119,6 +119,7 @@ if (!$streams_result) {
 // Handle form submission for adding new class
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? null;
+    
     if ($action === 'add') {
         // Support single or multiple class rows. When multiple, inputs are arrays like program_code[], level_id[], total_capacity[]
         $is_batch = isset($_POST['program_code']) && is_array($_POST['program_code']);
@@ -502,8 +503,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $conn->rollback();
             $error_message = 'Delete failed: ' . $e->getMessage();
         }
-    
-    // Edit class (update representative row: name, total_capacity, divisions_count, stream_id)
     } elseif ($action === 'edit' && isset($_POST['id'])) {
         $id = (int)($_POST['id'] ?? 0);
         $name = isset($_POST['name']) ? $conn->real_escape_string(trim($_POST['name'])) : '';
@@ -587,28 +586,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
         }
-    } elseif ($action === 'reactivate' && isset($_POST['id'])) {
-        $id = (int)($_POST['id'] ?? 0);
-        
-        if ($id <= 0) {
-            $error_message = 'Invalid class id.';
-        } else {
-            $reactivate_sql = "UPDATE classes SET is_active = 1 WHERE id = ?";
-            $r_stmt = $conn->prepare($reactivate_sql);
-            if ($r_stmt) {
-                $r_stmt->bind_param('i', $id);
-                if ($r_stmt->execute()) {
-                    $r_stmt->close();
-                    redirect_with_flash('classes.php', 'success', 'Class reactivated successfully!');
-                } else {
-                    $error_message = 'Error reactivating class: ' . $r_stmt->error;
-                    $r_stmt->close();
-                }
-            } else {
-                $error_message = 'Error preparing reactivate: ' . $conn->error;
-            }
-        }
-    }
+}
 }
 
 // Fetch classes with related program, level and stream information
@@ -684,10 +662,6 @@ if (!empty($select_extra)) {
 }
 
 $where_clause = "WHERE c.is_active = 1";
-// Optionally show inactive classes
-if (isset($_GET['show_inactive']) && $_GET['show_inactive'] == '1') {
-    $where_clause = "WHERE 1=1"; // Show all classes (active and inactive)
-}
 // Temporarily disable stream filtering to debug
 // if ($class_has_stream) {
 //     $where_clause .= " AND c.stream_id = " . $streamManager->getCurrentStreamId();
@@ -786,14 +760,6 @@ $level_result = $conn->query($level_sql);
                     </select>
                 </div>
                 <div class="col-md-2">
-                    <div class="form-check">
-                        <input class="form-check-input" type="checkbox" id="showInactive" onchange="toggleInactiveClasses()">
-                        <label class="form-check-label" for="showInactive">
-                            Show Inactive
-                        </label>
-                    </div>
-                </div>
-                <div class="col-md-2">
                     <button class="btn btn-outline-secondary" onclick="clearFilters()">
                         <i class="fas fa-times"></i> Clear
                     </button>
@@ -822,14 +788,11 @@ $level_result = $conn->query($level_sql);
                 <tbody>
                     <?php if ($result && $result->num_rows > 0): ?>
                         <?php while ($row = $result->fetch_assoc()): ?>
-                                                         <tr class="<?php echo (isset($_GET['show_inactive']) && $_GET['show_inactive'] == '1' && ($row['is_active'] ?? 1) == 0) ? 'table-secondary' : ''; ?>">
+                                                         <tr>
                                  <td>
                                      <strong><?php echo htmlspecialchars($row['name']); ?></strong>
                                      <?php if ($class_has_stream && !empty($row['stream_name'])): ?>
                                          <br><small><span class="badge bg-success"><?php echo htmlspecialchars($row['stream_name']); ?></span></small>
-                                     <?php endif; ?>
-                                     <?php if (isset($_GET['show_inactive']) && $_GET['show_inactive'] == '1' && ($row['is_active'] ?? 1) == 0): ?>
-                                         <br><small><span class="badge bg-warning">Inactive</span></small>
                                      <?php endif; ?>
                                  </td>
                                  <td><span class="badge bg-warning"><?php echo htmlspecialchars($row['level'] ?? ($row['level_name'] ?? 'N/A')); ?></span></td>
@@ -860,15 +823,6 @@ $level_result = $conn->query($level_sql);
                                              data-stream="<?php echo (int)($row['stream_id'] ?? 0); ?>">
                                          <i class="fas fa-edit"></i>
                                      </button>
-                                     <?php if (isset($_GET['show_inactive']) && $_GET['show_inactive'] == '1' && ($row['is_active'] ?? 1) == 0): ?>
-                                         <form method="POST" style="display: inline;" onsubmit="return confirm('Are you sure you want to reactivate this class?')">
-                                             <input type="hidden" name="action" value="reactivate">
-                                             <input type="hidden" name="id" value="<?php echo $row['id']; ?>">
-                                             <button type="submit" class="btn btn-sm btn-outline-success" title="Reactivate Class">
-                                                 <i class="fas fa-undo"></i>
-                                             </button>
-                                         </form>
-                                     <?php endif; ?>
                                      <form method="POST" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this class?')">
                                          <input type="hidden" name="action" value="delete">
                                          <input type="hidden" name="id" value="<?php echo $row['id']; ?>">
@@ -1192,21 +1146,7 @@ function updateFilterSummary(visibleCount, searchTerm, selectedStream) {
 function clearFilters() {
     document.querySelector('.search-input').value = '';
     document.getElementById('streamFilter').value = '';
-    document.getElementById('showInactive').checked = false;
     filterClasses();
-}
-
-function toggleInactiveClasses() {
-    const showInactive = document.getElementById('showInactive').checked;
-    
-    // Reload the page with a parameter to show inactive classes
-    const url = new URL(window.location);
-    if (showInactive) {
-        url.searchParams.set('show_inactive', '1');
-    } else {
-        url.searchParams.delete('show_inactive');
-    }
-    window.location.href = url.toString();
 }
 
 function editClass(btn) {
