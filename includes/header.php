@@ -187,6 +187,8 @@ if ($__current_script !== 'rooms.php') {
   }
 }
 // Include admin jobs modal so it's available across admin pages (allow disabling)
+// Temporarily disable admin jobs modal to prevent fetchJobs errors
+$show_admin_jobs_modal = false;
 if (!isset($show_admin_jobs_modal) || $show_admin_jobs_modal !== false) {
     $adminJobsModal = __DIR__ . '/admin_jobs_modal.php';
     if (file_exists($adminJobsModal)) {

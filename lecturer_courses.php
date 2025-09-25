@@ -257,8 +257,27 @@ function editMapping(lecturerId) {
     assignedList.innerHTML = '<div class="text-center p-3"><i class="fas fa-spinner fa-spin"></i> Loading courses...</div>';
     
     // Fetch courses from database
-    fetch(`get_lecturer_courses.php?lecturer_id=${lecturerId}`)
-        .then(response => response.json())
+    fetch(`get_lecturer_courses_for_edit.php?lecturer_id=${lecturerId}`)
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            // Check if response is JSON
+            const contentType = response.headers.get('content-type');
+            if (!contentType || !contentType.includes('application/json')) {
+                throw new Error('Response is not JSON');
+            }
+            
+            return response.text().then(text => {
+                try {
+                    return JSON.parse(text);
+                } catch (e) {
+                    console.error('Invalid JSON response:', text);
+                    throw new Error('Invalid JSON response: ' + text.substring(0, 100));
+                }
+            });
+        })
         .then(data => {
             if (data.success) {
                 availableCourses = data.data.available_courses;

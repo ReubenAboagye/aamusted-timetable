@@ -6,11 +6,20 @@ require_once __DIR__ . '/../connect.php';
 header('Content-Type: application/json');
 
 try {
+    // Check if database connection is available
+    if (!isset($conn) || !$conn) {
+        throw new Exception('Database connection not available');
+    }
+    
     $stream_id = isset($_GET['stream_id']) ? intval($_GET['stream_id']) : null;
     $limit = isset($_GET['limit']) ? intval($_GET['limit']) : 100;
 
     // Check if jobs table exists
     $table_check = $conn->query("SHOW TABLES LIKE 'jobs'");
+    if ($table_check === false) {
+        throw new Exception('Failed to check jobs table: ' . $conn->error);
+    }
+    
     if ($table_check->num_rows === 0) {
         // Jobs table doesn't exist, return empty array
         echo json_encode(['success' => true, 'jobs' => []]);

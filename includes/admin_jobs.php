@@ -25,9 +25,31 @@ $streamId = $active_stream ?? 1;
 <script>
 function fetchJobs() {
   fetch('api/list_jobs.php?stream_id=' + <?= json_encode($streamId) ?>)
-    .then(r => r.json())
+    .then(response => {
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      // Check if response is JSON
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        throw new Error('Response is not JSON');
+      }
+      
+      return response.text().then(text => {
+        try {
+          return JSON.parse(text);
+        } catch (e) {
+          console.error('Invalid JSON response:', text);
+          throw new Error('Invalid JSON response: ' + text.substring(0, 100));
+        }
+      });
+    })
     .then(data => {
-      if (!data.success) return;
+      if (!data.success) {
+        console.error('API returned error:', data.error);
+        return;
+      }
       const tbody = document.getElementById('jobsTableBody');
       tbody.innerHTML = '';
       data.jobs.forEach(j => {
@@ -40,6 +62,11 @@ function fetchJobs() {
           '<td><a class="btn btn-sm btn-outline-primary" href="api/job_status.php?job_id=' + j.id + '">Details</a></td>';
         tbody.appendChild(tr);
       });
+    })
+    .catch(error => {
+      console.error('Error fetching jobs:', error);
+      const tbody = document.getElementById('jobsTableBody');
+      tbody.innerHTML = '<tr><td colspan="6" class="text-center text-danger">Error loading jobs: ' + error.message + '</td></tr>';
     });
 }
 

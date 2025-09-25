@@ -32,13 +32,13 @@ function env_first(array $keys, $default = '') {
     return $default;
 }
 
-$dbHost = env_first(['DB_HOST', 'MYSQL_HOST'], '');
-$dbPort = env_first(['DB_PORT', 'MYSQL_PORT'], '');
-$dbName = env_first(['DB_NAME', 'MYSQL_DATABASE'], '');
-$dbUser = env_first(['DB_USER', 'MYSQL_USER'], '');
+$dbHost = env_first(['DB_HOST', 'MYSQL_HOST'], 'localhost');
+$dbPort = env_first(['DB_PORT', 'MYSQL_PORT'], '3306');
+$dbName = env_first(['DB_NAME', 'MYSQL_DATABASE'], 'timetable_system');
+$dbUser = env_first(['DB_USER', 'MYSQL_USER'], 'root');
 $dbPass = env_first(['DB_PASSWORD', 'MYSQL_PASSWORD'], '');
 
-// Fail fast if required values are missing
+// Fail fast if required values are missing (only if no defaults provided)
 $missing = [];
 if ($dbHost === '') { $missing[] = 'DB_HOST/MYSQL_HOST'; }
 if ($dbPort === '') { $missing[] = 'DB_PORT/MYSQL_PORT'; }
