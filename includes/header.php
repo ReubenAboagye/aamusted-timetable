@@ -1,6 +1,6 @@
 <?php
 if (!isset($pageTitle)) {
-  $pageTitle = 'University Timetable Generator';
+  $pageTitle = 'AAMUSTED Timetable Generator';
 }
 
 // Ensure session is started early (before any output) so StreamManager can use sessions
@@ -555,7 +555,7 @@ if (!function_exists('getCount')) {
     <div class="container-fluid">
       <button id="sidebarToggle"><i class="fas fa-bars"></i></button>
       <a class="navbar-brand text-white" href="#">
-        <img src="images/aamustedLog.png" alt="AAMUSTED Logo">University Timetable Generator
+        <img src="images/aamustedLog.png" alt="AAMUSTED Logo">AAMUSTED Timetable Generator
       </a>
       <div class="mx-auto text-white" id="currentStream">
         <i class="fas fa-clock me-2"></i>Current Stream: 
