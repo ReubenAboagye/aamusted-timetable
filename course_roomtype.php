@@ -138,6 +138,9 @@ $table_data = [];
                                 <span class="visually-hidden">Loading...</span>
                             </div>
                             <div class="mt-2">Loading course room type data...</div>
+                            <div class="mt-2">
+                                <small class="text-muted">If this takes too long, check the browser console for errors</small>
+                            </div>
                         </td>
                     </tr>
                 </tbody>
@@ -264,7 +267,8 @@ $table_data = [];
         </div>
     </div>
 
-<!-- Enhanced AJAX JavaScript -->
+<!-- jQuery and Enhanced AJAX JavaScript -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
 <script>
 $(document).ready(function() {
@@ -374,6 +378,58 @@ $(document).ready(function() {
         }
     }
 
+    // Load initial data from server
+    function loadInitialData() {
+        // Set a timeout for loading
+        const timeoutId = setTimeout(() => {
+            const loadingRow = document.getElementById('loadingRow');
+            if (loadingRow) {
+                loadingRow.innerHTML = `
+                    <td colspan="4" class="text-center py-4">
+                        <div class="alert alert-warning">
+                            <i class="fas fa-exclamation-triangle me-2"></i>
+                            Loading is taking longer than expected. 
+                            <button class="btn btn-sm btn-outline-warning ms-2" onclick="loadInitialData()">
+                                <i class="fas fa-redo me-1"></i>Retry
+                            </button>
+                        </div>
+                    </td>
+                `;
+            }
+        }, 10000); // 10 second timeout
+        
+        Promise.all([
+            loadCourses(),
+            loadRoomTypes(),
+            loadTableData()
+        ]).then(() => {
+            clearTimeout(timeoutId);
+            populateDropdowns();
+            renderTable();
+            console.log('Data loaded successfully:', { courses: courses.length, roomTypes: roomTypes.length, tableData: tableData.length });
+        }).catch(error => {
+            clearTimeout(timeoutId);
+            console.error('Error loading data:', error);
+            showAlert('Error loading data: ' + error.message, 'danger');
+            
+            // Show error in table
+            const tbody = document.getElementById('tableBody');
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="4" class="text-center py-4">
+                        <div class="alert alert-danger">
+                            <i class="fas fa-exclamation-circle me-2"></i>
+                            Failed to load data: ${error.message}
+                            <button class="btn btn-sm btn-outline-danger ms-2" onclick="loadInitialData()">
+                                <i class="fas fa-redo me-1"></i>Retry
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+            `;
+        });
+    }
+
     // Enhanced AJAX call with retry functionality
     function makeAjaxCall(url, data, retries = 3) {
         return fetch(url, {
@@ -384,7 +440,21 @@ $(document).ready(function() {
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
-            return response.json();
+            
+            // Check if response is JSON
+            const contentType = response.headers.get('content-type');
+            if (!contentType || !contentType.includes('application/json')) {
+                throw new Error('Response is not JSON');
+            }
+            
+            return response.text().then(text => {
+                try {
+                    return JSON.parse(text);
+                } catch (e) {
+                    console.error('Invalid JSON response:', text);
+                    throw new Error('Invalid JSON response: ' + text.substring(0, 100));
+                }
+            });
         })
         .catch(error => {
             if (retries > 0) {
@@ -401,14 +471,10 @@ $(document).ready(function() {
 
     // Load courses data
     function loadCourses() {
-        return fetch('ajax_course_roomtype.php', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-            },
-            body: 'action=get_courses'
-        })
-        .then(response => response.json())
+        const formData = new FormData();
+        formData.append('action', 'get_courses');
+        
+        return makeAjaxCall('ajax_course_roomtype.php', formData)
         .then(data => {
             if (data.success) {
                 courses = data.data;
@@ -420,14 +486,10 @@ $(document).ready(function() {
 
     // Load room types data
     function loadRoomTypes() {
-        return fetch('ajax_course_roomtype.php', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-            },
-            body: 'action=get_room_types'
-        })
-        .then(response => response.json())
+        const formData = new FormData();
+        formData.append('action', 'get_room_types');
+        
+        return makeAjaxCall('ajax_course_roomtype.php', formData)
         .then(data => {
             if (data.success) {
                 roomTypes = data.data;
@@ -439,14 +501,10 @@ $(document).ready(function() {
 
     // Load table data
     function loadTableData() {
-        return fetch('ajax_course_roomtype.php', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-            },
-            body: 'action=get_table_data'
-        })
-        .then(response => response.json())
+        const formData = new FormData();
+        formData.append('action', 'get_table_data');
+        
+        return makeAjaxCall('ajax_course_roomtype.php', formData)
         .then(data => {
             if (data.success) {
                 tableData = data.data;

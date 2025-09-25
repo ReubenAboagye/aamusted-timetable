@@ -1,5 +1,12 @@
 <?php
+// Ensure no output before JSON
+ob_start();
+
+// Set proper headers
 header('Content-Type: application/json');
+header('Cache-Control: no-cache, must-revalidate');
+
+// Include database connection
 include 'connect.php';
 
 // Helper function to resolve room type id from either numeric id or name
@@ -19,11 +26,14 @@ function resolveRoomTypeId($conn, $roomType) {
 
 // Helper function to send JSON response
 function sendResponse($success, $message, $data = null) {
+    // Clear any output buffer
+    ob_clean();
+    
     echo json_encode([
         'success' => $success,
         'message' => $message,
         'data' => $data
-    ]);
+    ], JSON_UNESCAPED_UNICODE);
     exit;
 }
 
@@ -33,6 +43,10 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 }
 
 $action = $_POST['action'] ?? null;
+
+if (empty($action)) {
+    sendResponse(false, 'No action specified');
+}
 
 try {
     switch ($action) {
@@ -284,5 +298,10 @@ try {
 
 } catch (Exception $e) {
     sendResponse(false, 'An error occurred: ' . $e->getMessage());
+} catch (Error $e) {
+    sendResponse(false, 'A fatal error occurred: ' . $e->getMessage());
 }
+
+// If we reach here, something went wrong
+sendResponse(false, 'Unknown error occurred');
 ?>
