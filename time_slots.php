@@ -17,7 +17,7 @@ $current_stream_id = $streamManager->getCurrentStreamId();
 		$start_time = $conn->real_escape_string($_POST['start_time']);
 		$duration = (int)$_POST['duration'];
 		$is_break = isset($_POST['is_break']) ? 1 : 0;
-		$is_mandatory = isset($_POST['is_mandatory']) ? 1 : 0;
+		$is_mandatory = 1; // Default to mandatory for all time slots
 
 		// Validate that start time is on the hour (XX:00)
 		$start_minutes = (int)substr($start_time, -2);
@@ -58,7 +58,7 @@ $current_stream_id = $streamManager->getCurrentStreamId();
 		$num_slots = (int)$_POST['num_slots'];
 		$duration = (int)$_POST['duration'];
 		$is_break = isset($_POST['is_break']) ? 1 : 0;
-		$is_mandatory = isset($_POST['is_mandatory']) ? 1 : 0;
+		$is_mandatory = 1; // Default to mandatory for all time slots
 
 		// Validate that base start time is on the hour (XX:00)
 		$start_minutes = (int)substr($base_start_time, -2);
@@ -117,7 +117,7 @@ $current_stream_id = $streamManager->getCurrentStreamId();
 		$end_time = $conn->real_escape_string($_POST['end_time']);
 		$duration = (int)$_POST['duration'];
 		$is_break = isset($_POST['is_break']) ? 1 : 0;
-		$is_mandatory = isset($_POST['is_mandatory']) ? 1 : 0;
+		$is_mandatory = 1; // Default to mandatory for all time slots
 
 		// Prevent changing to a start_time that already exists on a different slot
 		$check_stmt = $conn->prepare("SELECT id FROM time_slots WHERE start_time = ? AND id <> ? LIMIT 1");
@@ -189,7 +189,7 @@ $assigned_map = array_flip($assigned_time_slot_ids);
 
 		<table class="table table-striped m-3" id="timeslotTable">
 			<thead>
-				<tr><th>Start</th><th>End</th><th>Duration (min)</th><th>Break</th><th>Mandatory</th><th>Assigned</th><th>Actions</th></tr>
+				<tr><th>Start</th><th>End</th><th>Duration (min)</th><th>Type</th><th>Assigned</th><th>Actions</th></tr>
 			</thead>
 			<tbody>
 				<?php while ($ts = $ts_rs->fetch_assoc()): ?>
@@ -199,12 +199,11 @@ $assigned_map = array_flip($assigned_time_slot_ids);
 						<td><?php echo htmlspecialchars($ts['duration']); ?></td>
 						<td>
 							<?php if ($ts['is_break']): ?>
-								<span class="badge bg-warning text-dark">Break</span>
+								<span class="badge bg-warning text-dark">Non-Schedulable</span>
 							<?php else: ?>
-								<span class="badge bg-success">Regular</span>
+								<span class="badge bg-success">Schedulable</span>
 							<?php endif; ?>
 						</td>
-						<td><?php echo $ts['is_mandatory'] ? 'Yes' : 'No'; ?></td>
 						<td class="assigned-cell"><?php echo isset($assigned_map[$ts['id']]) ? 'Yes' : '-'; ?></td>
 						<td>
 							<button class="btn btn-sm btn-secondary" data-bs-toggle="modal" data-bs-target="#editTimeSlotModal<?php echo $ts['id']; ?>">Edit</button>
@@ -228,8 +227,7 @@ $assigned_map = array_flip($assigned_time_slot_ids);
 										<div class="mb-3"><label class="form-label">Start Time</label><input type="time" name="start_time" class="form-control" value="<?php echo $ts['start_time']; ?>" required></div>
 										<div class="mb-3"><label class="form-label">End Time</label><input type="time" name="end_time" class="form-control" value="<?php echo $ts['end_time']; ?>" required></div>
 										<div class="mb-3"><label class="form-label">Duration (minutes)</label><input type="number" name="duration" class="form-control" value="<?php echo $ts['duration']; ?>" required></div>
-										<div class="form-check mb-3"><input type="checkbox" name="is_break" class="form-check-input" id="ts_break_<?php echo $ts['id']; ?>" <?php echo $ts['is_break'] ? 'checked' : ''; ?>><label class="form-check-label" for="ts_break_<?php echo $ts['id']; ?>">Is Break</label></div>
-										<div class="form-check mb-3"><input type="checkbox" name="is_mandatory" class="form-check-input" id="ts_mand_<?php echo $ts['id']; ?>" <?php echo $ts['is_mandatory'] ? 'checked' : ''; ?>><label class="form-check-label" for="ts_mand_<?php echo $ts['id']; ?>">Is Mandatory</label></div>
+										<div class="form-check mb-3"><input type="checkbox" name="is_break" class="form-check-input" id="ts_break_<?php echo $ts['id']; ?>" <?php echo $ts['is_break'] ? 'checked' : ''; ?>><label class="form-check-label" for="ts_break_<?php echo $ts['id']; ?>">Mark as Non-Schedulable</label></div>
 									</div>
 									<div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button type="submit" class="btn btn-primary">Save</button></div>
 								</form>
@@ -270,11 +268,7 @@ $assigned_map = array_flip($assigned_time_slot_ids);
 					</div>
 					<div class="form-check mb-3">
 						<input type="checkbox" name="is_break" class="form-check-input" id="add_ts_break">
-						<label class="form-check-label" for="add_ts_break">Is Break</label>
-					</div>
-					<div class="form-check mb-3">
-						<input type="checkbox" name="is_mandatory" class="form-check-input" id="add_ts_mand">
-						<label class="form-check-label" for="add_ts_mand">Is Mandatory</label>
+						<label class="form-check-label" for="add_ts_break">Mark as Non-Schedulable</label>
 					</div>
 				</div>
 				<div class="modal-footer">
@@ -329,11 +323,7 @@ $assigned_map = array_flip($assigned_time_slot_ids);
 					
 					<div class="form-check mb-3">
 						<input type="checkbox" name="is_break" class="form-check-input" id="add_multiple_ts_break">
-						<label class="form-check-label" for="add_multiple_ts_break">Is Break</label>
-					</div>
-					<div class="form-check mb-3">
-						<input type="checkbox" name="is_mandatory" class="form-check-input" id="add_multiple_ts_mand">
-						<label class="form-check-label" for="add_multiple_ts_mand">Is Mandatory</label>
+						<label class="form-check-label" for="add_multiple_ts_break">Mark as Non-Schedulable</label>
 					</div>
 					
 					<div class="alert alert-info">
