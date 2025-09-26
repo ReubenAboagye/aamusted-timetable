@@ -233,7 +233,7 @@ foreach ($streams as $s) {
   <div class="card">
     <div class="card-body">
       <h5 class="card-title">Dashboard Overview</h5>
-      <p class="card-text">Welcome to the University Timetable Generator! This dashboard provides quick access to the core modules for the 
+      <p class="card-text">Welcome to the AAMUSTED Timetable Generator! This dashboard provides quick access to the core modules for the 
         <strong><?= htmlspecialchars($current_stream_name) ?></strong> stream:
       </p>
       <ul class="mb-0">
