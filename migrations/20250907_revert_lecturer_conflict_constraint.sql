@@ -13,3 +13,4 @@ DROP INDEX `idx_timetable_lecturer_conflict_check`;
 SHOW CREATE TABLE timetable;
 
 
+
