@@ -96,6 +96,9 @@ try {
         case 'course_roomtype':
             handleCourseRoomTypeActions($action, $conn);
             break;
+        case 'room_type':
+            handleRoomTypeActions($action, $conn);
+            break;
         default:
             sendResponse(false, 'Invalid module specified');
     }
@@ -328,6 +331,111 @@ function handleCourseActions($action, $conn) {
             sendResponse(true, 'Courses retrieved successfully', $courses);
             break;
             
+        case 'bulk_import':
+            $import_data = $_POST['import_data'] ?? null;
+            
+            // Handle JSON string input
+            if (is_string($import_data)) {
+                $import_data = json_decode($import_data, true);
+            }
+            
+            if (!$import_data || !is_array($import_data)) {
+                sendResponse(false, 'Invalid import data');
+            }
+            
+            $success_count = 0;
+            $error_count = 0;
+            $skipped_count = 0;
+            $added_courses = [];
+            
+            // Get existing course codes for duplicate checking
+            $existing_codes = [];
+            $existing_sql = "SELECT code FROM courses";
+            $existing_result = $conn->query($existing_sql);
+            if ($existing_result) {
+                while ($row = $existing_result->fetch_assoc()) {
+                    $existing_codes[strtolower($row['code'])] = true;
+                }
+            }
+            
+            foreach ($import_data as $course_data) {
+                $name = sanitizeInput($course_data['name'] ?? '');
+                $code = sanitizeInput($course_data['code'] ?? '');
+                $department_id = (int)($course_data['department_id'] ?? 0);
+                $hours_per_week = (int)($course_data['hours_per_week'] ?? 3);
+                $is_active = (int)($course_data['is_active'] ?? 1);
+                
+                if (empty($name) || empty($code) || $department_id <= 0) {
+                    $error_count++;
+                    continue;
+                }
+                
+                // Check for duplicate codes
+                if (isset($existing_codes[strtolower($code)])) {
+                    $skipped_count++;
+                    continue;
+                }
+                
+                // Verify department exists
+                $dept_check = $conn->prepare("SELECT id FROM departments WHERE id = ?");
+                $dept_check->bind_param("i", $department_id);
+                $dept_check->execute();
+                $dept_res = $dept_check->get_result();
+                
+                if ($dept_res->num_rows === 0) {
+                    $error_count++;
+                    continue;
+                }
+                
+                // Validate hours per week
+                if ($hours_per_week < 1 || $hours_per_week > 20) {
+                    $error_count++;
+                    continue;
+                }
+                
+                $sql = "INSERT INTO courses (name, code, department_id, hours_per_week, is_active) VALUES (?, ?, ?, ?, ?)";
+                $stmt = $conn->prepare($sql);
+                $stmt->bind_param("ssiii", $name, $code, $department_id, $hours_per_week, $is_active);
+                
+                if ($stmt->execute()) {
+                    $new_id = $conn->insert_id;
+                    $success_count++;
+                    
+                    // Get department name for response
+                    $dept_name_sql = "SELECT name FROM departments WHERE id = ?";
+                    $dept_name_stmt = $conn->prepare($dept_name_sql);
+                    $dept_name_stmt->bind_param("i", $department_id);
+                    $dept_name_stmt->execute();
+                    $dept_name_result = $dept_name_stmt->get_result();
+                    $dept_name = $dept_name_result->fetch_assoc()['name'] ?? 'Unknown';
+                    
+                    $added_courses[] = [
+                        'id' => $new_id,
+                        'name' => $name,
+                        'code' => $code,
+                        'department_id' => $department_id,
+                        'department_name' => $dept_name,
+                        'hours_per_week' => $hours_per_week,
+                        'is_active' => $is_active
+                    ];
+                    
+                    // Add to existing codes to prevent duplicates in same batch
+                    $existing_codes[strtolower($code)] = true;
+                } else {
+                    $error_count++;
+                }
+            }
+            
+            $message = "Import completed: {$success_count} added, {$skipped_count} skipped (duplicates), {$error_count} errors";
+            sendResponse(true, $message, [
+                'total_processed' => count($import_data),
+                'added_count' => $success_count,
+                'skipped_count' => $skipped_count,
+                'error_count' => $error_count,
+                'added_courses' => $added_courses
+            ]);
+            break;
+            
         default:
             sendResponse(false, 'Invalid course action');
     }
@@ -430,6 +538,103 @@ function handleLecturerActions($action, $conn) {
             sendResponse(true, 'Lecturers retrieved successfully', $lecturers);
             break;
             
+        case 'bulk_import':
+            $import_data = $_POST['import_data'] ?? null;
+            
+            // Handle JSON string input
+            if (is_string($import_data)) {
+                $import_data = json_decode($import_data, true);
+            }
+            
+            if (!$import_data || !is_array($import_data)) {
+                sendResponse(false, 'Invalid import data');
+            }
+            
+            $success_count = 0;
+            $error_count = 0;
+            $skipped_count = 0;
+            $added_lecturers = [];
+            
+            // Get existing lecturer names for duplicate checking
+            $existing_lecturers = [];
+            $existing_sql = "SELECT name, department_id FROM lecturers";
+            $existing_result = $conn->query($existing_sql);
+            if ($existing_result) {
+                while ($row = $existing_result->fetch_assoc()) {
+                    $key = strtolower($row['name']) . '|' . $row['department_id'];
+                    $existing_lecturers[$key] = true;
+                }
+            }
+            
+            foreach ($import_data as $lecturer_data) {
+                $name = sanitizeInput($lecturer_data['name'] ?? '');
+                $department_id = (int)($lecturer_data['department_id'] ?? 0);
+                $is_active = (int)($lecturer_data['is_active'] ?? 1);
+                
+                if (empty($name) || $department_id <= 0) {
+                    $error_count++;
+                    continue;
+                }
+                
+                // Check for duplicates
+                $duplicate_key = strtolower($name) . '|' . $department_id;
+                if (isset($existing_lecturers[$duplicate_key])) {
+                    $skipped_count++;
+                    continue;
+                }
+                
+                // Verify department exists
+                $dept_check = $conn->prepare("SELECT id FROM departments WHERE id = ?");
+                $dept_check->bind_param("i", $department_id);
+                $dept_check->execute();
+                $dept_res = $dept_check->get_result();
+                
+                if ($dept_res->num_rows === 0) {
+                    $error_count++;
+                    continue;
+                }
+                
+                $sql = "INSERT INTO lecturers (name, department_id, is_active) VALUES (?, ?, ?)";
+                $stmt = $conn->prepare($sql);
+                $stmt->bind_param("sii", $name, $department_id, $is_active);
+                
+                if ($stmt->execute()) {
+                    $new_id = $conn->insert_id;
+                    $success_count++;
+                    
+                    // Get department name for response
+                    $dept_name_sql = "SELECT name FROM departments WHERE id = ?";
+                    $dept_name_stmt = $conn->prepare($dept_name_sql);
+                    $dept_name_stmt->bind_param("i", $department_id);
+                    $dept_name_stmt->execute();
+                    $dept_name_result = $dept_name_stmt->get_result();
+                    $dept_name = $dept_name_result->fetch_assoc()['name'] ?? 'Unknown';
+                    
+                    $added_lecturers[] = [
+                        'id' => $new_id,
+                        'name' => $name,
+                        'department_id' => $department_id,
+                        'department_name' => $dept_name,
+                        'is_active' => $is_active
+                    ];
+                    
+                    // Add to existing lecturers to prevent duplicates in same batch
+                    $existing_lecturers[$duplicate_key] = true;
+                } else {
+                    $error_count++;
+                }
+            }
+            
+            $message = "Import completed: {$success_count} added, {$skipped_count} skipped (duplicates), {$error_count} errors";
+            sendResponse(true, $message, [
+                'total_processed' => count($import_data),
+                'added_count' => $success_count,
+                'skipped_count' => $skipped_count,
+                'error_count' => $error_count,
+                'added_lecturers' => $added_lecturers
+            ]);
+            break;
+            
         default:
             sendResponse(false, 'Invalid lecturer action');
     }
@@ -467,5 +672,148 @@ function handleClassCourseActions($action, $conn) {
 function handleCourseRoomTypeActions($action, $conn) {
     // This can reuse the existing course_roomtype.php logic
     include 'ajax_course_roomtype.php';
+}
+
+// Room Type Actions
+function handleRoomTypeActions($action, $conn) {
+    switch ($action) {
+        case 'list':
+            $sql = "SELECT id, name, description, is_active, created_at FROM room_types ORDER BY name";
+            $result = $conn->query($sql);
+            
+            if (!$result) {
+                sendResponse(false, 'Error fetching room types: ' . $conn->error);
+            }
+            
+            $room_types = [];
+            while ($row = $result->fetch_assoc()) {
+                $room_types[] = $row;
+            }
+            
+            sendResponse(true, 'Room types fetched successfully', $room_types);
+            break;
+            
+        case 'add':
+            $name = sanitizeInput($_POST['name'] ?? '');
+            $description = sanitizeInput($_POST['description'] ?? '');
+            $is_active = isset($_POST['is_active']) ? 1 : 0;
+            
+            if (empty($name)) {
+                sendResponse(false, 'Room type name is required');
+            }
+            
+            // Check if room type name already exists
+            $check_sql = "SELECT id FROM room_types WHERE name = ?";
+            $check_stmt = $conn->prepare($check_sql);
+            $check_stmt->bind_param("s", $name);
+            $check_stmt->execute();
+            $result = $check_stmt->get_result();
+            
+            if ($result->num_rows > 0) {
+                sendResponse(false, 'Room type name already exists');
+            }
+            
+            $sql = "INSERT INTO room_types (name, description, is_active) VALUES (?, ?, ?)";
+            $stmt = $conn->prepare($sql);
+            $stmt->bind_param("ssi", $name, $description, $is_active);
+            
+            if ($stmt->execute()) {
+                $new_id = $conn->insert_id;
+                sendResponse(true, 'Room type added successfully!', ['id' => $new_id]);
+            } else {
+                sendResponse(false, 'Error adding room type: ' . $stmt->error);
+            }
+            break;
+            
+        case 'edit':
+            $id = (int)($_POST['id'] ?? 0);
+            $name = sanitizeInput($_POST['name'] ?? '');
+            $description = sanitizeInput($_POST['description'] ?? '');
+            $is_active = isset($_POST['is_active']) ? 1 : 0;
+            
+            if ($id <= 0 || empty($name)) {
+                sendResponse(false, 'Invalid input');
+            }
+            
+            // Check if room type name already exists (excluding current record)
+            $check_sql = "SELECT id FROM room_types WHERE name = ? AND id != ?";
+            $check_stmt = $conn->prepare($check_sql);
+            $check_stmt->bind_param("si", $name, $id);
+            $check_stmt->execute();
+            $result = $check_stmt->get_result();
+            
+            if ($result->num_rows > 0) {
+                sendResponse(false, 'Room type name already exists');
+            }
+            
+            $sql = "UPDATE room_types SET name = ?, description = ?, is_active = ? WHERE id = ?";
+            $stmt = $conn->prepare($sql);
+            $stmt->bind_param("ssii", $name, $description, $is_active, $id);
+            
+            if ($stmt->execute()) {
+                sendResponse(true, 'Room type updated successfully!');
+            } else {
+                sendResponse(false, 'Error updating room type: ' . $stmt->error);
+            }
+            break;
+            
+        case 'delete':
+            $id = (int)($_POST['id'] ?? 0);
+            
+            if ($id <= 0) {
+                sendResponse(false, 'Invalid room type ID');
+            }
+            
+            // Check if room type is used in rooms table
+            $check_sql = "SELECT COUNT(*) as count FROM rooms WHERE room_type = (SELECT name FROM room_types WHERE id = ?)";
+            $check_stmt = $conn->prepare($check_sql);
+            $check_stmt->bind_param("i", $id);
+            $check_stmt->execute();
+            $result = $check_stmt->get_result();
+            $row = $result->fetch_assoc();
+            
+            if ($row['count'] > 0) {
+                sendResponse(false, 'Cannot delete room type that is being used by rooms');
+            }
+            
+            $sql = "DELETE FROM room_types WHERE id = ?";
+            $stmt = $conn->prepare($sql);
+            $stmt->bind_param("i", $id);
+            
+            if ($stmt->execute()) {
+                sendResponse(true, 'Room type deleted successfully!');
+            } else {
+                sendResponse(false, 'Error deleting room type: ' . $stmt->error);
+            }
+            break;
+            
+        case 'bulk_edit':
+            $ids = $_POST['ids'] ?? '';
+            $is_active = isset($_POST['is_active']) ? 1 : 0;
+            
+            if (empty($ids)) {
+                sendResponse(false, 'No room types selected');
+            }
+            
+            $id_array = explode(',', $ids);
+            $placeholders = str_repeat('?,', count($id_array) - 1) . '?';
+            
+            $sql = "UPDATE room_types SET is_active = ? WHERE id IN ($placeholders)";
+            $stmt = $conn->prepare($sql);
+            
+            $params = array_merge([$is_active], $id_array);
+            $stmt->bind_param(str_repeat('i', count($params)), ...$params);
+            
+            if ($stmt->execute()) {
+                $affected_rows = $stmt->affected_rows;
+                sendResponse(true, "Successfully updated $affected_rows room type(s)!");
+            } else {
+                sendResponse(false, 'Error updating room types: ' . $stmt->error);
+            }
+            break;
+            
+        default:
+            sendResponse(false, 'Invalid action for room type module');
+    }
 }
 ?>
