@@ -396,38 +396,9 @@ $departments = [];
 </div>
 
 <script>
-<<<<<<< HEAD
-$(document).ready(function() {
-    // Global variables
-    let courses = [];
-    let departments = [];
-    let importDataCourses = [];
-    let currentImportStep = 1;
-
-    // Load initial data
-    loadInitialData();
-
-    // Form submission handlers
-    $('#addCourseForm').on('submit', handleAddCourse);
-    $('#editCourseForm').on('submit', handleEditCourse);
-    
-    // Initialize search functionality
-    AjaxUtils.initSearch('searchInput', 'tableBody');
-
-    // Setup import functionality
-    setupImportFunctionality();
-
-    // Load initial data from server
-    function loadInitialData() {
-=======
 // Cache bust: <?php echo time(); ?>
-// Global variables
-let courses = [];
-let departments = [];
-
 // Load initial data from server - defined globally
 window.loadInitialData = function() {
->>>>>>> b447de458b35e6b4d85299dba59d57fddd00ea6a
         // Set a timeout for loading
         const timeoutId = setTimeout(() => {
             const loadingRow = document.getElementById('loadingRow');
@@ -547,6 +518,12 @@ window.renderTable = function() {
 }
 
 $(document).ready(function() {
+    // Global variables
+    let courses = [];
+    let departments = [];
+    let importDataCourses = [];
+    let currentImportStep = 1;
+
     // Load initial data
     window.loadInitialData();
 
@@ -556,6 +533,9 @@ $(document).ready(function() {
     
     // Initialize search functionality
     AjaxUtils.initSearch('searchInput', 'tableBody');
+
+    // Setup import functionality
+    setupImportFunctionality();
 });
 
 // Handle add course form submission
@@ -755,7 +735,7 @@ function deleteCourse(id) {
 }
 
 // Import functionality
-let importDataCourses = [];
+// importDataCourses is already declared above in the global scope
 
 // Setup import functionality
 function setupImportFunctionality() {
