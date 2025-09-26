@@ -46,12 +46,8 @@ $main_query = "
         c.stream_id AS stream_id,
         s.name AS stream_name,
         s.code AS stream_code,
-        COUNT(DISTINCT t.id) as total_entries,
-        COUNT(DISTINCT c.id) as total_classes,
-        COUNT(DISTINCT co.id) as total_courses,
-        COUNT(DISTINCT l.id) as total_lecturers,
-        COUNT(DISTINCT r.id) as total_rooms,
         MAX(COALESCE(t.academic_year, '')) as academic_year,
+        MAX(t.semester) as semester,
         MAX(t.created_at) as last_updated
     FROM timetable t
     " . $class_join . "
@@ -153,7 +149,6 @@ $error_message = $_GET['error'] ?? '';
                                     <th>Session</th>
                                     <th>Academic Year</th>
                                     <th>Semester</th>
-                                    <th>Statistics</th>
                                     <th>Last Updated</th>
                                     <th>Actions</th>
                                 </tr>
@@ -169,22 +164,17 @@ $error_message = $_GET['error'] ?? '';
                                         </td>
                                         <td>
                                             <?php 
-                                            // Stream-based schema: show stream code as semester/label
-                                            $stream_label = htmlspecialchars($timetable['stream_code'] ?? $timetable['stream_name']);
+                                            // Display semester as 1 or 2 based on database value
+                                            $semester_display = '';
+                                            if ($timetable['semester'] === 'first') {
+                                                $semester_display = '1';
+                                            } elseif ($timetable['semester'] === 'second') {
+                                                $semester_display = '2';
+                                            } else {
+                                                $semester_display = ucfirst($timetable['semester']);
+                                            }
                                             ?>
-                                            <span class="badge bg-secondary"><?php echo $stream_label; ?></span>
-                                        </td>
-                                        <td>
-                                            <div class="row g-1">
-                                                <div class="col-6">
-                                                    <small class="text-muted d-block">Entries: <strong><?php echo $timetable['total_entries']; ?></strong></small>
-                                                    <small class="text-muted d-block">Classes: <strong><?php echo $timetable['total_classes']; ?></strong></small>
-                                                </div>
-                                                <div class="col-6">
-                                                    <small class="text-muted d-block">Courses: <strong><?php echo $timetable['total_courses']; ?></strong></small>
-                                                    <small class="text-muted d-block">Lecturers: <strong><?php echo $timetable['total_lecturers']; ?></strong></small>
-                                                </div>
-                                            </div>
+                                            <span class="badge bg-secondary"><?php echo $semester_display; ?></span>
                                         </td>
                                         <td>
                                             <small class="text-muted">
