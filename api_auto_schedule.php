@@ -36,7 +36,17 @@ try {
         include_once 'schedule_functions.php';
         
         // Run the automatic scheduling algorithm
-        $scheduled_count = scheduleUnscheduledClasses($conn, $stream_id, $semester);
+        $scheduling_result = scheduleUnscheduledClasses($conn, $stream_id, $semester);
+        
+        // Handle the new return format
+        if (is_array($scheduling_result)) {
+            $scheduled_count = $scheduling_result['scheduled_count'];
+            $constraint_failures = $scheduling_result['constraint_failures'];
+        } else {
+            // Fallback for old format
+            $scheduled_count = $scheduling_result;
+            $constraint_failures = [];
+        }
         
         // Get detailed information about remaining unscheduled courses
         $remaining_query = "
@@ -108,6 +118,7 @@ try {
             'other_constraints' => $other_constraint_count
         ];
         $response['remaining_courses'] = $remaining_courses;
+        $response['constraint_failures'] = $constraint_failures;
         
         // Log the results
         error_log("Auto-scheduling completed: $scheduled_count courses scheduled, $remaining_count remaining unscheduled");

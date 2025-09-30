@@ -219,19 +219,34 @@ function scheduleUnscheduledClasses($conn, $stream_id, $semester) {
             });
             
             // Try each available slot
+            $slot_attempts = 0;
+            $room_attempts = 0;
+            $total_attempts = 0;
+            
             foreach ($available_slots as $slot) {
                 // Skip break slots
                 if ($slot['is_break']) {
                     continue;
                 }
                 
+                $slot_attempts++;
+                
                 // Try each suitable room
                 foreach ($suitable_rooms as $room) {
+                    $room_attempts++;
+                    $total_attempts++;
+                    
                     $room_key = $slot['day_id'] . '|' . $slot['time_slot_id'] . '|' . $room['id'];
                     $class_key = $slot['day_id'] . '|' . $slot['time_slot_id'] . '|' . $class_course['class_id'];
                     
                     // Check for conflicts
-                    if (isset($room_conflicts[$room_key]) || isset($class_conflicts[$class_key])) {
+                    if (isset($room_conflicts[$room_key])) {
+                        $failure_reasons[] = "Room {$room['name']} is already occupied at this time";
+                        continue;
+                    }
+                    
+                    if (isset($class_conflicts[$class_key])) {
+                        $failure_reasons[] = "Class {$class_course['class_name']} already has a class at this time";
                         continue;
                     }
                     
@@ -239,6 +254,7 @@ function scheduleUnscheduledClasses($conn, $stream_id, $semester) {
                     if ($lecturer_id) {
                         $lecturer_key = $slot['day_id'] . '|' . $slot['time_slot_id'] . '|' . $lecturer_id;
                         if (isset($lecturer_conflicts[$lecturer_key])) {
+                            $failure_reasons[] = "Lecturer {$class_course['lecturer_name']} already has a class at this time";
                             continue;
                         }
                         
@@ -258,6 +274,7 @@ function scheduleUnscheduledClasses($conn, $stream_id, $semester) {
                         
                         // Limit lecturer to maximum 4 classes per day
                         if ($daily_count >= 4) {
+                            $failure_reasons[] = "Lecturer {$class_course['lecturer_name']} already has maximum daily load (4 classes)";
                             continue;
                         }
                     }
@@ -278,6 +295,7 @@ function scheduleUnscheduledClasses($conn, $stream_id, $semester) {
                     
                     // Limit class to maximum 3 classes per day
                     if ($class_daily_count >= 3) {
+                        $failure_reasons[] = "Class {$class_course['class_name']} already has maximum daily load (3 classes)";
                         continue;
                     }
                     
@@ -324,12 +342,31 @@ function scheduleUnscheduledClasses($conn, $stream_id, $semester) {
                     break;
                 }
             }
+            
+            // If course couldn't be scheduled, add to constraint failures
+            if (!$scheduled) {
+                $constraint_failures[] = [
+                    'course_code' => $class_course['course_code'],
+                    'course_name' => $class_course['course_name'],
+                    'class_name' => $class_course['class_name'],
+                    'lecturer_name' => $class_course['lecturer_name'],
+                    'reason' => 'Constraint conflicts',
+                    'details' => implode('; ', array_unique($failure_reasons)),
+                    'attempts' => $total_attempts,
+                    'suitable_rooms' => count($suitable_rooms),
+                    'available_slots' => $slot_attempts
+                ];
+            }
         }
         
     } catch (Exception $e) {
         error_log("Error in scheduleUnscheduledClasses: " . $e->getMessage());
     }
     
-    return $additional_scheduled;
+    // Return both scheduled count and constraint failures
+    return [
+        'scheduled_count' => $additional_scheduled,
+        'constraint_failures' => $constraint_failures
+    ];
 }
 ?>

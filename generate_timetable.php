@@ -4503,6 +4503,20 @@ function autoScheduleUnscheduledCourses() {
                 message += '\n\nPlease assign lecturers to courses before attempting to schedule them.';
             }
             
+            // Add detailed constraint failure information
+            if (data.constraint_failures && data.constraint_failures.length > 0) {
+                message += `\n\n📋 Detailed Constraint Analysis:\n`;
+                data.constraint_failures.forEach(failure => {
+                    message += `\n• ${failure.course_code} - ${failure.class_name}: ${failure.reason}`;
+                    if (failure.details) {
+                        message += `\n  Details: ${failure.details}`;
+                    }
+                    if (failure.attempts) {
+                        message += `\n  Attempted ${failure.attempts} slot/room combinations`;
+                    }
+                });
+            }
+            
             showSuccessMessage(message);
             
             // Update the unscheduled count
