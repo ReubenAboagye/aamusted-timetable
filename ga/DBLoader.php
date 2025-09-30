@@ -377,7 +377,7 @@ class DBLoader {
     }
 
     private function loadDepartments($streamId = null) {
-        $sql = "SELECT id, name, code, description, is_active 
+        $sql = "SELECT id, name, code, is_active 
                 FROM departments WHERE is_active = 1";
         
         return $this->fetchAll($sql);

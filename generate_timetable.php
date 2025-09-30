@@ -193,8 +193,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     // Insert into database
                     $inserted_count = insertTimetableEntries($conn, $timetableEntries);
                     
+                    // Post-process: Try to schedule unscheduled classes in available slots
+                    $additional_scheduled = scheduleUnscheduledClasses($conn, $stream_id, $semester_int);
+                    
                     if ($inserted_count > 0) {
                         $msg = "Timetable generated successfully! $inserted_count entries created.";
+                        if ($additional_scheduled > 0) {
+                            $msg .= " Additionally scheduled $additional_scheduled unscheduled classes in available slots.";
+                        }
                         
                         // Check for lecturer conflicts in session
                         $conflictCount = 0;
@@ -731,6 +737,328 @@ function formatTimeForDatabase($time) {
     return $time;
 }
 
+/**
+ * Schedule unscheduled classes in available slots after GA generation
+ * @param mysqli $conn Database connection
+ * @param int $stream_id Stream ID
+ * @param int $semester Semester (1 or 2)
+ * @return int Number of additional classes scheduled
+ */
+function scheduleUnscheduledClasses($conn, $stream_id, $semester) {
+    $additional_scheduled = 0;
+    
+    try {
+        // Get unscheduled class courses for this stream and semester
+        $unscheduled_query = "
+            SELECT 
+                cc.id as class_course_id,
+                cc.class_id,
+                cc.course_id,
+                cc.lecturer_id,
+                c.name as class_name,
+                co.code as course_code,
+                co.name as course_name,
+                co.hours_per_week,
+                l.name as lecturer_name,
+                c.total_capacity as class_size
+            FROM class_courses cc
+            LEFT JOIN classes c ON cc.class_id = c.id
+            LEFT JOIN courses co ON cc.course_id = co.id
+            LEFT JOIN lecturers l ON cc.lecturer_id = l.id
+            WHERE cc.is_active = 1 
+            AND c.stream_id = ?
+            AND cc.id NOT IN (
+                SELECT DISTINCT t.class_course_id 
+                FROM timetable t 
+                WHERE t.class_course_id IS NOT NULL
+            )
+            ORDER BY 
+                CASE 
+                    WHEN cc.lecturer_id IS NOT NULL THEN 1  -- Prioritize courses with assigned lecturers
+                    ELSE 2 
+                END,
+                c.total_capacity DESC,  -- Prioritize larger classes
+                co.code ASC
+        ";
+        
+        $stmt = $conn->prepare($unscheduled_query);
+        $stmt->bind_param("i", $stream_id);
+        $stmt->execute();
+        $unscheduled_result = $stmt->get_result();
+        $unscheduled_classes = $unscheduled_result->fetch_all(MYSQLI_ASSOC);
+        $stmt->close();
+        
+        if (empty($unscheduled_classes)) {
+            return 0; // No unscheduled classes
+        }
+        
+        // Get available time slots and rooms for this stream
+        $slots_query = "
+            SELECT DISTINCT d.id as day_id, ts.id as time_slot_id, ts.start_time, ts.end_time, ts.is_break
+            FROM days d
+            CROSS JOIN stream_time_slots sts
+            JOIN time_slots ts ON sts.time_slot_id = ts.id
+            WHERE sts.stream_id = ? AND sts.is_active = 1
+            ORDER BY d.id, ts.start_time
+        ";
+        
+        $stmt = $conn->prepare($slots_query);
+        $stmt->bind_param("i", $stream_id);
+        $stmt->execute();
+        $slots_result = $stmt->get_result();
+        $available_slots = $slots_result->fetch_all(MYSQLI_ASSOC);
+        $stmt->close();
+        
+        // Get available rooms with capacity and type information
+        $rooms_query = "
+            SELECT r.id, r.name, r.capacity, rt.name as room_type
+            FROM rooms r
+            LEFT JOIN room_types rt ON r.room_type_id = rt.id
+            WHERE r.is_active = 1 
+            ORDER BY r.capacity DESC, r.name ASC
+        ";
+        $rooms_result = $conn->query($rooms_query);
+        $available_rooms = $rooms_result->fetch_all(MYSQLI_ASSOC);
+        
+        if (empty($available_slots) || empty($available_rooms)) {
+            return 0; // No available slots or rooms
+        }
+        
+        // Get course-room type preferences
+        $room_preferences_query = "
+            SELECT course_id, room_type
+            FROM course_room_types 
+            WHERE is_active = 1
+        ";
+        $prefs_result = $conn->query($room_preferences_query);
+        $room_preferences = [];
+        while ($pref = $prefs_result->fetch_assoc()) {
+            $room_preferences[$pref['course_id']] = $pref['room_type'];
+        }
+        
+        // Get currently scheduled entries to check for conflicts
+        $scheduled_query = "
+            SELECT t.day_id, t.time_slot_id, t.room_id, t.class_course_id, t.lecturer_course_id,
+                   cc.class_id, cc.course_id, lc.lecturer_id
+            FROM timetable t
+            JOIN class_courses cc ON t.class_course_id = cc.id
+            JOIN classes c ON cc.class_id = c.id
+            LEFT JOIN lecturer_courses lc ON t.lecturer_course_id = lc.id
+            WHERE c.stream_id = ? AND t.semester = ?
+        ";
+        
+        $stmt = $conn->prepare($scheduled_query);
+        $stmt->bind_param("ii", $stream_id, $semester);
+        $stmt->execute();
+        $scheduled_result = $stmt->get_result();
+        $scheduled_entries = $scheduled_result->fetch_all(MYSQLI_ASSOC);
+        $stmt->close();
+        
+        // Create comprehensive conflict maps
+        $room_conflicts = [];
+        $class_conflicts = [];
+        $lecturer_conflicts = [];
+        $room_usage = []; // Track room usage for optimization
+        
+        foreach ($scheduled_entries as $entry) {
+            $room_key = $entry['day_id'] . '|' . $entry['time_slot_id'] . '|' . $entry['room_id'];
+            $room_conflicts[$room_key] = true;
+            
+            $class_key = $entry['day_id'] . '|' . $entry['time_slot_id'] . '|' . $entry['class_id'];
+            $class_conflicts[$class_key] = true;
+            
+            if ($entry['lecturer_id']) {
+                $lecturer_key = $entry['day_id'] . '|' . $entry['time_slot_id'] . '|' . $entry['lecturer_id'];
+                $lecturer_conflicts[$lecturer_key] = true;
+            }
+            
+            // Track room usage for load balancing
+            $room_usage[$entry['room_id']] = ($room_usage[$entry['room_id']] ?? 0) + 1;
+        }
+        
+        // Try to schedule each unscheduled class
+        foreach ($unscheduled_classes as $class_course) {
+            $scheduled = false;
+            
+            // Get lecturer course for this class course
+            $lecturer_course_id = null;
+            $lecturer_id = null;
+            
+            if ($class_course['lecturer_id']) {
+                $lec_query = "SELECT id FROM lecturer_courses WHERE course_id = ? AND lecturer_id = ? AND is_active = 1 LIMIT 1";
+                $lec_stmt = $conn->prepare($lec_query);
+                $lec_stmt->bind_param("ii", $class_course['course_id'], $class_course['lecturer_id']);
+                $lec_stmt->execute();
+                $lec_result = $lec_stmt->get_result();
+                if ($lec_row = $lec_result->fetch_assoc()) {
+                    $lecturer_course_id = $lec_row['id'];
+                    $lecturer_id = $class_course['lecturer_id'];
+                }
+                $lec_stmt->close();
+            } else {
+                // Try to find any lecturer for this course
+                $lec_query = "SELECT id, lecturer_id FROM lecturer_courses WHERE course_id = ? AND is_active = 1 LIMIT 1";
+                $lec_stmt = $conn->prepare($lec_query);
+                $lec_stmt->bind_param("i", $class_course['course_id']);
+                $lec_stmt->execute();
+                $lec_result = $lec_stmt->get_result();
+                if ($lec_row = $lec_result->fetch_assoc()) {
+                    $lecturer_course_id = $lec_row['id'];
+                    $lecturer_id = $lec_row['lecturer_id'];
+                }
+                $lec_stmt->close();
+            }
+            
+            // Filter rooms by preference and capacity
+            $suitable_rooms = $available_rooms;
+            
+            // Apply room type preference if available
+            if (isset($room_preferences[$class_course['course_id']])) {
+                $preferred_type = $room_preferences[$class_course['course_id']];
+                $filtered_rooms = array_filter($suitable_rooms, function($room) use ($preferred_type) {
+                    return strtolower($room['room_type'] ?? '') === strtolower($preferred_type);
+                });
+                if (!empty($filtered_rooms)) {
+                    $suitable_rooms = array_values($filtered_rooms);
+                }
+            }
+            
+            // Filter by capacity
+            $class_size = (int)$class_course['class_size'];
+            if ($class_size > 0) {
+                $suitable_rooms = array_filter($suitable_rooms, function($room) use ($class_size) {
+                    return (int)$room['capacity'] >= $class_size;
+                });
+            }
+            
+            // Sort rooms by capacity (ascending) and usage (ascending) for load balancing
+            usort($suitable_rooms, function($a, $b) use ($room_usage) {
+                $usage_a = $room_usage[$a['id']] ?? 0;
+                $usage_b = $room_usage[$b['id']] ?? 0;
+                
+                if ($usage_a === $usage_b) {
+                    return $a['capacity'] - $b['capacity']; // Prefer smaller rooms if usage is equal
+                }
+                return $usage_a - $usage_b; // Prefer less used rooms
+            });
+            
+            // Try each available slot
+            foreach ($available_slots as $slot) {
+                // Skip break slots
+                if (isset($slot['is_break']) && $slot['is_break']) {
+                    continue;
+                }
+                
+                // Try each suitable room
+                foreach ($suitable_rooms as $room) {
+                    $room_key = $slot['day_id'] . '|' . $slot['time_slot_id'] . '|' . $room['id'];
+                    $class_key = $slot['day_id'] . '|' . $slot['time_slot_id'] . '|' . $class_course['class_id'];
+                    
+                    // Check for conflicts
+                    if (isset($room_conflicts[$room_key]) || isset($class_conflicts[$class_key])) {
+                        continue;
+                    }
+                    
+                    // Check lecturer conflict if we have a lecturer
+                    if ($lecturer_id) {
+                        $lecturer_key = $slot['day_id'] . '|' . $slot['time_slot_id'] . '|' . $lecturer_id;
+                        if (isset($lecturer_conflicts[$lecturer_key])) {
+                            continue;
+                        }
+                    }
+                    
+                    // Additional constraint: Check if lecturer has too many classes on the same day
+                    if ($lecturer_id) {
+                        $daily_load_query = "
+                            SELECT COUNT(*) as daily_count
+                            FROM timetable t
+                            JOIN lecturer_courses lc ON t.lecturer_course_id = lc.id
+                            WHERE lc.lecturer_id = ? AND t.day_id = ? AND t.semester = ?
+                        ";
+                        $load_stmt = $conn->prepare($daily_load_query);
+                        $load_stmt->bind_param("iii", $lecturer_id, $slot['day_id'], $semester);
+                        $load_stmt->execute();
+                        $load_result = $load_stmt->get_result();
+                        $daily_count = $load_result->fetch_assoc()['daily_count'];
+                        $load_stmt->close();
+                        
+                        // Limit lecturer to maximum 4 classes per day
+                        if ($daily_count >= 4) {
+                            continue;
+                        }
+                    }
+                    
+                    // Additional constraint: Check if class has too many classes on the same day
+                    $class_daily_load_query = "
+                        SELECT COUNT(*) as daily_count
+                        FROM timetable t
+                        JOIN class_courses cc ON t.class_course_id = cc.id
+                        WHERE cc.class_id = ? AND t.day_id = ? AND t.semester = ?
+                    ";
+                    $class_load_stmt = $conn->prepare($class_daily_load_query);
+                    $class_load_stmt->bind_param("iii", $class_course['class_id'], $slot['day_id'], $semester);
+                    $class_load_stmt->execute();
+                    $class_load_result = $class_load_stmt->get_result();
+                    $class_daily_count = $class_load_result->fetch_assoc()['daily_count'];
+                    $class_load_stmt->close();
+                    
+                    // Limit class to maximum 3 classes per day
+                    if ($class_daily_count >= 3) {
+                        continue;
+                    }
+                    
+                    // Schedule this class
+                    $insert_query = "
+                        INSERT INTO timetable (
+                            class_course_id, lecturer_course_id, day_id, time_slot_id, 
+                            room_id, division_label, semester, created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, '', ?, NOW(), NOW())
+                    ";
+                    
+                    $insert_stmt = $conn->prepare($insert_query);
+                    $insert_stmt->bind_param("iiiiii", 
+                        $class_course['class_course_id'],
+                        $lecturer_course_id,
+                        $slot['day_id'],
+                        $slot['time_slot_id'],
+                        $room['id'],
+                        $semester
+                    );
+                    
+                    if ($insert_stmt->execute()) {
+                        $additional_scheduled++;
+                        $scheduled = true;
+                        
+                        // Update conflict maps
+                        $room_conflicts[$room_key] = true;
+                        $class_conflicts[$class_key] = true;
+                        if ($lecturer_id) {
+                            $lecturer_key = $slot['day_id'] . '|' . $slot['time_slot_id'] . '|' . $lecturer_id;
+                            $lecturer_conflicts[$lecturer_key] = true;
+                        }
+                        
+                        // Update room usage for load balancing
+                        $room_usage[$room['id']] = ($room_usage[$room['id']] ?? 0) + 1;
+                        
+                        error_log("Successfully scheduled unscheduled class: {$class_course['class_name']} - {$class_course['course_code']} in room {$room['name']} at slot {$slot['start_time']}-{$slot['end_time']}");
+                        break;
+                    }
+                    $insert_stmt->close();
+                }
+                
+                if ($scheduled) {
+                    break;
+                }
+            }
+        }
+        
+    } catch (Exception $e) {
+        error_log("Error in scheduleUnscheduledClasses: " . $e->getMessage());
+    }
+    
+    return $additional_scheduled;
+}
+
 // Get statistics
 $total_assignments = 0;
 // Count assignments; respect stream when classes.stream_id exists
@@ -1153,8 +1481,8 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
         $is_ready = count($readiness_issues) == 0;
         ?>
 
-        <!-- Pre-Generation Conditions (show when no timetable exists or has issues) -->
-        <?php if (!$has_timetable || !$is_ready): ?>
+        <!-- Pre-Generation Conditions (always show readiness check before generation) -->
+        <?php if (true): ?>
         <div class="row m-3">
             <div class="col-12">
                 <div class="card mt-3">
@@ -2185,21 +2513,34 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                         
                         <?php if ($unscheduled_assignments > 0): ?>
                         <div class="mt-4">
-                            <h6 class="mb-3">
-                                <i class="fas fa-exclamation-triangle me-2 text-warning"></i>Unscheduled Courses
-                                <span class="badge bg-warning ms-2"><?php echo $unscheduled_assignments; ?></span>
-                            </h6>
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <h6 class="mb-0">
+                                    <i class="fas fa-exclamation-triangle me-2 text-warning"></i>Unscheduled Courses
+                                    <span class="badge bg-warning ms-2"><?php echo $unscheduled_assignments; ?></span>
+                                </h6>
+                                <?php if ($unscheduled_assignments > 0): ?>
+                                <div class="btn-group" role="group">
+                                    <button type="button" class="btn btn-primary btn-sm" id="autoScheduleBtn" onclick="autoScheduleUnscheduledCourses()">
+                                        <i class="fas fa-magic me-1"></i>Auto-Schedule All
+                                    </button>
+                                    <button type="button" class="btn btn-warning btn-sm" id="assignLecturersBtn" onclick="openLecturerAssignmentModal()">
+                                        <i class="fas fa-user-plus me-1"></i>Assign Lecturers
+                                    </button>
+                                </div>
+                                <?php endif; ?>
+                            </div>
                             
                             <?php
                             // Get unscheduled courses with details and reasons
                             $unscheduled_query = "
                                 SELECT 
                                     cc.id as class_course_id,
-                                    c.name as class_name,
-                                    co.code as course_code,
-                                    co.name as course_name,
-                                    co.hours_per_week,
-                                    l.name as lecturer_name,
+                c.name as class_name,
+                co.code as course_code,
+                co.name as course_name,
+                co.hours_per_week,
+                l.name as lecturer_name,
+                c.total_capacity as class_size,
                                     (SELECT COUNT(*) FROM lecturer_courses lc2 WHERE lc2.course_id = co.id AND lc2.is_active = 1) as lecturer_count,
                                     CASE 
                                         WHEN (SELECT COUNT(*) FROM lecturer_courses lc3 WHERE lc3.course_id = co.id AND lc3.is_active = 1) = 0 THEN 'No lecturer assigned'
@@ -2281,6 +2622,103 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                             ?>
                         </div>
                         <?php endif; ?>
+                        
+                        <!-- Available Slots Section -->
+                        <div class="mt-4">
+                            <h6 class="mb-3">
+                                <i class="fas fa-clock me-2 text-info"></i>Available Slots
+                                <span class="badge bg-info ms-2" id="available-slots-count">0</span>
+                            </h6>
+                            
+                            <?php
+                            // Get available slots for this stream
+                            $available_slots_query = "
+                                SELECT DISTINCT 
+                                    d.id as day_id,
+                                    d.name as day_name,
+                                    ts.id as time_slot_id,
+                                    ts.start_time,
+                                    ts.end_time,
+                                    ts.is_break,
+                                    COUNT(r.id) as available_rooms
+                                FROM days d
+                                CROSS JOIN stream_time_slots sts
+                                JOIN time_slots ts ON sts.time_slot_id = ts.id
+                                LEFT JOIN rooms r ON r.is_active = 1
+                                LEFT JOIN timetable t ON (
+                                    t.day_id = d.id 
+                                    AND t.time_slot_id = ts.id 
+                                    AND t.room_id = r.id
+                                    AND t.semester = ?
+                                )
+                                WHERE sts.stream_id = ? 
+                                AND sts.is_active = 1 
+                                AND t.id IS NULL
+                                GROUP BY d.id, ts.id, d.name, ts.start_time, ts.end_time, ts.is_break
+                                ORDER BY d.id, ts.start_time
+                            ";
+                            
+                            $available_stmt = $conn->prepare($available_slots_query);
+                            $available_stmt->bind_param("ii", $current_semester, $current_stream_id);
+                            $available_stmt->execute();
+                            $available_result = $available_stmt->get_result();
+                            $available_slots = $available_result->fetch_all(MYSQLI_ASSOC);
+                            $available_stmt->close();
+                            
+                            $total_available_slots = count($available_slots);
+                            ?>
+                            
+                            <div class="alert alert-info">
+                                <i class="fas fa-info-circle me-2"></i>
+                                <strong><?php echo $total_available_slots; ?></strong> time slots have available rooms for additional scheduling.
+                                These slots can be used to schedule unscheduled classes or for manual adjustments.
+                            </div>
+                            
+                            <?php if ($total_available_slots > 0): ?>
+                            <div class="table-responsive">
+                                <table class="table table-sm table-hover">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>Day</th>
+                                            <th>Time Slot</th>
+                                            <th>Available Rooms</th>
+                                            <th>Type</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php foreach ($available_slots as $slot): ?>
+                                        <tr>
+                                            <td>
+                                                <strong><?php echo htmlspecialchars($slot['day_name']); ?></strong>
+                                            </td>
+                                            <td>
+                                                <span class="fw-bold text-primary">
+                                                    <?php echo formatTimeForDisplay($slot['start_time']); ?> - 
+                                                    <?php echo formatTimeForDisplay($slot['end_time']); ?>
+                                                </span>
+                                            </td>
+                                            <td>
+                                                <span class="badge bg-success"><?php echo $slot['available_rooms']; ?> rooms</span>
+                                            </td>
+                                            <td>
+                                                <?php if ($slot['is_break']): ?>
+                                                    <span class="badge bg-warning">Break</span>
+                                                <?php else: ?>
+                                                    <span class="badge bg-primary">Class Slot</span>
+                                                <?php endif; ?>
+                                            </td>
+                                        </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <?php else: ?>
+                            <div class="alert alert-warning">
+                                <i class="fas fa-exclamation-triangle me-2"></i>
+                                No available slots found. All time slots are fully utilized.
+                            </div>
+                            <?php endif; ?>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -3770,6 +4208,338 @@ function saveManualScheduling() {
         // Restore button state
         saveBtn.innerHTML = originalText;
         saveBtn.disabled = false;
+    });
+}
+
+// Open lecturer assignment modal
+function openLecturerAssignmentModal() {
+    const currentStreamId = <?php echo $current_stream_id; ?>;
+    const currentSemester = <?php echo $current_semester; ?>;
+    
+    // Create modal HTML for lecturer assignment
+    const modalHtml = `
+        <div class="modal fade" id="lecturerAssignmentModal" tabindex="-1" aria-labelledby="lecturerAssignmentModalLabel" aria-hidden="true">
+            <div class="modal-dialog modal-xl">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="lecturerAssignmentModalLabel">
+                            <i class="fas fa-user-plus me-2"></i>Assign Lecturers to Unscheduled Courses
+                        </h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="alert alert-info">
+                            <i class="fas fa-info-circle me-2"></i>
+                            Assign lecturers to courses that don't have lecturers assigned. After assignment, use the "Auto-Schedule All" button to schedule these courses.
+                        </div>
+                        
+                        <div id="lecturerAssignmentContent">
+                            <div class="text-center">
+                                <div class="spinner-border" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                                <p class="mt-2">Loading unscheduled courses...</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                        <button type="button" class="btn btn-success" onclick="saveLecturerAssignments()">
+                            <i class="fas fa-save me-1"></i>Save Assignments
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Remove existing modal if any
+    const existingModal = document.getElementById('lecturerAssignmentModal');
+    if (existingModal) {
+        existingModal.remove();
+    }
+    
+    // Add modal to body
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    
+    // Show modal
+    const modal = new bootstrap.Modal(document.getElementById('lecturerAssignmentModal'));
+    modal.show();
+    
+    // Load unscheduled courses
+    loadUnscheduledCoursesForAssignment(currentStreamId, currentSemester);
+}
+
+// Load unscheduled courses for lecturer assignment
+function loadUnscheduledCoursesForAssignment(streamId, semester) {
+    fetch('api_lecturer_assignment.php', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            action: 'get_unscheduled_courses',
+            stream_id: streamId,
+            semester: semester
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            displayUnscheduledCoursesForAssignment(data.courses);
+        } else {
+            document.getElementById('lecturerAssignmentContent').innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    Error loading courses: ${data.message}
+                </div>
+            `;
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        document.getElementById('lecturerAssignmentContent').innerHTML = `
+            <div class="alert alert-danger">
+                <i class="fas fa-exclamation-triangle me-2"></i>
+                Error loading courses. Please try again.
+            </div>
+        `;
+    });
+}
+
+// Display unscheduled courses for assignment
+function displayUnscheduledCoursesForAssignment(courses) {
+    if (courses.length === 0) {
+        document.getElementById('lecturerAssignmentContent').innerHTML = `
+            <div class="alert alert-success">
+                <i class="fas fa-check-circle me-2"></i>
+                All courses have lecturers assigned!
+            </div>
+        `;
+        return;
+    }
+    
+    let html = '<div class="row">';
+    
+    courses.forEach(course => {
+        html += `
+            <div class="col-md-6 mb-3">
+                <div class="card">
+                    <div class="card-body">
+                        <h6 class="card-title">
+                            <strong>${course.course_code}</strong> - ${course.course_name}
+                        </h6>
+                        <p class="card-text">
+                            <small class="text-muted">Class: ${course.class_name}</small>
+                        </p>
+                        <div class="mb-2">
+                            <label class="form-label">Select Lecturer:</label>
+                            <select class="form-select lecturer-select" data-course-id="${course.course_id}" data-class-course-id="${course.class_course_id}">
+                                <option value="">Choose lecturer...</option>
+                            </select>
+                        </div>
+                        <div class="lecturer-options" id="lecturer-options-${course.class_course_id}" style="display: none;">
+                            <small class="text-muted">Available lecturers for this course:</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+    
+    html += '</div>';
+    
+    document.getElementById('lecturerAssignmentContent').innerHTML = html;
+    
+    // Load lecturers for each course
+    courses.forEach(course => {
+        loadLecturersForCourse(course.course_id, course.class_course_id);
+    });
+}
+
+// Load lecturers for a specific course
+function loadLecturersForCourse(courseId, classCourseId) {
+    fetch('api_lecturer_assignment.php', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            action: 'get_course_lecturers',
+            course_id: courseId
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            const select = document.querySelector(`select[data-course-id="${courseId}"]`);
+            const optionsDiv = document.getElementById(`lecturer-options-${classCourseId}`);
+            
+            if (data.lecturers.length > 0) {
+                data.lecturers.forEach(lecturer => {
+                    const option = document.createElement('option');
+                    option.value = lecturer.lecturer_course_id;
+                    option.textContent = lecturer.lecturer_name;
+                    select.appendChild(option);
+                });
+                
+                optionsDiv.innerHTML = `<small class="text-success">${data.lecturers.length} lecturer(s) available</small>`;
+                optionsDiv.style.display = 'block';
+            } else {
+                select.innerHTML = '<option value="">No lecturers available for this course</option>';
+                optionsDiv.innerHTML = '<small class="text-warning">No lecturers available for this course</small>';
+                optionsDiv.style.display = 'block';
+            }
+        }
+    })
+    .catch(error => {
+        console.error('Error loading lecturers:', error);
+    });
+}
+
+// Save lecturer assignments
+function saveLecturerAssignments() {
+    const assignments = [];
+    const selects = document.querySelectorAll('.lecturer-select');
+    
+    selects.forEach(select => {
+        if (select.value) {
+            assignments.push({
+                class_course_id: select.dataset.classCourseId,
+                lecturer_course_id: select.value
+            });
+        }
+    });
+    
+    if (assignments.length === 0) {
+        showErrorMessage('Please select at least one lecturer assignment.');
+        return;
+    }
+    
+    const currentStreamId = <?php echo $current_stream_id; ?>;
+    const currentSemester = <?php echo $current_semester; ?>;
+    
+    fetch('api_lecturer_assignment.php', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            action: 'save_assignments',
+            assignments: assignments,
+            stream_id: currentStreamId,
+            semester: currentSemester
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showSuccessMessage(`Successfully assigned lecturers to ${data.assigned_count} courses!`);
+            
+            // Close modal
+            const modal = bootstrap.Modal.getInstance(document.getElementById('lecturerAssignmentModal'));
+            modal.hide();
+            
+            // Reload page to show updated data
+            setTimeout(() => {
+                location.reload();
+            }, 2000);
+        } else {
+            showErrorMessage('Failed to save assignments: ' + data.message);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        showErrorMessage('Error saving assignments. Please try again.');
+    });
+}
+
+// Auto-schedule unscheduled courses function
+function autoScheduleUnscheduledCourses() {
+    const button = document.getElementById('autoScheduleBtn');
+    const originalText = button.innerHTML;
+    
+    // Show loading state
+    button.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Auto-Scheduling...';
+    button.disabled = true;
+    
+    // Get current stream and semester from the page
+    const currentStreamId = <?php echo $current_stream_id; ?>;
+    const currentSemester = <?php echo $current_semester; ?>;
+    
+    // Send AJAX request to auto-schedule
+    fetch('api_auto_schedule.php', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            action: 'auto_schedule_unscheduled',
+            stream_id: currentStreamId,
+            semester: currentSemester
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            let message = `Successfully scheduled ${data.scheduled_count} additional courses!`;
+            
+            // Add detailed feedback about remaining courses
+            if (data.remaining_unscheduled > 0) {
+                message += `\n\nRemaining unscheduled courses: ${data.remaining_unscheduled}`;
+                
+                if (data.remaining_details) {
+                    if (data.remaining_details.no_lecturer_assigned > 0) {
+                        message += `\n• ${data.remaining_details.no_lecturer_assigned} courses have no lecturer assigned`;
+                    }
+                    if (data.remaining_details.lecturer_not_found > 0) {
+                        message += `\n• ${data.remaining_details.lecturer_not_found} courses have lecturer issues`;
+                    }
+                    if (data.remaining_details.other_constraints > 0) {
+                        message += `\n• ${data.remaining_details.other_constraints} courses blocked by other constraints`;
+                    }
+                }
+                
+                message += '\n\nPlease assign lecturers to courses before attempting to schedule them.';
+            }
+            
+            showSuccessMessage(message);
+            
+            // Update the unscheduled count
+            const unscheduledBadge = document.querySelector('.badge.bg-warning');
+            if (unscheduledBadge) {
+                const newCount = data.remaining_unscheduled;
+                unscheduledBadge.textContent = newCount;
+                
+                if (newCount === 0) {
+                    // Hide the auto-schedule button if no more unscheduled courses
+                    button.style.display = 'none';
+                    // Update the section title
+                    const sectionTitle = document.querySelector('h6 .text-warning');
+                    if (sectionTitle) {
+                        sectionTitle.textContent = 'All Courses Scheduled';
+                        sectionTitle.className = 'fas fa-check-circle me-2 text-success';
+                    }
+                }
+            }
+            
+            // Reload the page to show updated data
+            setTimeout(() => {
+                location.reload();
+            }, 3000); // Increased timeout to allow user to read the detailed message
+            
+        } else {
+            showErrorMessage('Failed to auto-schedule courses: ' + data.message);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        showErrorMessage('Error auto-scheduling courses. Please try again.');
+    })
+    .finally(() => {
+        // Restore button state
+        button.innerHTML = originalText;
+        button.disabled = false;
     });
 }
 </script>
