@@ -178,8 +178,12 @@ function scheduleUnscheduledClasses($conn, $stream_id, $semester) {
                     'course_code' => $class_course['course_code'],
                     'course_name' => $class_course['course_name'],
                     'class_name' => $class_course['class_name'],
+                    'lecturer_name' => $class_course['lecturer_name'] ?? 'Not assigned',
                     'reason' => 'No lecturer assigned',
-                    'details' => 'This course does not have a lecturer assigned to it'
+                    'details' => 'This course does not have a lecturer assigned to it',
+                    'attempts' => 0,
+                    'suitable_rooms' => 0,
+                    'available_slots' => 0
                 ];
                 error_log("Skipping course {$class_course['course_code']} - {$class_course['course_name']} for class {$class_course['class_name']}: No lecturer assigned");
                 continue;
@@ -345,16 +349,33 @@ function scheduleUnscheduledClasses($conn, $stream_id, $semester) {
             
             // If course couldn't be scheduled, add to constraint failures
             if (!$scheduled) {
+                // Analyze why it couldn't be scheduled
+                $analysis_details = [];
+                
+                if (count($suitable_rooms) == 0) {
+                    $analysis_details[] = "No suitable rooms found (capacity or room type requirements not met)";
+                }
+                
+                if ($slot_attempts == 0) {
+                    $analysis_details[] = "No available time slots found";
+                }
+                
+                if (!empty($failure_reasons)) {
+                    $analysis_details = array_merge($analysis_details, array_unique($failure_reasons));
+                }
+                
                 $constraint_failures[] = [
                     'course_code' => $class_course['course_code'],
                     'course_name' => $class_course['course_name'],
                     'class_name' => $class_course['class_name'],
                     'lecturer_name' => $class_course['lecturer_name'],
                     'reason' => 'Constraint conflicts',
-                    'details' => implode('; ', array_unique($failure_reasons)),
+                    'details' => implode('; ', $analysis_details),
                     'attempts' => $total_attempts,
                     'suitable_rooms' => count($suitable_rooms),
-                    'available_slots' => $slot_attempts
+                    'available_slots' => $slot_attempts,
+                    'total_rooms' => count($available_rooms),
+                    'total_slots' => count($available_slots)
                 ];
             }
         }
