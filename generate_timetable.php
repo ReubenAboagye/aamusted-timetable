@@ -75,6 +75,18 @@ if (isset($_GET['edit_stream_id']) && !empty($_GET['edit_stream_id'])) {
 // Set current semester from form, URL params, or use defaults
 $current_semester = 2; // Default to semester 2
 
+// Set current version from URL params or use default
+$current_version = 'regular'; // Default version
+if (isset($_GET['version']) && !empty($_GET['version'])) {
+    $current_version = trim($_GET['version']);
+    // Sanitize version name
+    $current_version = preg_replace('/[^a-zA-Z0-9\s\-_]/', '', $current_version);
+    $current_version = trim($current_version);
+    if (empty($current_version)) {
+        $current_version = 'regular';
+    }
+}
+
 // Check if we have form data or URL parameters
 if (isset($_POST['semester']) && !empty($_POST['semester'])) {
     $semester_input = $_POST['semester'];
@@ -102,9 +114,22 @@ $generation_results = null;
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? null;
     if ($action === 'generate_lecture_timetable') {
-        // Read semester from user input
+        // Read semester and version from user input
         $semester = trim($_POST['semester'] ?? '');
+        $version = trim($_POST['version'] ?? 'regular');
         $stream_id = $current_stream_id; // Use currently active stream
+        
+        // Validate version name
+        if (empty($version)) {
+            $version = 'regular';
+        }
+        
+        // Sanitize version name (alphanumeric, spaces, hyphens, underscores only)
+        $version = preg_replace('/[^a-zA-Z0-9\s\-_]/', '', $version);
+        $version = trim($version);
+        if (empty($version)) {
+            $version = 'regular';
+        }
         
         // Convert semester to integer for genetic algorithm
         $semester_int = 0;
@@ -128,8 +153,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error_message = 'Please specify semester (1 or 2) before generating the timetable.';
         } else {
             try {
-                // Clear existing timetable for this period
-                clearExistingTimetable($conn, $semester_int, $stream_id);
+                // Clear existing timetable for this period and version
+                clearExistingTimetable($conn, $semester_int, $stream_id, $version);
                 
                 // Initialize genetic algorithm
                 // Determine academic year from stream manager if available
@@ -191,7 +216,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                     
                     // Insert into database
-                    $inserted_count = insertTimetableEntries($conn, $timetableEntries);
+                    $inserted_count = insertTimetableEntries($conn, $timetableEntries, $version);
                     
                     // Post-process: Try to schedule unscheduled classes in available slots
                     $additional_scheduled = scheduleUnscheduledClasses($conn, $stream_id, $semester_int);
@@ -234,9 +259,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 // Helper functions
-function clearExistingTimetable($conn, $semester, $stream_id) {
+function clearExistingTimetable($conn, $semester, $stream_id, $version = 'regular') {
     // Check if timetable table has the new schema
     $has_class_course = $conn->query("SHOW COLUMNS FROM timetable LIKE 'class_course_id'")->num_rows > 0;
+    $has_version = $conn->query("SHOW COLUMNS FROM timetable LIKE 'version'")->num_rows > 0;
     
     // Determine if timetable.semester is enum('first','second',...) or numeric and normalize input
     $semTypeRes = $conn->query("SHOW COLUMNS FROM timetable LIKE 'semester'");
@@ -256,12 +282,23 @@ function clearExistingTimetable($conn, $semester, $stream_id) {
 
     if ($has_class_course) {
         // New schema: clear via class_courses -> classes -> stream
-        $sql = "DELETE t FROM timetable t 
-                JOIN class_courses cc ON t.class_course_id = cc.id 
-                JOIN classes c ON cc.class_id = c.id 
-                WHERE t.semester = ? AND c.stream_id = ?";
-        $stmt = $conn->prepare($sql);
-        $stmt->bind_param("si", $semester_param, $stream_id);
+        if ($has_version) {
+            // Include version in the delete query
+            $sql = "DELETE t FROM timetable t 
+                    JOIN class_courses cc ON t.class_course_id = cc.id 
+                    JOIN classes c ON cc.class_id = c.id 
+                    WHERE t.semester = ? AND t.version = ? AND c.stream_id = ?";
+            $stmt = $conn->prepare($sql);
+            $stmt->bind_param("ssi", $semester_param, $version, $stream_id);
+        } else {
+            // Fallback for tables without version field
+            $sql = "DELETE t FROM timetable t 
+                    JOIN class_courses cc ON t.class_course_id = cc.id 
+                    JOIN classes c ON cc.class_id = c.id 
+                    WHERE t.semester = ? AND c.stream_id = ?";
+            $stmt = $conn->prepare($sql);
+            $stmt->bind_param("si", $semester_param, $stream_id);
+        }
         $stmt->execute();
         $stmt->close();
         
@@ -310,7 +347,7 @@ function clearExistingTimetable($conn, $semester, $stream_id) {
     }
 }
 
-function insertTimetableEntries($conn, $entries) {
+function insertTimetableEntries($conn, $entries, $version = 'regular') {
     if (empty($entries)) {
         return 0;
     }
@@ -461,7 +498,7 @@ function insertTimetableEntries($conn, $entries) {
         }
             
             // Add to batch
-            $batchValues[] = "(" . (int)$entry['class_course_id'] . ", " . (int)$lecturerCourseId . ", " . (int)$entry['day_id'] . ", " . (int)$entry['time_slot_id'] . ", " . (int)$entry['room_id'] . ", '" . $conn->real_escape_string($entry['division_label']) . "', '" . $conn->real_escape_string($semesterVal) . "', '" . $conn->real_escape_string($academicYearVal) . "')";
+            $batchValues[] = "(" . (int)$entry['class_course_id'] . ", " . (int)$lecturerCourseId . ", " . (int)$entry['day_id'] . ", " . (int)$entry['time_slot_id'] . ", " . (int)$entry['room_id'] . ", '" . $conn->real_escape_string($entry['division_label']) . "', '" . $conn->real_escape_string($semesterVal) . "', '" . $conn->real_escape_string($academicYearVal) . "', '" . $conn->real_escape_string($version) . "')";
             $occupiedSlotKeys[$slotKey] = true;
         }
         
@@ -473,7 +510,7 @@ function insertTimetableEntries($conn, $entries) {
         
         // Execute batch insert if we have valid entries
         if (!empty($batchValues)) {
-            $sql = "INSERT INTO timetable (class_course_id, lecturer_course_id, day_id, time_slot_id, room_id, division_label, semester, academic_year) VALUES " . implode(', ', $batchValues);
+            $sql = "INSERT INTO timetable (class_course_id, lecturer_course_id, day_id, time_slot_id, room_id, division_label, semester, academic_year, version) VALUES " . implode(', ', $batchValues);
             
             if ($conn->query($sql)) {
                 $batchInserted = $conn->affected_rows;
@@ -1212,13 +1249,22 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                             <input type="hidden" name="action" value="generate_lecture_timetable">
                             
                             <div class="d-flex flex-column gap-3">
-                                <div class="d-flex gap-2 align-items-center">
-                                    <select name="semester" class="form-select form-select-sm" required style="max-width:140px">
-                                        <option value="">Semester</option>
-                                        <option value="first" <?php echo $current_semester == 1 ? 'selected' : ''; ?>>First</option>
-                                        <option value="second" <?php echo $current_semester == 2 ? 'selected' : ''; ?>>Second</option>
-                                    </select>
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <label class="form-label">Semester</label>
+                                        <select name="semester" class="form-select" required>
+                                            <option value="">Select Semester</option>
+                                            <option value="first" <?php echo $current_semester == 1 ? 'selected' : ''; ?>>First Semester</option>
+                                            <option value="second" <?php echo $current_semester == 2 ? 'selected' : ''; ?>>Second Semester</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label">Version Name</label>
+                                        <input type="text" name="version" class="form-control" placeholder="e.g., regular, v2, backup" value="regular" required>
+                                        <small class="form-text text-muted">Create different versions of the timetable (e.g., regular, v2, backup)</small>
+                                    </div>
                                 </div>
+                                
                                 <div class="d-flex gap-2 align-items-center">
                                     <button type="submit" class="btn btn-primary btn-lg" id="generate-btn">
                                         <i class="fas fa-magic me-2"></i>Generate Lecture Timetable
@@ -1233,6 +1279,77 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                 </div>
             </div>
 
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-header">
+                        <h6 class="mb-0">Timetable Versions</h6>
+                    </div>
+                    <div class="card-body">
+                        <?php
+                        // Get existing versions for this stream and semester
+                        $versions_query = "
+                            SELECT DISTINCT t.version, COUNT(*) as entry_count, MAX(t.created_at) as last_updated
+                            FROM timetable t
+                            JOIN class_courses cc ON t.class_course_id = cc.id
+                            JOIN classes c ON cc.class_id = c.id
+                            WHERE c.stream_id = ? AND t.semester = ?
+                            GROUP BY t.version
+                            ORDER BY MAX(t.created_at) DESC
+                        ";
+                        
+                        $versions_stmt = $conn->prepare($versions_query);
+                        $versions_stmt->bind_param("ii", $current_stream_id, $current_semester);
+                        $versions_stmt->execute();
+                        $versions_result = $versions_stmt->get_result();
+                        $existing_versions = $versions_result->fetch_all(MYSQLI_ASSOC);
+                        $versions_stmt->close();
+                        ?>
+                        
+                        <?php if (!empty($existing_versions)): ?>
+                        <div class="mb-3">
+                            <h6>Existing Versions:</h6>
+                            <div class="list-group list-group-flush">
+                                <?php foreach ($existing_versions as $version_info): ?>
+                                <div class="list-group-item d-flex justify-content-between align-items-center px-0">
+                                    <div>
+                                        <strong><?php echo htmlspecialchars($version_info['version']); ?></strong>
+                                        <br>
+                                        <small class="text-muted">
+                                            <?php echo $version_info['entry_count']; ?> entries
+                                            <br>
+                                            Updated: <?php echo date('M j, Y g:i A', strtotime($version_info['last_updated'])); ?>
+                                        </small>
+                                    </div>
+                                    <div class="btn-group btn-group-sm">
+                                        <button class="btn btn-outline-primary btn-sm" onclick="loadVersion('<?php echo htmlspecialchars($version_info['version']); ?>')">
+                                            <i class="fas fa-eye"></i>
+                                        </button>
+                                        <button class="btn btn-outline-danger btn-sm" onclick="deleteVersion('<?php echo htmlspecialchars($version_info['version']); ?>')">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                <?php endforeach; ?>
+                            </div>
+                        </div>
+                        <?php else: ?>
+                        <div class="text-muted">
+                            <i class="fas fa-info-circle me-2"></i>
+                            No timetable versions found for this stream and semester.
+                        </div>
+                        <?php endif; ?>
+                        
+                        <div class="mt-3">
+                            <button class="btn btn-outline-info btn-sm w-100" onclick="refreshVersions()">
+                                <i class="fas fa-sync me-2"></i>Refresh Versions
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row m-3">
             <div class="col-md-4">
                 <div class="card">
                     <div class="card-header">
@@ -4067,7 +4184,8 @@ function openManualSchedulingModal(classCourseId, className, courseCode, courseN
         modal.show();
     }
 }
-
+</script>
+<script type="text/javascript">
 function loadTimeSlotsForManualScheduling(dayId = null) {
     const timeSlotSelect = document.getElementById('manual_time_slot');
     if (timeSlotSelect) {
@@ -4660,6 +4778,55 @@ function showConstraintModal(constraintDetails) {
     modal.show();
 }
 
+// Version management functions
+function loadVersion(versionName) {
+    // Add version parameter to URL and reload
+    const url = new URL(window.location);
+    url.searchParams.set('version', versionName);
+    window.location.href = url.toString();
+}
+
+function deleteVersion(versionName) {
+    if (!confirm(`Are you sure you want to delete the "${versionName}" version? This action cannot be undone.`)) {
+        return;
+    }
+    
+    const currentStreamId = <?php echo $current_stream_id; ?>;
+    const currentSemester = <?php echo $current_semester; ?>;
+    
+    fetch('api_version_management.php', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            action: 'delete_version',
+            stream_id: currentStreamId,
+            semester: currentSemester,
+            version: versionName
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showSuccessMessage(`Version "${versionName}" deleted successfully!`);
+            setTimeout(() => {
+                location.reload();
+            }, 2000);
+        } else {
+            showErrorMessage('Failed to delete version: ' + data.message);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        showErrorMessage('Error deleting version. Please try again.');
+    });
+}
+
+function refreshVersions() {
+    location.reload();
+}
+
 // Auto-schedule unscheduled courses function
 function autoScheduleUnscheduledCourses() {
     const button = document.getElementById('autoScheduleBtn');
@@ -4763,3 +4930,6 @@ function autoScheduleUnscheduledCourses() {
     });
 }
 </script>
+
+</body>
+</html>
