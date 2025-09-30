@@ -2604,7 +2604,17 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                                                 <span class="badge bg-secondary"><?php echo $unscheduled['hours_per_week']; ?>h</span>
                                             </td>
                                             <td>
-                                                <span class="badge bg-warning"><?php echo htmlspecialchars($unscheduled['reason']); ?></span>
+                                                <button type="button" 
+                                                        class="btn btn-sm btn-outline-info" 
+                                                        data-bs-toggle="tooltip" 
+                                                        data-bs-placement="top" 
+                                                        data-class-course-id="<?php echo $unscheduled['class_course_id']; ?>"
+                                                        data-course-code="<?php echo htmlspecialchars($unscheduled['course_code']); ?>"
+                                                        data-class-name="<?php echo htmlspecialchars($unscheduled['class_name']); ?>"
+                                                        onclick="showConstraintDetails(<?php echo $unscheduled['class_course_id']; ?>)"
+                                                        title="Click to view detailed constraint information">
+                                                    <i class="fas fa-info-circle"></i>
+                                                </button>
                                             </td>
                                             <td>
                                                 <button class="btn btn-sm btn-success" 
@@ -2632,6 +2642,33 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                             
                             <?php
                             // Get available slots for this stream
+                            // First, get days that actually have classes for this stream
+                            $stream_days_query = "
+                                SELECT DISTINCT d.id as day_id
+                                FROM days d
+                                JOIN timetable t ON d.id = t.day_id
+                                JOIN class_courses cc ON t.class_course_id = cc.id
+                                JOIN classes c ON cc.class_id = c.id
+                                WHERE c.stream_id = ? AND t.semester = ?
+                            ";
+                            
+                            $stream_days_stmt = $conn->prepare($stream_days_query);
+                            $stream_days_stmt->bind_param("ii", $current_stream_id, $current_semester);
+                            $stream_days_stmt->execute();
+                            $stream_days_result = $stream_days_stmt->get_result();
+                            $stream_day_ids = [];
+                            while ($row = $stream_days_result->fetch_assoc()) {
+                                $stream_day_ids[] = $row['day_id'];
+                            }
+                            $stream_days_stmt->close();
+                            
+                            // If no days found, use all days (fallback)
+                            if (empty($stream_day_ids)) {
+                                $stream_day_ids = [1, 2, 3, 4, 5, 6, 7]; // All days
+                            }
+                            
+                            $days_placeholder = str_repeat('?,', count($stream_day_ids) - 1) . '?';
+                            
                             $available_slots_query = "
                                 SELECT DISTINCT 
                                     d.id as day_id,
@@ -2653,17 +2690,30 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                                 )
                                 WHERE sts.stream_id = ? 
                                 AND sts.is_active = 1 
+                                AND ts.is_break = 0
                                 AND t.id IS NULL
+                                AND d.id IN ($days_placeholder)
                                 GROUP BY d.id, ts.id, d.name, ts.start_time, ts.end_time, ts.is_break
                                 ORDER BY d.id, ts.start_time
                             ";
                             
+                            $params = array_merge([$current_semester, $current_stream_id], $stream_day_ids);
                             $available_stmt = $conn->prepare($available_slots_query);
-                            $available_stmt->bind_param("ii", $current_semester, $current_stream_id);
+                            $available_stmt->bind_param(str_repeat('i', count($params)), ...$params);
                             $available_stmt->execute();
                             $available_result = $available_stmt->get_result();
                             $available_slots = $available_result->fetch_all(MYSQLI_ASSOC);
                             $available_stmt->close();
+                            
+                            // Group slots by day
+                            $slots_by_day = [];
+                            foreach ($available_slots as $slot) {
+                                $day_name = $slot['day_name'];
+                                if (!isset($slots_by_day[$day_name])) {
+                                    $slots_by_day[$day_name] = [];
+                                }
+                                $slots_by_day[$day_name][] = $slot;
+                            }
                             
                             $total_available_slots = count($available_slots);
                             ?>
@@ -2680,32 +2730,31 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                                     <thead class="table-light">
                                         <tr>
                                             <th>Day</th>
-                                            <th>Time Slot</th>
-                                            <th>Available Rooms</th>
-                                            <th>Type</th>
+                                            <th>Available Time Slots</th>
+                                            <th>Total Rooms</th>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        <?php foreach ($available_slots as $slot): ?>
+                                        <?php foreach ($slots_by_day as $day_name => $day_slots): ?>
                                         <tr>
                                             <td>
-                                                <strong><?php echo htmlspecialchars($slot['day_name']); ?></strong>
+                                                <strong class="text-primary"><?php echo htmlspecialchars($day_name); ?></strong>
                                             </td>
                                             <td>
-                                                <span class="fw-bold text-primary">
-                                                    <?php echo formatTimeForDisplay($slot['start_time']); ?> - 
-                                                    <?php echo formatTimeForDisplay($slot['end_time']); ?>
+                                                <div class="d-flex flex-wrap gap-2">
+                                                    <?php foreach ($day_slots as $slot): ?>
+                                                    <div class="badge bg-info text-dark">
+                                                        <?php echo formatTimeForDisplay($slot['start_time']); ?> - 
+                                                        <?php echo formatTimeForDisplay($slot['end_time']); ?>
+                                                        <span class="ms-1">(<?php echo $slot['available_rooms']; ?> rooms)</span>
+                                                    </div>
+                                                    <?php endforeach; ?>
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <span class="badge bg-success">
+                                                    <?php echo array_sum(array_column($day_slots, 'available_rooms')); ?> total
                                                 </span>
-                                            </td>
-                                            <td>
-                                                <span class="badge bg-success"><?php echo $slot['available_rooms']; ?> rooms</span>
-                                            </td>
-                                            <td>
-                                                <?php if ($slot['is_break']): ?>
-                                                    <span class="badge bg-warning">Break</span>
-                                                <?php else: ?>
-                                                    <span class="badge bg-primary">Class Slot</span>
-                                                <?php endif; ?>
                                             </td>
                                         </tr>
                                         <?php endforeach; ?>
@@ -4452,6 +4501,163 @@ function saveLecturerAssignments() {
         console.error('Error:', error);
         showErrorMessage('Error saving assignments. Please try again.');
     });
+}
+
+// Show constraint details for a specific course
+function showConstraintDetails(classCourseId) {
+    const currentStreamId = <?php echo $current_stream_id; ?>;
+    const currentSemester = <?php echo $current_semester; ?>;
+    
+    // Show loading state
+    const button = event.target.closest('button');
+    const originalContent = button.innerHTML;
+    button.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span>';
+    button.disabled = true;
+    
+    // Fetch constraint details
+    fetch('api_constraint_details.php', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            action: 'get_constraint_details',
+            class_course_id: classCourseId,
+            stream_id: currentStreamId,
+            semester: currentSemester
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showConstraintModal(data.constraint_details);
+        } else {
+            showErrorMessage('Failed to load constraint details: ' + data.message);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        showErrorMessage('Error loading constraint details. Please try again.');
+    })
+    .finally(() => {
+        // Restore button state
+        button.innerHTML = originalContent;
+        button.disabled = false;
+    });
+}
+
+// Show constraint details modal
+function showConstraintModal(constraintDetails) {
+    const modalHtml = `
+        <div class="modal fade" id="constraintDetailsModal" tabindex="-1" aria-labelledby="constraintDetailsModalLabel" aria-hidden="true">
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="constraintDetailsModalLabel">
+                            <i class="fas fa-info-circle me-2"></i>Constraint Analysis
+                        </h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <strong>Course:</strong> ${constraintDetails.course_code} - ${constraintDetails.course_name}
+                            </div>
+                            <div class="col-md-6">
+                                <strong>Class:</strong> ${constraintDetails.class_name}
+                            </div>
+                        </div>
+                        
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <strong>Lecturer:</strong> ${constraintDetails.lecturer_name || 'Not assigned'}
+                            </div>
+                            <div class="col-md-6">
+                                <strong>Hours:</strong> ${constraintDetails.hours_per_week}h
+                            </div>
+                        </div>
+                        
+                        <hr>
+                        
+                        <div class="alert alert-${constraintDetails.reason === 'No lecturer assigned' ? 'warning' : 'danger'}">
+                            <h6><i class="fas fa-exclamation-triangle me-2"></i>Reason: ${constraintDetails.reason}</h6>
+                            <p class="mb-0">${constraintDetails.details}</p>
+                        </div>
+                        
+                        ${constraintDetails.attempts > 0 ? `
+                        <div class="row">
+                            <div class="col-md-4">
+                                <div class="card text-center">
+                                    <div class="card-body">
+                                        <h5 class="card-title text-primary">${constraintDetails.attempts}</h5>
+                                        <p class="card-text">Slot/Room Combinations Attempted</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="card text-center">
+                                    <div class="card-body">
+                                        <h5 class="card-title text-info">${constraintDetails.suitable_rooms}</h5>
+                                        <p class="card-text">Suitable Rooms Found</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="card text-center">
+                                    <div class="card-body">
+                                        <h5 class="card-title text-success">${constraintDetails.available_slots}</h5>
+                                        <p class="card-text">Available Time Slots</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        ` : ''}
+                        
+                        ${constraintDetails.total_rooms ? `
+                        <div class="mt-3">
+                            <small class="text-muted">
+                                Total rooms available: ${constraintDetails.total_rooms} | 
+                                Total time slots: ${constraintDetails.total_slots}
+                            </small>
+                        </div>
+                        ` : ''}
+                        
+                        <div class="mt-4">
+                            <h6>Recommended Actions:</h6>
+                            <ul class="list-unstyled">
+                                ${constraintDetails.reason === 'No lecturer assigned' ? 
+                                    '<li><i class="fas fa-user-plus text-warning me-2"></i>Assign a lecturer to this course using the "Assign Lecturers" button</li>' : 
+                                    '<li><i class="fas fa-calendar-plus text-info me-2"></i>Try manual scheduling using the "Add to Timetable" button</li>' +
+                                    '<li><i class="fas fa-clock text-secondary me-2"></i>Consider adjusting existing schedule to free up time slots</li>' +
+                                    '<li><i class="fas fa-door-open text-primary me-2"></i>Check if room capacity or type requirements can be adjusted</li>'
+                                }
+                            </ul>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                        ${constraintDetails.reason === 'No lecturer assigned' ? 
+                            '<button type="button" class="btn btn-warning" onclick="openLecturerAssignmentModal()"><i class="fas fa-user-plus me-1"></i>Assign Lecturers</button>' :
+                            '<button type="button" class="btn btn-primary" onclick="openManualSchedulingModal(' + constraintDetails.class_course_id + ', \'' + constraintDetails.class_name + '\', \'' + constraintDetails.course_code + '\', \'' + constraintDetails.course_name + '\', ' + constraintDetails.hours_per_week + ', 1)"><i class="fas fa-calendar-plus me-1"></i>Manual Schedule</button>'
+                        }
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Remove existing modal if any
+    const existingModal = document.getElementById('constraintDetailsModal');
+    if (existingModal) {
+        existingModal.remove();
+    }
+    
+    // Add modal to body
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    
+    // Show modal
+    const modal = new bootstrap.Modal(document.getElementById('constraintDetailsModal'));
+    modal.show();
 }
 
 // Auto-schedule unscheduled courses function
