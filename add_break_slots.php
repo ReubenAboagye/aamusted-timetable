@@ -17,12 +17,12 @@ foreach ($break_slots as $slot) {
     $stmt->bind_param('ssiii', $slot[0], $slot[1], $slot[2], $slot[3], $slot[4]);
     
     if ($stmt->execute()) {
-        echo "<p>✅ Added break slot: {$slot[0]} - {$slot[1]} (Duration: {$slot[2]} min)</p>";
+        echo "<p> Added break slot: {$slot[0]} - {$slot[1]} (Duration: {$slot[2]} min)</p>";
     } else {
         if ($stmt->errno == 1062) {
-            echo "<p>⚠️ Break slot already exists: {$slot[0]} - {$slot[1]}</p>";
+            echo "<p> Break slot already exists: {$slot[0]} - {$slot[1]}</p>";
         } else {
-            echo "<p>❌ Error adding break slot: {$stmt->error}</p>";
+            echo "<p> Error adding break slot: {$stmt->error}</p>";
         }
     }
 }

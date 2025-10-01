@@ -715,7 +715,14 @@ $level_result = $conn->query($level_sql);
 <div class="main-content" id="mainContent">
     <div class="table-container">
         <div class="table-header d-flex justify-content-between align-items-center">
-            <h4><i class="fas fa-users me-2"></i>Classes Management</h4>
+            <div>
+                <h4><i class="fas fa-users me-2"></i>Classes Management</h4>
+                <div class="record-count-info">
+                    <span class="badge bg-primary me-2" id="totalCount">Loading...</span>
+                    <span class="badge bg-success me-2" id="activeCount">Loading...</span>
+                    <span class="badge bg-secondary" id="inactiveCount">Loading...</span>
+                </div>
+            </div>
             <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addClassModal">
                 <i class="fas fa-plus me-2"></i>Add New Classes
             </button>

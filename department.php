@@ -5,11 +5,17 @@ $show_admin_jobs_modal = false; // Disable admin jobs modal to prevent fetchJobs
 // Database connection and flash functionality
 include 'connect.php';
 include 'includes/flash.php';
+include 'includes/stream_validation.php';
 
 // Start session for CSRF protection
 if (session_status() == PHP_SESSION_NONE) {
     session_start();
 }
+
+// Validate stream selection before allowing any operations
+$stream_info = validateStreamSelection($conn);
+$current_stream_id = $stream_info['stream_id'];
+$current_stream_name = $stream_info['stream_name'];
 
 // Generate CSRF token if not exists
 if (!isset($_SESSION['csrf_token'])) {
@@ -138,17 +144,34 @@ $departments = [];
             margin-bottom: 0.5rem;
         }
         
-        .btn {
-            width: 100%;
-            margin-bottom: 0.25rem;
-        }
+    .btn {
+        width: 100%;
+        margin-bottom: 0.25rem;
     }
+}
+
+/* Record count styling */
+.record-count-info {
+    margin-top: 8px;
+}
+
+.record-count-info .badge {
+    font-size: 0.8rem;
+    padding: 0.4em 0.6em;
+}
 </style>
 
 <div class="main-content" id="mainContent">
     <div class="table-container">
         <div class="table-header d-flex justify-content-between align-items-center">
-            <h4><i class="fas fa-building me-2"></i>Department Management</h4>
+            <div>
+                <h4><i class="fas fa-building me-2"></i>Department Management</h4>
+                <div class="record-count-info">
+                    <span class="badge bg-primary me-2" id="totalCount">Loading...</span>
+                    <span class="badge bg-success me-2" id="activeCount">Loading...</span>
+                    <span class="badge bg-secondary" id="inactiveCount">Loading...</span>
+                </div>
+            </div>
             <div class="d-flex gap-2 align-items-center">
                 <!-- Search functionality -->
                 <div class="search-container me-3">
@@ -351,10 +374,24 @@ $(document).ready(function() {
         });
     }
 
+    // Update count badges
+    function updateCountBadges() {
+        const total = departments.length;
+        const active = departments.filter(dept => dept.is_active).length;
+        const inactive = total - active;
+        
+        document.getElementById('totalCount').textContent = `Total: ${total}`;
+        document.getElementById('activeCount').textContent = `Active: ${active}`;
+        document.getElementById('inactiveCount').textContent = `Inactive: ${inactive}`;
+    }
+
     // Render table data
     function renderTable() {
         const tbody = $('#tableBody');
         tbody.empty();
+
+        // Update count badges
+        updateCountBadges();
 
         if (departments.length === 0) {
             tbody.append(`

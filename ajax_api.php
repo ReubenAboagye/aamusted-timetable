@@ -1,15 +1,16 @@
 <?php
 // Centralized AJAX API Handler for the entire project
-// Ensure no output before JSON
+// Ensure no output before JSON response is sent 
 ob_start();
 
 // Set proper headers
 header('Content-Type: application/json');
 header('Cache-Control: no-cache, must-revalidate');
 
-// Include database connection
+// Include database connection and session management
 include 'connect.php';
 include 'includes/flash.php';
+include 'includes/stream_validation.php';
 
 // Start session for CSRF protection
 if (session_status() == PHP_SESSION_NONE) {
@@ -60,6 +61,10 @@ if (empty($action) || empty($module)) {
 
 // Validate CSRF token
 validateCSRF();
+
+// Validate stream selection for all database operations
+$stream_validation = validateStreamForAjax($conn);
+$current_stream_id = $stream_validation['stream_id'];
 
 try {
     switch ($module) {

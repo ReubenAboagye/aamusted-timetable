@@ -60,6 +60,12 @@ $isAjaxRequest = isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER
 // Include database connection early
 include 'connect.php';
 include 'includes/flash.php';
+include 'includes/stream_validation.php';
+
+// Validate stream selection before allowing any operations
+$stream_info = validateStreamSelection($conn);
+$current_stream_id = $stream_info['stream_id'];
+$current_stream_name = $stream_info['stream_name'];
 
 // Handle AJAX requests for existing rooms data FIRST, before any HTML output
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['action'] === 'get_existing_rooms') {
@@ -518,12 +524,54 @@ $result = $conn->query($sql);
 // Fetch buildings for dropdown
  $buildings_sql = "SELECT id, name, code FROM buildings WHERE is_active = 1 ORDER BY name";
  $buildings_result = $conn->query($buildings_sql);
+
+// Calculate counts for display
+$total_rooms = 0;
+$active_rooms = 0;
+$inactive_rooms = 0;
+$unique_buildings = 0;
+
+if ($result && $result->num_rows > 0) {
+    $total_rooms = $result->num_rows;
+    $result->data_seek(0); // Reset result pointer
+    
+    $buildings_set = [];
+    while ($row = $result->fetch_assoc()) {
+        if ($row['is_active']) {
+            $active_rooms++;
+        } else {
+            $inactive_rooms++;
+        }
+        $buildings_set[$row['building_name']] = true;
+    }
+    $unique_buildings = count($buildings_set);
+    $result->data_seek(0); // Reset result pointer again for display
+}
 ?>
+
+<style>
+/* Record count styling */
+.record-count-info {
+    margin-top: 8px;
+}
+
+.record-count-info .badge {
+    font-size: 0.8rem;
+    padding: 0.4em 0.6em;
+}
+</style>
 
 <div class="main-content" id="mainContent">
     <div class="table-container">
         <div class="table-header d-flex justify-content-between align-items-center">
-            <h4><i class="fas fa-door-open me-2"></i>Rooms Management</h4>
+            <div>
+                <h4><i class="fas fa-door-open me-2"></i>Rooms Management</h4>
+                <div class="record-count-info">
+                    <span class="badge bg-primary me-2" id="totalCount">Total: <?= $total_rooms ?></span>
+                    <span class="badge bg-success me-2" id="activeCount">Active: <?= $active_rooms ?></span>
+                    <span class="badge bg-secondary" id="inactiveCount">Inactive: <?= $inactive_rooms ?></span>
+                </div>
+            </div>
             <div class="d-flex gap-2">
                 <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addRoomModal">
                     <i class="fas fa-plus me-2"></i>Add New Room

@@ -47,9 +47,9 @@ if ($result && $result->num_rows > 0) {
     
     echo "<h3>Semester Assignment Issues</h3>\n";
     if (empty($semester_issues)) {
-        echo "<p style='color: green;'>✅ All semester assignments are correct!</p>\n";
+        echo "<p style='color: green;'> All semester assignments are correct!</p>\n";
     } else {
-        echo "<p style='color: orange;'>⚠️ Found " . count($semester_issues) . " semester assignment issues:</p>\n";
+        echo "<p style='color: orange;'> Found " . count($semester_issues) . " semester assignment issues:</p>\n";
         echo "<table border='1' style='border-collapse: collapse;'>\n";
         echo "<tr><th>ID</th><th>Course Code</th><th>Current Semester</th><th>Expected Semester</th></tr>\n";
         
@@ -67,7 +67,7 @@ if ($result && $result->num_rows > 0) {
     }
     
     echo "<h3>Correct Assignments</h3>\n";
-    echo "<p>✅ " . count($correct_assignments) . " assignments are correct</p>\n";
+    echo "<p> " . count($correct_assignments) . " assignments are correct</p>\n";
     
 } else {
     echo "<p style='color: red;'>❌ No class-course assignments found or error querying database</p>\n";
@@ -87,7 +87,7 @@ if ($result && $result->num_rows > 0) {
     }
     echo "</ul>\n";
 } else {
-    echo "<p style='color: orange;'>⚠️ No academic year data found</p>\n";
+    echo "<p style='color: orange;'> No academic year data found</p>\n";
 }
 
 // Check stream assignments
@@ -108,7 +108,7 @@ if ($result && $result->num_rows > 0) {
     }
     echo "</ul>\n";
 } else {
-    echo "<p style='color: orange;'>⚠️ No stream data found</p>\n";
+    echo "<p style='color: orange;'> No stream data found</p>\n";
 }
 
 echo "<hr>\n";

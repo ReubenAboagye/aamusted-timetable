@@ -9,7 +9,7 @@ include 'connect.php';
 include 'includes/header.php';
 include 'includes/sidebar.php';
 
-// Get parameters
+// Get parameters (versions, stream, semester)
 $stream_id = isset($_GET['stream_id']) ? intval($_GET['stream_id']) : 0;
 $version = isset($_GET['version']) ? $_GET['version'] : '';
 $semester = isset($_GET['semester']) ? $_GET['semester'] : 'second';
@@ -19,7 +19,7 @@ if (!$stream_id || !$version) {
     exit;
 }
 
-// Get stream name
+// Get stream name ( for display purposes )
 $stream_query = "SELECT name FROM streams WHERE id = ? AND is_active = 1";
 $stmt = $conn->prepare($stream_query);
 $stmt->bind_param("i", $stream_id);
@@ -28,7 +28,7 @@ $stream_result = $stmt->get_result();
 $stream_name = $stream_result->fetch_assoc()['name'] ?? 'Unknown Stream';
 $stmt->close();
 
-// Handle AJAX updates
+// Handle AJAX updates for drag & drop and edits
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     header('Content-Type: application/json');
     
@@ -41,7 +41,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $new_time_slot_id = intval($_POST['time_slot_id']);
         $new_room_id = intval($_POST['room_id']);
         
-        // Check for conflicts
+        // Check for conflicts before updating
         $conflict_check = "
             SELECT COUNT(*) as conflict_count
             FROM timetable t1
@@ -88,7 +88,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     exit;
 }
 
-// Get timetable entries organized by day and time
+// Get timetable entries organized by day and time slot
 $timetable_query = "
     SELECT t.*, 
            l.name as lecturer_name,
@@ -378,7 +378,7 @@ foreach ($timetable_entries as $entry) {
 <script>
 let draggedElement = null;
 
-// Drag and drop functionality
+// Drag and drop functionality for timetable entries 
 document.addEventListener('DOMContentLoaded', function() {
     const entries = document.querySelectorAll('.timetable-entry');
     const cells = document.querySelectorAll('.timetable-cell');
@@ -453,7 +453,7 @@ function updateEntryPosition(entryId, dayId, timeSlotId) {
     .then(data => {
         showMessage(data.success ? 'success' : 'danger', data.message);
         if (data.success) {
-            // Optionally reload the page to refresh data
+            // Optionally reload the page to refresh data from server
             setTimeout(() => location.reload(), 1000);
         }
     })
@@ -512,7 +512,7 @@ function showMessage(type, message) {
     `;
 }
 
-// Handle form submission
+// Handle form submission for editing entries
 document.getElementById('editForm').addEventListener('submit', function(e) {
     e.preventDefault();
     

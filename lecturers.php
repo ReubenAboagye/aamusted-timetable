@@ -4,7 +4,13 @@ $pageTitle = 'Lecturers Management';
 // Database connection and stream manager must be loaded before any output
 include 'connect.php';
 include 'includes/stream_manager.php';
+include 'includes/stream_validation.php';
 $streamManager = getStreamManager();
+
+// Validate stream selection before allowing any operations
+$stream_info = validateStreamSelection($conn);
+$current_stream_id = $stream_info['stream_id'];
+$current_stream_name = $stream_info['stream_name'];
 
 include 'includes/header.php';
 include 'includes/sidebar.php';
@@ -169,12 +175,29 @@ $departments = [];
     border-color: var(--primary-color) !important;
     background-color: rgba(128, 0, 32, 0.1);
 }
+
+/* Record count styling */
+.record-count-info {
+    margin-top: 8px;
+}
+
+.record-count-info .badge {
+    font-size: 0.8rem;
+    padding: 0.4em 0.6em;
+}
 </style>
 
 <div class="main-content" id="mainContent">
     <div class="table-container">
         <div class="table-header d-flex justify-content-between align-items-center">
-            <h4><i class="fas fa-chalkboard-teacher me-2"></i>Lecturers Management</h4>
+            <div>
+                <h4><i class="fas fa-chalkboard-teacher me-2"></i>Lecturers Management</h4>
+                <div class="record-count-info">
+                    <span class="badge bg-primary me-2" id="totalCount">Loading...</span>
+                    <span class="badge bg-success me-2" id="activeCount">Loading...</span>
+                    <span class="badge bg-secondary" id="inactiveCount">Loading...</span>
+                </div>
+            </div>
             <div class="d-flex gap-2 align-items-center">
                 <!-- Search functionality -->
                 <div class="search-container me-3">
@@ -459,10 +482,24 @@ $(document).ready(function() {
         });
     }
 
+    // Update count badges
+    function updateCountBadges() {
+        const total = lecturers.length;
+        const active = lecturers.filter(lecturer => lecturer.is_active).length;
+        const inactive = total - active;
+        
+        document.getElementById('totalCount').textContent = `Total: ${total}`;
+        document.getElementById('activeCount').textContent = `Active: ${active}`;
+        document.getElementById('inactiveCount').textContent = `Inactive: ${inactive}`;
+    }
+
     // Render table data
     function renderTable() {
         const tbody = $('#tableBody');
         tbody.empty();
+
+        // Update count badges
+        updateCountBadges();
 
         if (lecturers.length === 0) {
             tbody.append(`
