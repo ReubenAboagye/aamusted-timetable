@@ -114,22 +114,9 @@ $generation_results = null;
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? null;
     if ($action === 'generate_lecture_timetable') {
-        // Read semester and version from user input
+        // Read semester from user input
         $semester = trim($_POST['semester'] ?? '');
-        $version = trim($_POST['version'] ?? 'regular');
         $stream_id = $current_stream_id; // Use currently active stream
-        
-        // Validate version name
-        if (empty($version)) {
-            $version = 'regular';
-        }
-        
-        // Sanitize version name (alphanumeric, spaces, hyphens, underscores only)
-        $version = preg_replace('/[^a-zA-Z0-9\s\-_]/', '', $version);
-        $version = trim($version);
-        if (empty($version)) {
-            $version = 'regular';
-        }
         
         // Convert semester to integer for genetic algorithm
         $semester_int = 0;
@@ -138,6 +125,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif ($semester === '2' || strtolower($semester) === 'second' || strtolower($semester) === 'semester 2') {
             $semester_int = 2;
         }
+        
+        // Get stream name for version naming
+        $stream_name = getStreamName($conn, $stream_id);
+        
+        // Generate automatic version name based on stream name
+        $version = generateStreamBasedVersion($conn, $stream_id, $semester_int, $stream_name);
         
         // Update current semester for display
         $current_semester = $semester_int;
@@ -153,8 +146,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error_message = 'Please specify semester (1 or 2) before generating the timetable.';
         } else {
             try {
-                // Clear existing timetable for this period and version
-                clearExistingTimetable($conn, $semester_int, $stream_id, $version);
+                // Only clear existing timetable if this exact version already exists
+                // This prevents overwriting when creating new versions
+                if (versionExists($conn, $stream_id, $semester_int, $version)) {
+                    clearExistingTimetable($conn, $semester_int, $stream_id, $version);
+                }
                 
                 // Initialize genetic algorithm
                 // Determine academic year from stream manager if available
@@ -223,6 +219,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     
                     if ($inserted_count > 0) {
                         $msg = "Timetable generated successfully! $inserted_count entries created.";
+                        $msg .= " Version: <strong>$version</strong>";
                         if ($additional_scheduled > 0) {
                             $msg .= " Additionally scheduled $additional_scheduled unscheduled classes in available slots.";
                         }
@@ -259,6 +256,90 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 // Helper functions
+function versionExists($conn, $stream_id, $semester, $version) {
+    $query = "
+        SELECT COUNT(*) as count
+        FROM timetable t
+        JOIN class_courses cc ON t.class_course_id = cc.id
+        JOIN classes c ON cc.class_id = c.id
+        WHERE c.stream_id = ? AND t.semester = ? AND t.version = ?
+    ";
+    
+    $semester_param = is_numeric($semester) ? (($semester == 1) ? 'first' : 'second') : $semester;
+    
+    $stmt = $conn->prepare($query);
+    $stmt->bind_param("iss", $stream_id, $semester_param, $version);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $count = $result->fetch_assoc()['count'];
+    $stmt->close();
+    
+    return $count > 0;
+}
+
+function getStreamName($conn, $stream_id) {
+    $query = "SELECT name FROM streams WHERE id = ? AND is_active = 1";
+    $stmt = $conn->prepare($query);
+    $stmt->bind_param("i", $stream_id);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    if ($row = $result->fetch_assoc()) {
+        $stream_name = $row['name'];
+        $stmt->close();
+        return $stream_name;
+    }
+    
+    $stmt->close();
+    return 'Unknown Stream'; // Fallback
+}
+
+function generateStreamBasedVersion($conn, $stream_id, $semester, $stream_name) {
+    // Clean stream name for version naming (remove special characters)
+    $clean_stream_name = preg_replace('/[^a-zA-Z0-9\s]/', '', $stream_name);
+    $clean_stream_name = trim($clean_stream_name);
+    $clean_stream_name = str_replace(' ', ' ', $clean_stream_name); // Normalize spaces
+    
+    // Find existing versions for this stream
+    $query = "
+        SELECT DISTINCT t.version
+        FROM timetable t
+        JOIN class_courses cc ON t.class_course_id = cc.id
+        JOIN classes c ON cc.class_id = c.id
+        WHERE c.stream_id = ? AND t.semester = ?
+        ORDER BY t.version DESC
+    ";
+    
+    $semester_param = is_numeric($semester) ? (($semester == 1) ? 'first' : 'second') : $semester;
+    
+    $stmt = $conn->prepare($query);
+    $stmt->bind_param("is", $stream_id, $semester_param);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    $existing_versions = [];
+    while ($row = $result->fetch_assoc()) {
+        $existing_versions[] = $row['version'];
+    }
+    $stmt->close();
+    
+    // Find the highest draft number for this stream
+    $max_draft_number = 0;
+    $draft_pattern = '/^' . preg_quote($clean_stream_name, '/') . '\s+DRAFT\s+(\d+)$/i';
+    
+    foreach ($existing_versions as $existing_version) {
+        if (preg_match($draft_pattern, $existing_version, $matches)) {
+            $max_draft_number = max($max_draft_number, (int)$matches[1]);
+        }
+    }
+    
+    // Generate next draft number
+    $next_draft_number = $max_draft_number + 1;
+    
+    // Return format: "STREAM NAME DRAFT {number}"
+    return "{$clean_stream_name} DRAFT {$next_draft_number}";
+}
+
 function clearExistingTimetable($conn, $semester, $stream_id, $version = 'regular') {
     // Check if timetable table has the new schema
     $has_class_course = $conn->query("SHOW COLUMNS FROM timetable LIKE 'class_course_id'")->num_rows > 0;
@@ -1259,9 +1340,13 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                                         </select>
                                     </div>
                                     <div class="col-md-6">
-                                        <label class="form-label">Version Name</label>
-                                        <input type="text" name="version" class="form-control" placeholder="e.g., regular, v2, backup" value="regular" required>
-                                        <small class="form-text text-muted">Create different versions of the timetable (e.g., regular, v2, backup)</small>
+                                        <label class="form-label">Version Naming</label>
+                                        <div class="form-control-plaintext">
+                                            <small class="text-muted">
+                                                <i class="fas fa-info-circle me-1"></i>
+                                                Automatic: <strong><?php echo htmlspecialchars(getStreamName($conn, $current_stream_id)); ?> DRAFT {1, 2, 3...}</strong>
+                                            </small>
+                                        </div>
                                     </div>
                                 </div>
                                 
