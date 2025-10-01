@@ -17,6 +17,9 @@ try {
     $raw_input = file_get_contents('php://input');
     $input = json_decode($raw_input, true);
     
+    // Debug logging
+    error_log("Auto-schedule API called with raw input: " . $raw_input);
+    
     if (!$input || !isset($input['action'])) {
         throw new Exception('Invalid request data. Raw input: ' . $raw_input);
     }
@@ -32,11 +35,37 @@ try {
         $stream_id = intval($input['stream_id']);
         $semester = intval($input['semester']);
         
+        // Get the current version for this stream/semester
+        $version_query = "
+            SELECT t.version
+            FROM timetable t
+            JOIN class_courses cc ON t.class_course_id = cc.id
+            JOIN classes c ON cc.class_id = c.id
+            WHERE c.stream_id = ? AND t.semester = ?
+            ORDER BY t.created_at DESC
+            LIMIT 1
+        ";
+        $semester_param = is_numeric($semester) ? (($semester == 1) ? 'first' : 'second') : $semester;
+        $stmt = $conn->prepare($version_query);
+        $stmt->bind_param("is", $stream_id, $semester_param);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $current_version = 'regular'; // Default
+        if ($row = $result->fetch_assoc()) {
+            $current_version = $row['version'] ?: 'regular';
+        }
+        $stmt->close();
+        
         // Include the enhanced scheduling function
         include_once 'schedule_functions.php';
         
-        // Run the automatic scheduling algorithm
-        $scheduling_result = scheduleUnscheduledClasses($conn, $stream_id, $semester);
+        // Debug logging
+        error_log("About to call scheduleUnscheduledClasses with stream_id=$stream_id, semester=$semester, version=$current_version");
+        
+        // Run the automatic scheduling algorithm with current version
+        $scheduling_result = scheduleUnscheduledClasses($conn, $stream_id, $semester, $current_version);
+        
+        error_log("scheduleUnscheduledClasses returned: " . print_r($scheduling_result, true));
         
         // Handle the new return format
         if (is_array($scheduling_result)) {
@@ -131,6 +160,12 @@ try {
     $response['success'] = false;
     $response['message'] = $e->getMessage();
     error_log("Auto-scheduling error: " . $e->getMessage());
+    error_log("Stack trace: " . $e->getTraceAsString());
+} catch (Error $e) {
+    $response['success'] = false;
+    $response['message'] = "PHP Error: " . $e->getMessage();
+    error_log("Auto-scheduling PHP error: " . $e->getMessage());
+    error_log("Stack trace: " . $e->getTraceAsString());
 }
 
 echo json_encode($response);

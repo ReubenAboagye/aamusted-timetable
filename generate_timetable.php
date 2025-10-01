@@ -64,13 +64,26 @@ $streamManager = getStreamManager();
 // Check if we're in edit mode (stream_id passed via URL)
 $edit_mode = false;
 $edit_stream_id = null;
+$view_version = null;
+$view_semester = null;
+
 if (isset($_GET['edit_stream_id']) && !empty($_GET['edit_stream_id'])) {
     $edit_stream_id = intval($_GET['edit_stream_id']);
     $edit_mode = true;
     $current_stream_id = $edit_stream_id;
+    
+    // Check if we're viewing a specific version
+    if (isset($_GET['version']) && !empty($_GET['version'])) {
+        $view_version = $_GET['version'];
+    }
+    if (isset($_GET['semester']) && !empty($_GET['semester'])) {
+        $view_semester = $_GET['semester'];
+    }
 } else {
     $current_stream_id = $streamManager->getCurrentStreamId();
 }
+
+error_log("DEBUG: Current stream ID determined as: $current_stream_id (edit_mode: " . ($edit_mode ? 'true' : 'false') . ")");
 
 // Set current semester from form, URL params, or use defaults
 $current_semester = 2; // Default to semester 2
@@ -146,11 +159,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error_message = 'Please specify semester (1 or 2) before generating the timetable.';
         } else {
             try {
-                // Only clear existing timetable if this exact version already exists
-                // This prevents overwriting when creating new versions
-                if (versionExists($conn, $stream_id, $semester_int, $version)) {
-                    clearExistingTimetable($conn, $semester_int, $stream_id, $version);
-                }
+                // For incremental scheduling, we don't clear existing entries
+                // We only add new courses to available time slots
+                // This allows building upon existing timetables
                 
                 // Initialize genetic algorithm
                 // Determine academic year from stream manager if available
@@ -167,7 +178,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'max_runtime' => $max_runtime,
                     'stream_id' => $stream_id,
                     'semester' => $semester_int,
-                    'academic_year' => $academic_year
+                    'academic_year' => $academic_year,
+                    'exclude_scheduled' => false  // Generate complete timetable for each version
                 ];
                 
                 $ga = new GeneticAlgorithm($conn, $gaOptions);
@@ -215,7 +227,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $inserted_count = insertTimetableEntries($conn, $timetableEntries, $version);
                     
                     // Post-process: Try to schedule unscheduled classes in available slots
-                    $additional_scheduled = scheduleUnscheduledClasses($conn, $stream_id, $semester_int);
+                    $additional_scheduled = scheduleUnscheduledClasses($conn, $stream_id, $semester_int, $version);
                     
                     if ($inserted_count > 0) {
                         $msg = "Timetable generated successfully! $inserted_count entries created.";
@@ -224,16 +236,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $msg .= " Additionally scheduled $additional_scheduled unscheduled classes in available slots.";
                         }
                         
-                        // Check for lecturer conflicts in session
+                        // Check for lecturer conflicts in current version only
                         $conflictCount = 0;
                         if (session_status() === PHP_SESSION_NONE) {
                             session_start();
                         }
-                        if (isset($_SESSION['lecturer_conflicts'])) {
-                            $conflictCount = count($_SESSION['lecturer_conflicts']);
-                            if ($conflictCount > 0) {
-                                $msg .= " <strong>Note:</strong> $conflictCount lecturer conflicts detected. <a href='lecturer_conflicts.php' class='alert-link'>Review and resolve conflicts</a>";
-                            }
+                        
+                        // Clear previous conflicts and check only current version
+                        $_SESSION['lecturer_conflicts'] = [];
+                        
+                        // Count conflicts for current version only
+                        $conflict_query = "
+                            SELECT COUNT(*) as conflict_count
+                            FROM (
+                                SELECT lc.lecturer_id, t.day_id, t.time_slot_id
+                                FROM timetable t
+                                JOIN lecturer_courses lc ON t.lecturer_course_id = lc.id
+                                WHERE t.semester = ? AND t.academic_year = ? AND t.version = ?
+                                GROUP BY lc.lecturer_id, t.day_id, t.time_slot_id
+                                HAVING COUNT(*) > 1
+                            ) as conflicts
+                        ";
+                        
+                        $semester_param = is_numeric($semester_int) ? (($semester_int == 1) ? 'first' : 'second') : $semester_int;
+                        $academic_year = '2025/2026';
+                        
+                        $stmt = $conn->prepare($conflict_query);
+                        $stmt->bind_param("sss", $semester_param, $academic_year, $version);
+                        $stmt->execute();
+                        $result = $stmt->get_result();
+                        if ($row = $result->fetch_assoc()) {
+                            $conflictCount = $row['conflict_count'];
+                        }
+                        $stmt->close();
+                        
+                        if ($conflictCount > 0) {
+                            $msg .= " <strong>Note:</strong> $conflictCount lecturer conflicts detected in this version. <a href='lecturer_conflicts.php?version=" . urlencode($version) . "' class='alert-link'>Review and resolve conflicts</a>";
                         }
                         
                         if (function_exists('redirect_with_flash')) {
@@ -325,8 +363,14 @@ function generateStreamBasedVersion($conn, $stream_id, $semester, $stream_name) 
     
     // Find the highest draft number for this stream
     $max_draft_number = 0;
-    $draft_pattern = '/^' . preg_quote($clean_stream_name, '/') . '\s+DRAFT\s+(\d+)$/i';
     
+    // Check for exact base name match (like "regular")
+    if (in_array($clean_stream_name, $existing_versions)) {
+        $max_draft_number = 1;
+    }
+    
+    // Check for draft patterns (like "Regular DRAFT 1", "Regular DRAFT 2")
+    $draft_pattern = '/^' . preg_quote($clean_stream_name, '/') . '\s+DRAFT\s+(\d+)$/i';
     foreach ($existing_versions as $existing_version) {
         if (preg_match($draft_pattern, $existing_version, $matches)) {
             $max_draft_number = max($max_draft_number, (int)$matches[1]);
@@ -373,12 +417,12 @@ function clearExistingTimetable($conn, $semester, $stream_id, $version = 'regula
             $stmt->bind_param("ssi", $semester_param, $version, $stream_id);
         } else {
             // Fallback for tables without version field
-            $sql = "DELETE t FROM timetable t 
-                    JOIN class_courses cc ON t.class_course_id = cc.id 
-                    JOIN classes c ON cc.class_id = c.id 
-                    WHERE t.semester = ? AND c.stream_id = ?";
-            $stmt = $conn->prepare($sql);
-            $stmt->bind_param("si", $semester_param, $stream_id);
+        $sql = "DELETE t FROM timetable t 
+                JOIN class_courses cc ON t.class_course_id = cc.id 
+                JOIN classes c ON cc.class_id = c.id 
+                WHERE t.semester = ? AND c.stream_id = ?";
+        $stmt = $conn->prepare($sql);
+        $stmt->bind_param("si", $semester_param, $stream_id);
         }
         $stmt->execute();
         $stmt->close();
@@ -599,6 +643,13 @@ function insertTimetableEntries($conn, $entries, $version = 'regular') {
                 error_log("Batch inserted $batchInserted entries successfully");
             } else {
                 error_log("Batch insert failed: " . $conn->error);
+                
+                // Check if it's a duplicate key error and handle gracefully
+                if (strpos($conn->error, 'Duplicate entry') !== false) {
+                    error_log("Duplicate entry detected, skipping batch to prevent constraint violation");
+                    continue; // Skip this batch entirely
+                }
+                
                 // Fallback to individual inserts for this batch
                 error_log("Falling back to individual inserts for this batch");
                 foreach ($batch as $entry) {
@@ -1210,9 +1261,11 @@ if ($has_stream_col && !empty($current_stream_id)) {
     }
     $res = $conn->query($sql);
     $total_timetable_entries = $res ? $res->fetch_assoc()['count'] : 0;
+    error_log("DEBUG: Current stream ID: $current_stream_id, Timetable entries for this stream: $total_timetable_entries");
 } else {
     // Fallback to global count
     $total_timetable_entries = $conn->query("SELECT COUNT(*) as count FROM timetable")->fetch_assoc()['count'];
+    error_log("DEBUG: No current stream ID, using global count: $total_timetable_entries");
 }
 
 if ($tcol) $tcol->close();
@@ -1321,10 +1374,10 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
             <div class="col-md-8">
                 <div class="card">
                     <div class="card-header">
-                        <h6 class="mb-0">Timetable Generation</h6>
+                        <h6 class="mb-0">Generate New Timetable</h6>
                     </div>
                     <div class="card-body">
-                        <p class="text-muted">This will generate a new timetable based on current class-course assignments. Any existing timetable entries will be cleared.</p>
+                        <p class="text-muted">This will generate a completely new timetable version. Previous versions will be preserved.</p>
 
                         <form method="POST">
                             <input type="hidden" name="action" value="generate_lecture_timetable">
@@ -1337,14 +1390,14 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                                             <option value="">Select Semester</option>
                                             <option value="first" <?php echo $current_semester == 1 ? 'selected' : ''; ?>>First Semester</option>
                                             <option value="second" <?php echo $current_semester == 2 ? 'selected' : ''; ?>>Second Semester</option>
-                                        </select>
-                                    </div>
+                                    </select>
+                                </div>
                                     <div class="col-md-6">
                                         <label class="form-label">Version Naming</label>
                                         <div class="form-control-plaintext">
                                             <small class="text-muted">
                                                 <i class="fas fa-info-circle me-1"></i>
-                                                Automatic: <strong><?php echo htmlspecialchars(getStreamName($conn, $current_stream_id)); ?> DRAFT {1, 2, 3...}</strong>
+                                                Creates new version: <strong><?php echo htmlspecialchars(getStreamName($conn, $current_stream_id)); ?> DRAFT {1, 2, 3...}</strong>
                                             </small>
                                         </div>
                                     </div>
@@ -1352,7 +1405,7 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                                 
                                 <div class="d-flex gap-2 align-items-center">
                                     <button type="submit" class="btn btn-primary btn-lg" id="generate-btn">
-                                        <i class="fas fa-magic me-2"></i>Generate Lecture Timetable
+                                        <i class="fas fa-magic me-2"></i>Generate New Timetable
                                     </button>
                                     <button type="button" class="btn btn-success btn-lg" onclick="saveToSavedTimetables()" id="save-timetable-btn" style="display: none;">
                                         <i class="fas fa-save me-2"></i>Save Timetable
@@ -1605,7 +1658,7 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                             $slot_duration = 60; // Default 60 minutes
                             
                             // Check if there's a matching time slot in the database
-                            $existing_slot_sql = "SELECT duration, is_break FROM time_slots WHERE start_time = ? AND is_active = 1 LIMIT 1";
+                            $existing_slot_sql = "SELECT duration, is_break FROM time_slots WHERE start_time = ? LIMIT 1";
                             $existing_slot_stmt = $conn->prepare($existing_slot_sql);
                             $existing_slot_stmt->bind_param('s', $slot_start);
                             $existing_slot_stmt->execute();
@@ -1683,7 +1736,43 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
         $is_ready = count($readiness_issues) == 0;
         ?>
 
-        <!-- Pre-Generation Conditions (always show readiness check before generation) -->
+        <!-- Version Viewing/Editing Section -->
+        <?php if ($edit_mode && $view_version): ?>
+        <div class="row m-3">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header bg-info text-white">
+                        <h6 class="mb-0">
+                            <i class="fas fa-eye me-2"></i>Viewing Timetable Version: <strong><?php echo htmlspecialchars($view_version); ?></strong>
+                        </h6>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <p><strong>Stream:</strong> <?php echo htmlspecialchars(getStreamName($conn, $current_stream_id)); ?></p>
+                                <p><strong>Semester:</strong> <?php echo htmlspecialchars($view_semester ?: 'Second'); ?></p>
+                                <p><strong>Version:</strong> <?php echo htmlspecialchars($view_version); ?></p>
+                            </div>
+                            <div class="col-md-6">
+                                <p><strong>Actions:</strong></p>
+                                <div class="btn-group">
+                                    <a href="manual_timetable_editor.php?stream_id=<?php echo $current_stream_id; ?>&version=<?php echo urlencode($view_version); ?>&semester=<?php echo urlencode($view_semester); ?>" class="btn btn-primary btn-sm">
+                                        <i class="fas fa-edit me-1"></i>Manual Edit
+                                    </a>
+                                    <a href="lecturer_conflicts.php?version=<?php echo urlencode($view_version); ?>&semester=<?php echo urlencode($view_semester); ?>" class="btn btn-warning btn-sm">
+                                        <i class="fas fa-exclamation-triangle me-1"></i>Review Conflicts
+                                    </a>
+                                    <a href="saved_timetable.php" class="btn btn-secondary btn-sm">
+                                        <i class="fas fa-arrow-left me-1"></i>Back to Versions
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <?php endif; ?>
         <?php if (true): ?>
         <div class="row m-3">
             <div class="col-12">
@@ -1877,7 +1966,7 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                             $slot_duration = 60; // Default 60 minutes
                             
                             // Check if there's a matching time slot in the database
-                            $existing_slot_sql = "SELECT duration, is_break FROM time_slots WHERE start_time = ? AND is_active = 1 LIMIT 1";
+                            $existing_slot_sql = "SELECT duration, is_break FROM time_slots WHERE start_time = ? LIMIT 1";
                             $existing_slot_stmt = $conn->prepare($existing_slot_sql);
                             $existing_slot_stmt->bind_param('s', $slot_start);
                             $existing_slot_stmt->execute();
@@ -1949,14 +2038,16 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                 $slot_duration = 60; // Default 60 minutes
                 
                 // Check if there's a matching time slot in the database
-                $existing_slot_sql = "SELECT duration FROM time_slots WHERE start_time = ? AND is_active = 1 LIMIT 1";
+                $existing_slot_sql = "SELECT duration, is_break FROM time_slots WHERE start_time = ? LIMIT 1";
                 $existing_slot_stmt = $conn->prepare($existing_slot_sql);
                 $existing_slot_stmt->bind_param('s', $start_time);
                 $existing_slot_stmt->execute();
                 $existing_slot_result = $existing_slot_stmt->get_result();
                 
+                $is_break_from_db = false; // Default value
                 if ($existing_slot_row = $existing_slot_result->fetch_assoc()) {
                     $slot_duration = (int)$existing_slot_row['duration'];
+                    $is_break_from_db = (bool)$existing_slot_row['is_break'];
                 }
                 $existing_slot_stmt->close();
                 
@@ -2318,19 +2409,44 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                                 <?php else: ?>
                                     <?php if (!empty($timetable_data)): ?>
                                         This timetable shows the actual generated data for the selected stream and semester. 
-                                        Blue cells contain scheduled courses with class, course code, and lecturer details.
-                                        <strong>Click on any course block to edit the day, time slot, or room assignment.</strong>
+                                        <strong>Blue cells contain scheduled courses</strong> with class, course code, and lecturer details.
+                                        <strong>Click on any course block to edit</strong> the day, time slot, or room assignment.
                                         Course duration is fixed and cannot be changed. Courses will span multiple periods based on their duration (e.g., 3-hour courses span 3 periods).
+                                        
+                                        <div class="mt-2">
+                                            <small class="text-muted">
+                                                <i class="fas fa-info-circle me-1"></i>
+                                                <strong>Version:</strong> <?php echo htmlspecialchars($current_version); ?> | 
+                                                <strong>Total Courses:</strong> <?php echo count($timetable_data); ?> | 
+                                                <strong>Last Updated:</strong> <?php echo date('Y-m-d H:i:s'); ?>
+                                            </small>
+                                        </div>
                                     <?php else: ?>
                                         This template shows the structure that will be used for timetable generation. 
                                         The cells will be filled with class-course assignments when you generate the timetable.
                                     <?php endif; ?>
                                 <?php endif; ?>
                             </p>
-                            <!-- Debug information -->
-                            <div class="alert alert-info" style="font-size: 0.8em;">
-                                <strong>Debug Info:</strong> <?php echo htmlspecialchars($debug_info); ?><br>
-                                <strong>Data Count:</strong> <?php echo is_array($timetable_data) ? count($timetable_data) : 0; ?> days with data
+                            <!-- Enhanced Debug information -->
+                            <div class="alert alert-light border" style="font-size: 0.85em;">
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <strong><i class="fas fa-cog me-1"></i>System Info:</strong><br>
+                                        <small class="text-muted">
+                                            Stream ID: <?php echo htmlspecialchars($current_stream_id); ?> | 
+                                            Semester: <?php echo htmlspecialchars($current_semester); ?> | 
+                                            Version: <?php echo htmlspecialchars($current_version); ?>
+                                        </small>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <strong><i class="fas fa-chart-bar me-1"></i>Data Stats:</strong><br>
+                                        <small class="text-muted">
+                                            Total Entries: <?php echo is_array($timetable_data) ? count($timetable_data) : 0; ?> | 
+                                            Days Active: <?php echo count(array_unique(array_column($timetable_data, 'day_id'))); ?> | 
+                                            Rooms Used: <?php echo count(array_unique(array_column($timetable_data, 'room_id'))); ?>
+                                        </small>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                         
@@ -2476,7 +2592,9 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                                                             if ($entry) {
                                                                 ?>
                                                                 <div class="course-block editable-course" 
-                                                                     style="background-color: #e3f2fd; border: 2px solid #2196f3; border-radius: 4px; padding: 4px; margin: 2px; height: 100%; display: flex; flex-direction: column; justify-content: center; overflow: hidden; cursor: pointer;"
+                                                                     style="background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%); border: 2px solid #2196f3; border-radius: 6px; padding: 6px; margin: 2px; height: 100%; display: flex; flex-direction: column; justify-content: center; overflow: hidden; cursor: pointer; box-shadow: 0 2px 4px rgba(33, 150, 243, 0.2); transition: all 0.2s ease;"
+                                                                     onmouseover="this.style.transform='scale(1.02)'; this.style.boxShadow='0 4px 8px rgba(33, 150, 243, 0.3)'"
+                                                                     onmouseout="this.style.transform='scale(1)'; this.style.boxShadow='0 2px 4px rgba(33, 150, 243, 0.2)'"
                                                                      data-entry-id="<?php echo $entry['id']; ?>"
                                                                      data-day-id="<?php echo $entry['day_id']; ?>"
                                                                      data-time-slot-id="<?php echo $entry['time_slot_id']; ?>"
@@ -2717,9 +2835,9 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                         <div class="mt-4">
                             <div class="d-flex justify-content-between align-items-center mb-3">
                                 <h6 class="mb-0">
-                                    <i class="fas fa-exclamation-triangle me-2 text-warning"></i>Unscheduled Courses
-                                    <span class="badge bg-warning ms-2"><?php echo $unscheduled_assignments; ?></span>
-                                </h6>
+                                <i class="fas fa-exclamation-triangle me-2 text-warning"></i>Unscheduled Courses
+                                <span class="badge bg-warning ms-2"><?php echo $unscheduled_assignments; ?></span>
+                            </h6>
                                 <?php if ($unscheduled_assignments > 0): ?>
                                 <div class="btn-group" role="group">
                                     <button type="button" class="btn btn-primary btn-sm" id="autoScheduleBtn" onclick="autoScheduleUnscheduledCourses()">
@@ -2737,11 +2855,11 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                             $unscheduled_query = "
                                 SELECT 
                                     cc.id as class_course_id,
-                c.name as class_name,
-                co.code as course_code,
-                co.name as course_name,
-                co.hours_per_week,
-                l.name as lecturer_name,
+                                    c.name as class_name,
+                                    co.code as course_code,
+                                    co.name as course_name,
+                                    co.hours_per_week,
+                                    l.name as lecturer_name,
                 c.total_capacity as class_size,
                                     (SELECT COUNT(*) FROM lecturer_courses lc2 WHERE lc2.course_id = co.id AND lc2.is_active = 1) as lecturer_count,
                                     CASE 
@@ -2924,7 +3042,7 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                                 <i class="fas fa-info-circle me-2"></i>
                                 <strong><?php echo $total_available_slots; ?></strong> time slots have available rooms for additional scheduling.
                                 These slots can be used to schedule unscheduled classes or for manual adjustments.
-                            </div>
+                    </div>
                             
                             <?php if ($total_available_slots > 0): ?>
                             <div class="table-responsive">
@@ -2949,7 +3067,7 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                                                         <?php echo formatTimeForDisplay($slot['start_time']); ?> - 
                                                         <?php echo formatTimeForDisplay($slot['end_time']); ?>
                                                         <span class="ms-1">(<?php echo $slot['available_rooms']; ?> rooms)</span>
-                                                    </div>
+                </div>
                                                     <?php endforeach; ?>
                                                 </div>
                                             </td>

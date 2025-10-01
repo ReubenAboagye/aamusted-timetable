@@ -58,21 +58,40 @@ if ($_POST['action'] ?? '' === 'resolve_conflict') {
 }
 
 // Get all lecturer conflicts from database
-// First, find conflict groups (lecturer + time combinations with multiple entries)
-$conflictsQuery = "SELECT lc.lecturer_id, t.day_id, t.time_slot_id, t.semester, t.academic_year,
-                   COUNT(*) as conflict_count
-                   FROM timetable t
-                   JOIN lecturer_courses lc ON t.lecturer_course_id = lc.id
-                   WHERE t.semester = ? AND t.academic_year = ? AND t.timetable_type = 'lecture'
-                   GROUP BY lc.lecturer_id, t.day_id, t.time_slot_id, t.semester, t.academic_year
-                   HAVING conflict_count > 1
-                   ORDER BY lc.lecturer_id, t.day_id, t.time_slot_id";
-
+// Check if we're viewing a specific version
 $current_semester = $_GET['semester'] ?? 'first';
 $current_academic_year = $_GET['academic_year'] ?? date('Y') . '/' . (date('Y') + 1);
+$current_version = $_GET['version'] ?? null;
 
-$stmt = $conn->prepare($conflictsQuery);
-$stmt->bind_param("ss", $current_semester, $current_academic_year);
+// Build conflict query based on whether we're viewing a specific version
+if ($current_version) {
+    // Show conflicts for specific version only
+    $conflictsQuery = "SELECT lc.lecturer_id, t.day_id, t.time_slot_id, t.semester, t.academic_year, t.version,
+                       COUNT(*) as conflict_count
+                       FROM timetable t
+                       JOIN lecturer_courses lc ON t.lecturer_course_id = lc.id
+                       WHERE t.semester = ? AND t.academic_year = ? AND t.version = ? AND t.timetable_type = 'lecture'
+                       GROUP BY lc.lecturer_id, t.day_id, t.time_slot_id, t.semester, t.academic_year, t.version
+                       HAVING conflict_count > 1
+                       ORDER BY lc.lecturer_id, t.day_id, t.time_slot_id";
+    
+    $stmt = $conn->prepare($conflictsQuery);
+    $stmt->bind_param("sss", $current_semester, $current_academic_year, $current_version);
+} else {
+    // Show conflicts for all versions
+    $conflictsQuery = "SELECT lc.lecturer_id, t.day_id, t.time_slot_id, t.semester, t.academic_year, t.version,
+                       COUNT(*) as conflict_count
+                       FROM timetable t
+                       JOIN lecturer_courses lc ON t.lecturer_course_id = lc.id
+                       WHERE t.semester = ? AND t.academic_year = ? AND t.timetable_type = 'lecture'
+                       GROUP BY lc.lecturer_id, t.day_id, t.time_slot_id, t.semester, t.academic_year, t.version
+                       HAVING conflict_count > 1
+                       ORDER BY lc.lecturer_id, t.day_id, t.time_slot_id, t.version";
+    
+    $stmt = $conn->prepare($conflictsQuery);
+    $stmt->bind_param("ss", $current_semester, $current_academic_year);
+}
+
 $stmt->execute();
 $conflictGroups = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 $stmt->close();
@@ -94,17 +113,26 @@ foreach ($conflictGroups as $conflictGroup) {
                     JOIN time_slots ts ON t.time_slot_id = ts.id
                     JOIN rooms r ON t.room_id = r.id
                     WHERE lc.lecturer_id = ? AND t.day_id = ? AND t.time_slot_id = ? 
-                    AND t.semester = ? AND t.academic_year = ? AND t.timetable_type = 'lecture'
-                    ORDER BY t.id";
+                    AND t.semester = ? AND t.academic_year = ? AND t.timetable_type = 'lecture'";
     
-    $stmt = $conn->prepare($detailQuery);
-    $stmt->bind_param("iiiss", 
+    $params = [
         $conflictGroup['lecturer_id'], 
         $conflictGroup['day_id'], 
         $conflictGroup['time_slot_id'],
         $conflictGroup['semester'],
         $conflictGroup['academic_year']
-    );
+    ];
+    
+    // Add version filter if viewing specific version
+    if ($current_version) {
+        $detailQuery .= " AND t.version = ?";
+        $params[] = $current_version;
+    }
+    
+    $detailQuery .= " ORDER BY t.id";
+    
+    $stmt = $conn->prepare($detailQuery);
+    $stmt->bind_param(str_repeat('i', 3) . str_repeat('s', count($params) - 3), ...$params);
     $stmt->execute();
     $conflictEntries = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
     $stmt->close();
@@ -136,10 +164,19 @@ include 'includes/sidebar.php';
 
 <div id="mainContent" class="main-content">
     <div class="d-flex justify-content-between align-items-center mb-4">
-        <h2>Lecturer Conflicts Management</h2>
+        <h2>Lecturer Conflicts Management
+        <?php if ($current_version): ?>
+            <small class="text-muted">- Version: <?php echo htmlspecialchars($current_version); ?></small>
+        <?php endif; ?>
+        </h2>
         <div>
-            <a href="generate_timetable.php" class="btn btn-secondary">
-                <i class="fas fa-arrow-left"></i> Back to Generation
+            <?php if ($current_version): ?>
+                <a href="generate_timetable.php?edit_stream_id=<?php echo $current_stream_id ?? 1; ?>&version=<?php echo urlencode($current_version); ?>&semester=<?php echo urlencode($current_semester); ?>" class="btn btn-secondary me-2">
+                    <i class="fas fa-arrow-left"></i> Back to Version
+                </a>
+            <?php endif; ?>
+            <a href="generate_timetable.php" class="btn btn-primary">
+                <i class="fas fa-cogs"></i> Generate Timetable
             </a>
         </div>
     </div>

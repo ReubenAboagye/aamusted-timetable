@@ -21,9 +21,10 @@ class DBLoader {
         $streamId = $options['stream_id'] ?? null;
         $academicYear = $options['academic_year'] ?? null;
         $semester = $options['semester'] ?? null;
+        $excludeScheduled = $options['exclude_scheduled'] ?? false;
         
         return [
-            'class_courses' => $this->loadClassCourses($streamId, $academicYear, $semester),
+            'class_courses' => $this->loadClassCourses($streamId, $academicYear, $semester, $excludeScheduled),
             'lecturer_courses' => $this->loadLecturerCourses($streamId),
             'classes' => $this->loadClasses($streamId),
             'courses' => $this->loadCourses($streamId),
@@ -54,7 +55,7 @@ class DBLoader {
         return $out;
     }
 
-    private function loadClassCourses($streamId = null, $academicYear = null, $semester = null) {
+    private function loadClassCourses($streamId = null, $academicYear = null, $semester = null, $excludeScheduled = false) {
         $sql = "SELECT cc.id, cc.class_id, cc.course_id, cc.lecturer_id, cc.semester, cc.academic_year, cc.is_active, 
                        co.code as course_code, co.name as course_name, co.hours_per_week,
                        c.name as class_name, c.divisions_count, c.total_capacity
@@ -70,6 +71,17 @@ class DBLoader {
         
         if ($academicYear) {
             $conditions[] = "cc.academic_year = '" . $this->conn->real_escape_string($academicYear) . "'";
+        }
+        
+        // Exclude already scheduled courses if requested
+        if ($excludeScheduled && $semester) {
+            $semesterParam = is_numeric($semester) ? (($semester == 1) ? 'first' : 'second') : $semester;
+            $conditions[] = "cc.id NOT IN (
+                SELECT DISTINCT t.class_course_id 
+                FROM timetable t 
+                WHERE t.semester = '" . $this->conn->real_escape_string($semesterParam) . "'
+                AND t.is_active = 1
+            )";
         }
         
         $sql .= " WHERE " . implode(" AND ", $conditions);

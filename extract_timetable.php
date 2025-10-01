@@ -15,6 +15,7 @@ $show_admin_jobs_modal = false; // Disable admin jobs JSON polling on this publi
 // --- Read filters
 $selected_stream = isset($_GET['stream_id']) ? intval($_GET['stream_id']) : 0;
 $selected_semester = isset($_GET['semester']) ? intval($_GET['semester']) : 0;
+$selected_version = isset($_GET['version']) ? $_GET['version'] : '';
 $role = isset($_GET['role']) ? $_GET['role'] : '';
 
 // IDs for specific role
@@ -65,6 +66,19 @@ $departments_result = $conn->query("SELECT id, name FROM departments WHERE is_ac
 // Load lecturers (global)
 $lecturers_result = $conn->query("SELECT id, name FROM lecturers WHERE is_active = 1 ORDER BY name");
 
+// Load versions for the selected stream and semester
+$versions_result = null;
+if ($selected_stream > 0 && $selected_semester > 0) {
+	$semester_text = ($selected_semester == 1) ? 'first' : 'second';
+	$stmt = $conn->prepare("SELECT DISTINCT version FROM timetable t JOIN class_courses cc ON t.class_course_id = cc.id JOIN classes c ON cc.class_id = c.id WHERE c.stream_id = ? AND t.semester = ? AND t.version IS NOT NULL ORDER BY t.version DESC");
+	if ($stmt) {
+		$stmt->bind_param('is', $selected_stream, $semester_text);
+		$stmt->execute();
+		$versions_result = $stmt->get_result();
+		$stmt->close();
+	}
+}
+
 // --- Build query for timetable display/export when all needed filters are present
 $timetable_rows = [];
 $can_query = ($selected_stream > 0 && $selected_semester > 0 && in_array($role, ['class','department','lecturer','full']));
@@ -113,9 +127,19 @@ if ($can_query) {
 	$joins[] = "JOIN time_slots ts ON t.time_slot_id = ts.id";
 	$joins[] = "JOIN rooms r ON t.room_id = r.id";
 
+	// Convert semester number to text
+	$semester_text = ($selected_semester == 1) ? 'first' : 'second';
+	
 	$where = ["c.stream_id = ?", "t.semester = ?"];
-	$params = [$selected_stream, $selected_semester];
-	$types = "ii";
+	$params = [$selected_stream, $semester_text];
+	$types = "is";
+	
+	// Add version filter if specified
+	if (!empty($selected_version)) {
+		$where[] = "t.version = ?";
+		$params[] = $selected_version;
+		$types .= "s";
+	}
 
 	if ($role === 'class' && $class_id > 0) {
 		$where[] = "c.id = ?";
@@ -266,7 +290,25 @@ if ($can_query) {
 						<?php endforeach; ?>
 					</select>
 				</div>
-				<div class="col-md-5">
+				<div class="col-md-3">
+					<label for="version" class="form-label">Version (Optional)</label>
+					<div class="position-relative">
+						<select name="version" id="version" class="form-select">
+							<option value="">Latest version</option>
+							<?php if ($versions_result && $versions_result->num_rows > 0): ?>
+								<?php while ($v = $versions_result->fetch_assoc()): ?>
+									<option value="<?php echo htmlspecialchars($v['version']); ?>" <?php echo ($selected_version == $v['version']) ? 'selected' : ''; ?>><?php echo htmlspecialchars($v['version']); ?></option>
+								<?php endwhile; ?>
+							<?php endif; ?>
+						</select>
+						<div id="version-loading" class="position-absolute top-50 end-0 translate-middle-y me-3" style="display: none;">
+							<div class="spinner-border spinner-border-sm text-primary" role="status">
+								<span class="visually-hidden">Loading...</span>
+							</div>
+						</div>
+					</div>
+				</div>
+				<div class="col-md-3">
 					<label class="form-label d-block">Who is extracting?</label>
 					<div class="btn-group" role="group">
 						<input type="radio" class="btn-check" name="role" id="roleClass" value="class" <?php echo ($role==='class')?'checked':''; ?> autocomplete="off">
@@ -369,6 +411,11 @@ if ($can_query) {
 			<div class="table-header d-flex justify-content-between align-items-center">
 				<h5 class="m-0">
 					Results
+					<?php if (!empty($selected_version)): ?>
+						<span class="badge bg-info ms-2">Version: <?php echo htmlspecialchars($selected_version); ?></span>
+					<?php else: ?>
+						<span class="badge bg-secondary ms-2">Latest Version</span>
+					<?php endif; ?>
 					<?php if ($role === 'class' && !empty($division_label)): ?>
 						<span class="badge bg-primary ms-2">Division <?php echo htmlspecialchars($division_label); ?></span>
 					<?php endif; ?>
@@ -550,6 +597,55 @@ document.addEventListener('DOMContentLoaded', function() {
 	});
 	updateRoleBlocks();
 
+	// Function to load versions when stream and semester change
+	function loadVersions() {
+		var streamId = document.getElementById('stream_id').value;
+		var semesterId = document.getElementById('semester').value;
+		var versionSelect = document.getElementById('version');
+		
+		if (versionSelect) {
+			// Clear existing options except the first one
+			versionSelect.innerHTML = '<option value="">Latest version</option>';
+			
+			if (streamId && semesterId) {
+				// Show loading state
+				versionSelect.innerHTML = '<option value="">Loading versions...</option>';
+				versionSelect.disabled = true;
+				document.getElementById('version-loading').style.display = 'block';
+				
+				// Fetch versions for the selected stream and semester
+				fetch('get_timetable_versions.php?stream_id=' + streamId + '&semester=' + semesterId)
+					.then(response => response.json())
+					.then(data => {
+						versionSelect.innerHTML = '<option value="">Latest version</option>';
+						if (data.success && data.versions.length > 0) {
+							data.versions.forEach(function(version) {
+								var option = document.createElement('option');
+								option.value = version;
+								option.textContent = version;
+								versionSelect.appendChild(option);
+							});
+						} else {
+							var option = document.createElement('option');
+							option.value = '';
+							option.textContent = 'No versions found';
+							versionSelect.appendChild(option);
+						}
+						versionSelect.disabled = false;
+						document.getElementById('version-loading').style.display = 'none';
+					})
+					.catch(error => {
+						console.error('Error loading versions:', error);
+						versionSelect.innerHTML = '<option value="">Error loading versions</option>';
+						versionSelect.disabled = false;
+						document.getElementById('version-loading').style.display = 'none';
+					});
+			} else {
+				document.getElementById('version-loading').style.display = 'none';
+			}
+		}
+	}
+
 	// When stream changes, dynamically load classes for that stream
 	var streamSelect = document.getElementById('stream_id');
 	if (streamSelect) {
@@ -598,7 +694,16 @@ document.addEventListener('DOMContentLoaded', function() {
 					document.getElementById('class-loading').style.display = 'none';
 				}
 			}
+			
+			// Also load versions when stream changes
+			loadVersions();
 		});
+	}
+	
+	// When semester changes, load versions
+	var semesterSelect = document.getElementById('semester');
+	if (semesterSelect) {
+		semesterSelect.addEventListener('change', loadVersions);
 	}
 	
 	// When class changes, dynamically load divisions for that class

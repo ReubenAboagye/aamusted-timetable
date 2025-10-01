@@ -46,16 +46,18 @@ $main_query = "
         c.stream_id AS stream_id,
         s.name AS stream_name,
         s.code AS stream_code,
-        MAX(COALESCE(t.academic_year, '')) as academic_year,
-        MAX(t.semester) as semester,
-        MAX(t.created_at) as last_updated
+        COALESCE(t.academic_year, '') as academic_year,
+        t.semester as semester,
+        COALESCE(t.version, 'regular') as version,
+        MAX(t.created_at) as last_updated,
+        COUNT(t.id) as entry_count
     FROM timetable t
     " . $class_join . "
     JOIN streams s ON c.stream_id = s.id
     " . $lecturer_join . "
     JOIN rooms r ON t.room_id = r.id" . $join_programs . "
     WHERE $where_clause
-    GROUP BY c.stream_id, s.name, s.code
+    GROUP BY c.stream_id, s.name, s.code, t.academic_year, t.semester, t.version
     ORDER BY last_updated DESC
     ";
 
@@ -72,21 +74,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? null;
     if ($action === 'delete') {
         $stream_id = isset($_POST['stream_id']) ? intval($_POST['stream_id']) : 0;
+        $version = isset($_POST['version']) ? $_POST['version'] : '';
+        $semester = isset($_POST['semester']) ? $_POST['semester'] : '';
 
-        if ($stream_id > 0) {
-            // Delete timetable entries for the given stream (classes in that stream)
+        if ($stream_id > 0 && $version && $semester) {
+            // Delete timetable entries for the specific version
             $delete_stmt = $conn->prepare(
                 "DELETE t FROM timetable t
                  JOIN class_courses cc ON t.class_course_id = cc.id
                  JOIN classes c ON cc.class_id = c.id
-                 WHERE c.stream_id = ?"
+                 WHERE c.stream_id = ? AND t.version = ? AND t.semester = ?"
             );
-            $delete_stmt->bind_param('i', $stream_id);
+            $delete_stmt->bind_param('iss', $stream_id, $version, $semester);
 
             if ($delete_stmt->execute()) {
                 $delete_stmt->close();
                 $location = 'saved_timetable.php';
-                redirect_with_flash($location, 'success', 'Timetable for the selected stream has been deleted successfully.');
+                redirect_with_flash($location, 'success', "Timetable version '{$version}' for the selected stream has been deleted successfully.");
             } else {
                 $error_message = "Error deleting timetable: " . $conn->error;
             }
@@ -147,8 +151,10 @@ $error_message = $_GET['error'] ?? '';
                             <thead class="table-light">
                                 <tr>
                                     <th>Session</th>
+                                    <th>Version</th>
                                     <th>Academic Year</th>
                                     <th>Semester</th>
+                                    <th>Entries</th>
                                     <th>Last Updated</th>
                                     <th>Actions</th>
                                 </tr>
@@ -158,6 +164,9 @@ $error_message = $_GET['error'] ?? '';
                                     <tr>
                                         <td>
                                             <strong><?php echo htmlspecialchars($timetable['stream_name']); ?></strong>
+                                        </td>
+                                        <td>
+                                            <span class="badge bg-warning"><?php echo htmlspecialchars($timetable['version']); ?></span>
                                         </td>
                                         <td>
                                             <span class="badge bg-info"><?php echo htmlspecialchars($timetable['academic_year'] ?? '—'); ?></span>
@@ -177,6 +186,9 @@ $error_message = $_GET['error'] ?? '';
                                             <span class="badge bg-secondary"><?php echo $semester_display; ?></span>
                                         </td>
                                         <td>
+                                            <span class="badge bg-success"><?php echo $timetable['entry_count']; ?></span>
+                                        </td>
+                                        <td>
                                             <small class="text-muted">
                                                 <?php echo date('M j, Y g:i A', strtotime($timetable['last_updated'])); ?>
                                             </small>
@@ -184,11 +196,14 @@ $error_message = $_GET['error'] ?? '';
                                         <td>
                                             <div class="btn-group btn-group-sm" role="group">
                                                 <div class="btn-group" role="group" aria-label="Actions">
-                                                    <a href="generate_timetable.php?edit_stream_id=<?php echo $timetable['stream_id']; ?>" class="btn btn-sm btn-outline-primary" title="Edit Timetable">
-                                                        <i class="fas fa-edit"></i>
-                                                    </a>
+                                                <a href="generate_timetable.php?edit_stream_id=<?php echo $timetable['stream_id']; ?>&version=<?php echo urlencode($timetable['version']); ?>&semester=<?php echo urlencode($timetable['semester']); ?>" class="btn btn-sm btn-outline-primary" title="View Timetable">
+                                                    <i class="fas fa-eye"></i>
+                                                </a>
+                                                <a href="manual_timetable_editor.php?stream_id=<?php echo $timetable['stream_id']; ?>&version=<?php echo urlencode($timetable['version']); ?>&semester=<?php echo urlencode($timetable['semester']); ?>" class="btn btn-sm btn-outline-success" title="Manual Edit">
+                                                    <i class="fas fa-edit"></i>
+                                                </a>
                                                     <!-- Edit Stream button removed -->
-                                                    <button type="button" class="btn btn-sm btn-outline-danger" title="Delete Timetable" onclick="confirmDelete(<?php echo $timetable['stream_id']; ?>, '<?php echo htmlspecialchars($timetable['stream_name']); ?>')">
+                                                    <button type="button" class="btn btn-sm btn-outline-danger" title="Delete Timetable" onclick="confirmDelete(<?php echo $timetable['stream_id']; ?>, '<?php echo htmlspecialchars($timetable['stream_name']); ?>', '<?php echo htmlspecialchars($timetable['version']); ?>', '<?php echo htmlspecialchars($timetable['semester']); ?>')">
                                                         <i class="fas fa-trash"></i>
                                                     </button>
                                                 </div>
@@ -233,7 +248,9 @@ $error_message = $_GET['error'] ?? '';
                 <form method="POST" action="saved_timetable.php" style="display: inline;">
                     <input type="hidden" name="action" value="delete">
                     <input type="hidden" name="stream_id" id="deleteStreamId">
-                    <button type="submit" class="btn btn-danger">Delete Timetable</button>
+                    <input type="hidden" name="version" id="deleteVersion">
+                    <input type="hidden" name="semester" id="deleteSemester">
+                    <button type="submit" class="btn btn-danger">Delete Timetable Version</button>
                 </form>
             </div>
         </div>
@@ -242,10 +259,16 @@ $error_message = $_GET['error'] ?? '';
 <!-- Edit Session modal removed -->
 
 <script>
-function confirmDelete(sessionId, sessionName) {
-    var input = document.getElementById('deleteStreamId');
-    if (input) input.value = sessionId;
-    document.getElementById('sessionName').textContent = sessionName;
+function confirmDelete(streamId, streamName, version, semester) {
+    var streamInput = document.getElementById('deleteStreamId');
+    var versionInput = document.getElementById('deleteVersion');
+    var semesterInput = document.getElementById('deleteSemester');
+    
+    if (streamInput) streamInput.value = streamId;
+    if (versionInput) versionInput.value = version;
+    if (semesterInput) semesterInput.value = semester;
+    
+    document.getElementById('sessionName').textContent = streamName + ' (' + version + ')';
     var el = document.getElementById('deleteModal');
     if (!el) return console.error('deleteModal element missing');
     if (typeof bootstrap === 'undefined' || !bootstrap.Modal) return console.error('Bootstrap Modal not available');

@@ -11,10 +11,37 @@
  * @param int $semester Semester (1 or 2)
  * @return int Number of additional classes scheduled
  */
-function scheduleUnscheduledClasses($conn, $stream_id, $semester) {
+function scheduleUnscheduledClasses($conn, $stream_id, $semester, $version = null) {
     $additional_scheduled = 0;
     
     try {
+        // If no version specified, get the current version for this stream/semester
+        if (!$version) {
+            $version_query = "
+                SELECT t.version, t.academic_year
+                FROM timetable t
+                JOIN class_courses cc ON t.class_course_id = cc.id
+                JOIN classes c ON cc.class_id = c.id
+                WHERE c.stream_id = ? AND t.semester = ?
+                ORDER BY t.created_at DESC
+                LIMIT 1
+            ";
+            $semester_param = is_numeric($semester) ? (($semester == 1) ? 'first' : 'second') : $semester;
+            $stmt = $conn->prepare($version_query);
+            $stmt->bind_param("is", $stream_id, $semester_param);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            if ($row = $result->fetch_assoc()) {
+                $version = $row['version'] ?: 'regular';
+                $academic_year = $row['academic_year'] ?: '2025/2026';
+            } else {
+                $version = 'regular';
+                $academic_year = '2025/2026';
+            }
+            $stmt->close();
+        } else {
+            $academic_year = '2025/2026'; // Default academic year
+        }
         // Get unscheduled class courses for this stream and semester with enhanced prioritization
         $unscheduled_query = "
             SELECT 
@@ -307,18 +334,38 @@ function scheduleUnscheduledClasses($conn, $stream_id, $semester) {
                     $insert_query = "
                         INSERT INTO timetable (
                             class_course_id, lecturer_course_id, day_id, time_slot_id, 
-                            room_id, division_label, semester, created_at, updated_at
-                        ) VALUES (?, ?, ?, ?, ?, '', ?, NOW(), NOW())
+                            room_id, division_label, semester, academic_year, version, created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, '', ?, ?, ?, NOW(), NOW())
                     ";
                     
+                    // Debug: Log the variables before binding
+                    error_log("Debug bind_param variables:");
+                    error_log("class_course_id: " . $class_course['class_course_id']);
+                    error_log("lecturer_course_id: " . $lecturer_course_id);
+                    error_log("day_id: " . $slot['day_id']);
+                    error_log("time_slot_id: " . $slot['time_slot_id']);
+                    error_log("room_id: " . $room['id']);
+                    error_log("semester_param: " . $semester_param);
+                    error_log("academic_year: " . $academic_year);
+                    error_log("version: " . $version);
+                    
                     $insert_stmt = $conn->prepare($insert_query);
-                    $insert_stmt->bind_param("iiiiii", 
+                    
+                    // Safety check: ensure lecturer_course_id is not null
+                    if ($lecturer_course_id === null) {
+                        error_log("ERROR: lecturer_course_id is null for course {$class_course['course_code']} - this should not happen!");
+                        continue;
+                    }
+                    
+                    $insert_stmt->bind_param("iiiisss", 
                         $class_course['class_course_id'],
                         $lecturer_course_id,
                         $slot['day_id'],
                         $slot['time_slot_id'],
                         $room['id'],
-                        $semester
+                        $semester_param,
+                        $academic_year,
+                        $version
                     );
                     
                     if ($insert_stmt->execute()) {

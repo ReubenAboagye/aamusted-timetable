@@ -18,6 +18,7 @@ spl_autoload_register(function($class){
 
 $selected_stream = isset($_GET['stream_id']) ? intval($_GET['stream_id']) : 0;
 $selected_semester = isset($_GET['semester']) ? intval($_GET['semester']) : 0;
+$selected_version = isset($_GET['version']) ? $_GET['version'] : '';
 $role = isset($_GET['role']) ? $_GET['role'] : '';
 $class_id = isset($_GET['class_id']) ? intval($_GET['class_id']) : 0;
 $department_id = isset($_GET['department_id']) ? intval($_GET['department_id']) : 0;
@@ -76,9 +77,19 @@ $joins[] = "JOIN rooms r ON t.room_id = r.id";
 $division_label = isset($_GET['division_label']) ? $_GET['division_label'] : '';
 $isDivisionView = ($role === 'class' && $division_label !== '');
 
+// Convert semester number to text
+$semester_text = ($selected_semester == 1) ? 'first' : 'second';
+
 $where = ["c.stream_id = ?", "t.semester = ?"];
-$params = [$selected_stream, $selected_semester];
-$types = 'ii';
+$params = [$selected_stream, $semester_text];
+$types = 'is';
+
+// Add version filter if specified
+if (!empty($selected_version)) {
+    $where[] = "t.version = ?";
+    $params[] = $selected_version;
+    $types .= 's';
+}
 
 if ($role === 'class' && $class_id > 0) {
     $where[] = "c.id = ?";
@@ -140,6 +151,7 @@ $safeTitle = htmlspecialchars($stream_name !== '' ? $stream_name : 'Stream', ENT
 $safeRole = htmlspecialchars($role_title, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 $safeFilter = htmlspecialchars($filter_value !== '' ? $filter_value : 'All', ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 $safeSemester = htmlspecialchars((string)$selected_semester, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+$safeVersion = htmlspecialchars($selected_version !== '' ? $selected_version : 'Latest Version', ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 
 // Build rows grouped by day but render day only on the first row of each day
 $rowsHtml = '';
@@ -191,6 +203,7 @@ $tableHeadRow = $isDivisionView
     : '<tr><th>Day</th><th>Period</th><th>Class</th><th>Course</th><th>Room</th><th>Lecturer</th></tr>';
 
 $metaHtml = '<div class="meta"><span><strong>Role:</strong> ' . $safeRole . '</span><span><strong>Filter:</strong> ' . $safeFilter . '</span>'
+    . '<span><strong>Version:</strong> ' . $safeVersion . '</span>'
     . (!empty($division_label) ? '<span><strong>Division:</strong> ' . htmlspecialchars($division_label, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</span>' : '')
     . '<span><strong>Generated:</strong> ' . htmlspecialchars(date('Y-m-d H:i')) . '</span></div>';
 
@@ -215,7 +228,7 @@ $html = '<html><head><meta charset="UTF-8"><style>
     . '<div class="header">'
     . ($logoDataUri !== '' ? ('<img src="' . htmlspecialchars($logoDataUri) . '" />') : '')
     . '<h1 class="title">AKENTEN APPIAH-MENKA UNIVERSITY</h1>'
-    . '<div class="subtitle">Timetable - ' . $safeTitle . ' | Semester ' . $safeSemester . '</div>'
+    . '<div class="subtitle">Timetable - ' . $safeTitle . ' | Semester ' . $safeSemester . ' | Version: ' . $safeVersion . '</div>'
     . '</div>'
     . $metaHtml
     . '<table>' . $tableColGroup . '<thead>' . $tableHeadRow . '</thead><tbody>'
@@ -225,9 +238,12 @@ $html = '<html><head><meta charset="UTF-8"><style>
 // Simple filename sanitizer for downloads
 if (!function_exists('tt_sanitize_filename')) {
     function tt_sanitize_filename($text) {
+        if ($text === null) {
+            return 'AAMUSTED Timetable';
+        }
         // Remove control chars and Windows-illegal characters: <>:"/\|?*
         $text = preg_replace('/[\x00-\x1F\x7F]+/', '', $text);
-        $text = preg_replace('/[<>:\"\\\/\|\?\*]+/', '', $text);
+        $text = preg_replace('/[<>:"\/\\\|\?\*]+/', '', $text);
         // Collapse whitespace to single spaces and trim
         $text = preg_replace('/\s+/', ' ', $text);
         $text = trim($text);
@@ -250,6 +266,7 @@ $filename_parts = ['AAMUSTED'];
 $stream_label = trim($stream_name) !== '' ? $stream_name : ('Stream ' . (int)$selected_stream);
 $filename_parts[] = $stream_label;
 $filename_parts[] = 'Semester ' . $selected_semester;
+if (!empty($selected_version)) { $filename_parts[] = $selected_version; }
 if ($role === 'full') {
     $filename_parts[] = 'Full';
 } elseif ($filter_value !== '') {
@@ -262,6 +279,7 @@ $sanitized_filename = tt_sanitize_filename($raw_filename);
 if ($sanitized_filename === '' || $sanitized_filename === 'AAMUSTED Timetable') {
     // Fallback builder to avoid generic name
     $fallback = 'AAMUSTED ' . $stream_label . ' Semester ' . (int)$selected_semester;
+    if (!empty($selected_version)) { $fallback .= ' ' . $selected_version; }
     if ($role === 'full') { $fallback .= ' Full'; }
     elseif ($filter_value !== '') { $fallback .= ' ' . $role_title . ' ' . $filter_value; }
     if (!empty($division_label)) { $fallback .= ' Division ' . $division_label; }
