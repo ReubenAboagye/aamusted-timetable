@@ -4,6 +4,123 @@
  * Advanced interface for manual timetable editing
  */
 
+// Handle AJAX updates for drag & drop and edits FIRST (before any includes)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+    // Include only what's needed for AJAX
+    include 'connect.php';
+    
+    // Get parameters from URL
+    $stream_id = isset($_GET['stream_id']) ? intval($_GET['stream_id']) : 0;
+    $version = isset($_GET['version']) ? $_GET['version'] : '';
+    $semester = isset($_GET['semester']) ? $_GET['semester'] : 'second';
+    
+    // Clear any previous output
+    ob_clean();
+    header('Content-Type: application/json');
+    
+    $action = $_POST['action'];
+    $response = ['success' => false, 'message' => ''];
+    
+    // Debug logging
+    error_log("AJAX Action: " . $action);
+    error_log("POST data: " . print_r($_POST, true));
+    
+    if ($action === 'update_entry') {
+        try {
+            $entry_id = intval($_POST['entry_id']);
+            $new_day_id = intval($_POST['day_id']);
+            $new_time_slot_id = intval($_POST['time_slot_id']);
+            $new_room_id = intval($_POST['room_id']);
+            
+            // Get current entry details first
+            $current_entry_query = "SELECT academic_year, timetable_type, class_course_id, lecturer_course_id FROM timetable WHERE id = ?";
+            $stmt = $conn->prepare($current_entry_query);
+            $stmt->bind_param("i", $entry_id);
+            $stmt->execute();
+            $current_entry = $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+            
+            // Check for conflicts before updating
+            $conflict_check = "
+                SELECT COUNT(*) as conflict_count
+                FROM timetable t1
+                WHERE t1.id != ? 
+                AND t1.day_id = ? 
+                AND t1.time_slot_id = ? 
+                AND (
+                    t1.room_id = ? OR
+                    t1.class_course_id = ? OR
+                    t1.lecturer_course_id = ?
+                )
+                AND t1.semester = ? AND t1.version = ? AND t1.academic_year = ? AND t1.timetable_type = ?
+            ";
+            
+            $stmt = $conn->prepare($conflict_check);
+            $stmt->bind_param("iiiiiiisss", $entry_id, $new_day_id, $new_time_slot_id, $new_room_id, $current_entry['class_course_id'], $current_entry['lecturer_course_id'], $semester, $version, $current_entry['academic_year'], $current_entry['timetable_type']);
+            $stmt->execute();
+            $conflict_result = $stmt->get_result();
+            $conflict_count = $conflict_result->fetch_assoc()['conflict_count'];
+            $stmt->close();
+            
+            if ($conflict_count > 0) {
+                $response['message'] = 'This would create a conflict with existing entries.';
+            } else {
+                $update_query = "UPDATE timetable SET day_id = ?, time_slot_id = ?, room_id = ?, updated_at = NOW() WHERE id = ?";
+                $stmt = $conn->prepare($update_query);
+                $stmt->bind_param("iiii", $new_day_id, $new_time_slot_id, $new_room_id, $entry_id);
+                
+                if ($stmt->execute()) {
+                    $response['success'] = true;
+                    $response['message'] = 'Entry updated successfully!';
+                } else {
+                    $response['message'] = 'Failed to update entry: ' . $conn->error;
+                }
+                $stmt->close();
+            }
+        } catch (Exception $e) {
+            // Check if it's a constraint violation and provide user-friendly message
+            if (strpos($e->getMessage(), 'uq_timetable_same_version') !== false) {
+                $response['message'] = 'Cannot move entry: This time slot is already occupied by another class in the same room.';
+            } elseif (strpos($e->getMessage(), 'uq_timetable_class_course_time') !== false) {
+                $response['message'] = 'Cannot move entry: This class already has another course scheduled at this time.';
+            } elseif (strpos($e->getMessage(), 'uq_timetable_class_time') !== false) {
+                $response['message'] = 'Cannot move entry: This would create a scheduling conflict for the class.';
+            } else {
+                $response['message'] = 'Unable to update entry. Please try again or contact support if the problem persists.';
+            }
+            error_log("Update entry error: " . $e->getMessage());
+        }
+    }
+    
+    if ($action === 'delete_entry') {
+        try {
+            $entry_id = intval($_POST['entry_id']);
+            
+            $delete_query = "DELETE FROM timetable WHERE id = ? AND version = ? AND semester = ?";
+            $stmt = $conn->prepare($delete_query);
+            $stmt->bind_param("iss", $entry_id, $version, $semester);
+            
+            if ($stmt->execute()) {
+                $response['success'] = true;
+                $response['message'] = 'Entry deleted successfully!';
+            } else {
+                $response['message'] = 'Failed to delete entry: ' . $conn->error;
+            }
+            $stmt->close();
+        } catch (Exception $e) {
+            $response['message'] = 'Unable to delete entry. Please try again or contact support if the problem persists.';
+            error_log("Delete entry error: " . $e->getMessage());
+        }
+    }
+    
+    // Debug logging
+    error_log("Response: " . json_encode($response));
+    
+    echo json_encode($response);
+    exit;
+}
+
+// Regular page load - include everything
 $pageTitle = 'Advanced Timetable Editor';
 include 'connect.php';
 include 'includes/header.php';
@@ -28,66 +145,6 @@ $stream_result = $stmt->get_result();
 $stream_name = $stream_result->fetch_assoc()['name'] ?? 'Unknown Stream';
 $stmt->close();
 
-// Handle AJAX updates for drag & drop and edits
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
-    header('Content-Type: application/json');
-    
-    $action = $_POST['action'];
-    $response = ['success' => false, 'message' => ''];
-    
-    if ($action === 'update_entry') {
-        $entry_id = intval($_POST['entry_id']);
-        $new_day_id = intval($_POST['day_id']);
-        $new_time_slot_id = intval($_POST['time_slot_id']);
-        $new_room_id = intval($_POST['room_id']);
-        
-        // Check for conflicts before updating
-        $conflict_check = "
-            SELECT COUNT(*) as conflict_count
-            FROM timetable t1
-            WHERE t1.id != ? 
-            AND t1.day_id = ? 
-            AND t1.time_slot_id = ? 
-            AND (
-                t1.room_id = ? OR
-                t1.class_course_id = (
-                    SELECT t2.class_course_id FROM timetable t2 WHERE t2.id = ?
-                ) OR
-                t1.lecturer_course_id = (
-                    SELECT t2.lecturer_course_id FROM timetable t2 WHERE t2.id = ?
-                )
-            )
-            AND t1.semester = ? AND t1.version = ?
-        ";
-        
-        $stmt = $conn->prepare($conflict_check);
-        $stmt->bind_param("iiiiiiis", $entry_id, $new_day_id, $new_time_slot_id, $new_room_id, $entry_id, $entry_id, $semester, $version);
-        $stmt->execute();
-        $conflict_result = $stmt->get_result();
-        $conflict_count = $conflict_result->fetch_assoc()['conflict_count'];
-        $stmt->close();
-        
-        if ($conflict_count > 0) {
-            $response['message'] = 'This would create a conflict with existing entries.';
-        } else {
-            $update_query = "UPDATE timetable SET day_id = ?, time_slot_id = ?, room_id = ?, updated_at = NOW() WHERE id = ?";
-            $stmt = $conn->prepare($update_query);
-            $stmt->bind_param("iiii", $new_day_id, $new_time_slot_id, $new_room_id, $entry_id);
-            
-            if ($stmt->execute()) {
-                $response['success'] = true;
-                $response['message'] = 'Entry updated successfully!';
-            } else {
-                $response['message'] = 'Failed to update entry: ' . $conn->error;
-            }
-            $stmt->close();
-        }
-    }
-    
-    echo json_encode($response);
-    exit;
-}
-
 // Get timetable entries organized by day and time slot
 $timetable_query = "
     SELECT t.*, 
@@ -96,7 +153,8 @@ $timetable_query = "
            cl.name as class_name,
            d.name as day_name, d.id as day_id,
            ts.start_time, ts.end_time, ts.id as time_slot_id,
-           r.name as room_name, r.id as room_id
+           r.name as room_name, r.id as room_id,
+           CONCAT(cl.name, COALESCE(CONCAT(' - ', t.division_label), '')) as class_division_name
     FROM timetable t
     JOIN lecturer_courses lc ON t.lecturer_course_id = lc.id
     JOIN lecturers l ON lc.lecturer_id = l.id
@@ -107,7 +165,7 @@ $timetable_query = "
     JOIN time_slots ts ON t.time_slot_id = ts.id
     JOIN rooms r ON t.room_id = r.id
     WHERE cl.stream_id = ? AND t.version = ? AND t.semester = ?
-    ORDER BY d.id, ts.start_time, cl.name
+    ORDER BY d.id, ts.start_time, cl.name, t.division_label
 ";
 
 $stmt = $conn->prepare($timetable_query);
@@ -121,7 +179,7 @@ $days_query = "SELECT id, name FROM days WHERE is_active = 1 ORDER BY id";
 $days_result = $conn->query($days_query);
 $available_days = $days_result->fetch_all(MYSQLI_ASSOC);
 
-$time_slots_query = "SELECT id, start_time, end_time FROM time_slots WHERE is_active = 1 ORDER BY start_time";
+$time_slots_query = "SELECT id, start_time, end_time FROM time_slots ORDER BY start_time";
 $time_slots_result = $conn->query($time_slots_query);
 $available_time_slots = $time_slots_result->fetch_all(MYSQLI_ASSOC);
 
@@ -131,6 +189,25 @@ $available_rooms = $rooms_result->fetch_all(MYSQLI_ASSOC);
 
 // Organize entries by day and time slot for grid display
 $timetable_grid = [];
+$class_colors = [];
+$color_palette = [
+    '#007bff', '#28a745', '#dc3545', '#ffc107', '#17a2b8', '#6f42c1', 
+    '#fd7e14', '#20c997', '#e83e8c', '#6c757d', '#343a40', '#0d6efd',
+    '#1e3a8a', '#059669', '#dc2626', '#d97706', '#0891b2', '#7c3aed',
+    '#be185d', '#374151', '#1f2937', '#f59e0b', '#10b981', '#ef4444',
+    '#8b5cf6', '#06b6d4', '#84cc16', '#f97316', '#ec4899', '#6366f1'
+];
+
+// Assign colors to classes (not divisions to avoid excessive colors)
+$class_index = 0;
+foreach ($timetable_entries as $entry) {
+    $class_name = $entry['class_name'];
+    if (!isset($class_colors[$class_name])) {
+        $class_colors[$class_name] = $color_palette[$class_index % count($color_palette)];
+        $class_index++;
+    }
+}
+
 foreach ($timetable_entries as $entry) {
     $day_id = $entry['day_id'];
     $time_slot_id = $entry['time_slot_id'];
@@ -173,6 +250,19 @@ foreach ($timetable_entries as $entry) {
     <!-- Messages -->
     <div id="messageContainer"></div>
 
+    <!-- Class Color Legend -->
+        <?php if (!empty($class_colors)): ?>
+        <div class="class-legend">
+            <h6><i class="fas fa-palette me-2"></i>Class Color Legend</h6>
+            <p class="text-muted small mb-2">Each class has a unique color. Divisions (A, B, C, D) share the same color as their parent class.</p>
+            <?php foreach ($class_colors as $class_name => $color): ?>
+                <span class="legend-item" style="background: linear-gradient(135deg, <?php echo $color; ?>, <?php echo $color; ?>dd);">
+                    <?php echo htmlspecialchars($class_name); ?>
+                </span>
+            <?php endforeach; ?>
+        </div>
+        <?php endif; ?>
+
     <!-- Timetable Grid -->
     <div class="card">
         <div class="card-header">
@@ -204,13 +294,15 @@ foreach ($timetable_entries as $entry) {
                                             <?php foreach ($timetable_grid[$day['id']][$slot['id']] as $entry): ?>
                                                 <div class="timetable-entry" 
                                                      data-entry-id="<?php echo $entry['id']; ?>"
-                                                     data-class="<?php echo htmlspecialchars($entry['class_name']); ?>"
+                                                     data-class="<?php echo htmlspecialchars($entry['class_division_name']); ?>"
                                                      data-course="<?php echo htmlspecialchars($entry['course_name']); ?>"
                                                      data-lecturer="<?php echo htmlspecialchars($entry['lecturer_name']); ?>"
                                                      data-room="<?php echo htmlspecialchars($entry['room_name']); ?>"
+                                                     data-room-id="<?php echo $entry['room_id']; ?>"
+                                                     style="background: linear-gradient(135deg, <?php echo $class_colors[$entry['class_name']]; ?>, <?php echo $class_colors[$entry['class_name']]; ?>dd);"
                                                      draggable="true">
                                                     <div class="entry-content">
-                                                        <div class="entry-class"><?php echo htmlspecialchars($entry['class_name']); ?></div>
+                                                        <div class="entry-class"><?php echo htmlspecialchars($entry['class_division_name']); ?></div>
                                                         <div class="entry-course"><?php echo htmlspecialchars($entry['course_name']); ?></div>
                                                         <div class="entry-lecturer"><?php echo htmlspecialchars($entry['lecturer_name']); ?></div>
                                                         <div class="entry-room"><?php echo htmlspecialchars($entry['room_name']); ?></div>
@@ -304,58 +396,71 @@ foreach ($timetable_entries as $entry) {
 }
 
 .timetable-entry {
-    background: linear-gradient(135deg, #007bff, #0056b3);
     color: white;
-    border-radius: 6px;
-    padding: 8px;
-    margin: 2px 0;
+    border-radius: 8px;
+    padding: 10px;
+    margin: 3px 0;
     cursor: move;
     transition: all 0.3s ease;
     position: relative;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    border: 1px solid rgba(255,255,255,0.2);
 }
+
 
 .timetable-entry:hover {
     transform: scale(1.02);
-    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+    box-shadow: 0 6px 12px rgba(0,0,0,0.25);
+    border-color: rgba(255,255,255,0.4);
 }
 
 .timetable-entry.dragging {
-    opacity: 0.5;
-    transform: rotate(5deg);
+    opacity: 0.7;
+    transform: rotate(3deg) scale(1.05);
+    box-shadow: 0 8px 16px rgba(0,0,0,0.3);
+    z-index: 1000;
 }
 
 .timetable-cell.drag-over {
-    background-color: #e3f2fd;
+    background-color: rgba(33, 150, 243, 0.1);
     border: 2px dashed #2196f3;
+    border-radius: 4px;
 }
 
 .entry-content {
     font-size: 0.8rem;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.3);
 }
 
 .entry-class {
     font-weight: bold;
     font-size: 0.9rem;
+    margin-bottom: 2px;
 }
 
 .entry-course {
     font-style: italic;
+    font-size: 0.8rem;
+    margin-bottom: 2px;
+    opacity: 0.95;
 }
 
 .entry-lecturer {
     font-size: 0.75rem;
     opacity: 0.9;
+    margin-bottom: 1px;
 }
 
 .entry-room {
     font-size: 0.75rem;
-    opacity: 0.8;
+    opacity: 0.85;
+    font-weight: 500;
 }
 
 .entry-actions {
     position: absolute;
-    top: 2px;
-    right: 2px;
+    top: 4px;
+    right: 4px;
     opacity: 0;
     transition: opacity 0.3s ease;
 }
@@ -364,14 +469,79 @@ foreach ($timetable_entries as $entry) {
     opacity: 1;
 }
 
+.entry-actions .btn {
+    background: rgba(255,255,255,0.2);
+    border: 1px solid rgba(255,255,255,0.3);
+    color: white;
+    padding: 2px 6px;
+    font-size: 0.7rem;
+    margin-left: 2px;
+}
+
+.entry-actions .btn:hover {
+    background: rgba(255,255,255,0.3);
+    border-color: rgba(255,255,255,0.5);
+    color: white;
+}
+
 .time-slot-header {
-    background-color: #f8f9fa;
+    background: linear-gradient(135deg, #f8f9fa, #e9ecef);
     font-weight: bold;
     vertical-align: middle;
+    border-right: 1px solid #dee2e6;
+    position: sticky;
+    left: 0;
+    z-index: 10;
 }
 
 #messageContainer {
     margin-bottom: 1rem;
+}
+
+/* Class color legend */
+.class-legend {
+    margin-bottom: 1rem;
+    padding: 10px;
+    background: #f8f9fa;
+    border-radius: 6px;
+    border: 1px solid #dee2e6;
+}
+
+.class-legend h6 {
+    margin-bottom: 8px;
+    font-weight: bold;
+    color: #495057;
+}
+
+.legend-item {
+    display: inline-block;
+    margin: 2px 8px 2px 0;
+    padding: 4px 8px;
+    border-radius: 4px;
+    color: white;
+    font-size: 0.8rem;
+    font-weight: 500;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+}
+
+/* Responsive improvements */
+@media (max-width: 768px) {
+    .timetable-entry {
+        padding: 6px;
+        font-size: 0.7rem;
+    }
+    
+    .entry-class {
+        font-size: 0.8rem;
+    }
+    
+    .entry-course {
+        font-size: 0.7rem;
+    }
+    
+    .entry-lecturer, .entry-room {
+        font-size: 0.65rem;
+    }
 }
 </style>
 
@@ -438,12 +608,16 @@ function handleDrop(e) {
 }
 
 function updateEntryPosition(entryId, dayId, timeSlotId) {
+    // Get the current room from the entry element
+    const entry = document.querySelector(`[data-entry-id="${entryId}"]`);
+    const currentRoomId = entry ? entry.dataset.roomId : '';
+    
     const formData = new FormData();
     formData.append('action', 'update_entry');
     formData.append('entry_id', entryId);
     formData.append('day_id', dayId);
     formData.append('time_slot_id', timeSlotId);
-    formData.append('room_id', document.getElementById('editRoom').value); // Keep current room
+    formData.append('room_id', currentRoomId); // Keep current room
     
     fetch(window.location.href, {
         method: 'POST',
