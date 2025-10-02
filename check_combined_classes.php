@@ -53,12 +53,7 @@ if ($result && mysqli_num_rows($result) > 0) {
             $row['room_name'],
             $row['capacity']
         );
-        if (!empty($row['combined_classes'])) {
-            echo sprintf(
-                "Combined Classes: %s\n",
-                $row['combined_classes']
-            );
-        }
+        // Note: combined_classes column doesn't exist in current schema
         echo "---\n";
     }
 } else {
