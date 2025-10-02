@@ -662,10 +662,10 @@ if (!empty($select_extra)) {
 }
 
 $where_clause = "WHERE c.is_active = 1";
-// Temporarily disable stream filtering to debug
-// if ($class_has_stream) {
-//     $where_clause .= " AND c.stream_id = " . $streamManager->getCurrentStreamId();
-// }
+// Apply stream filtering for classes
+if ($class_has_stream) {
+    $where_clause .= " AND c.stream_id = " . $streamManager->getCurrentStreamId();
+}
 
 $sql = "SELECT " . $select_clause . "\n        " . $from_clause . "\n        " . $where_clause . "\n        ORDER BY c.name";
 $result = $conn->query($sql);
@@ -1074,6 +1074,9 @@ document.addEventListener('DOMContentLoaded', function() {
     if (searchInput) {
         searchInput.addEventListener('input', filterClasses);
     }
+    
+    // Initialize count badges on page load
+    updateCountBadges();
 });
 
 function filterClasses() {
@@ -1128,6 +1131,9 @@ function filterClasses() {
     
     // Update filter summary
     updateFilterSummary(visibleRows.length, searchTerm, selectedStream);
+    
+    // Update count badges
+    updateCountBadges();
 }
 
 function updateFilterSummary(visibleCount, searchTerm, selectedStream) {
@@ -1148,6 +1154,66 @@ function updateFilterSummary(visibleCount, searchTerm, selectedStream) {
     }
     
     summaryElement.textContent = summaryText;
+}
+
+function updateCountBadges() {
+    console.log('updateCountBadges called');
+    
+    // Get CSRF token from meta tag
+    const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+    
+    // Fetch count from database via AJAX
+    fetch('ajax_api.php', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: `module=class&action=get_count&csrf_token=${csrfToken}`
+    })
+    .then(response => {
+        console.log('Response status:', response.status);
+        return response.json();
+    })
+    .then(data => {
+        console.log('Response data:', data);
+        if (data.success) {
+            const totalCount = data.data.total || 0;
+            const activeCount = data.data.active || 0;
+            const inactiveCount = data.data.inactive || 0;
+            
+            console.log('Counts:', { totalCount, activeCount, inactiveCount });
+            
+            // Update the count badges
+            const totalCountElement = document.getElementById('totalCount');
+            const activeCountElement = document.getElementById('activeCount');
+            const inactiveCountElement = document.getElementById('inactiveCount');
+            
+            if (totalCountElement) {
+                totalCountElement.textContent = `${totalCount} Total`;
+            }
+            if (activeCountElement) {
+                activeCountElement.textContent = `${activeCount} Active`;
+            }
+            if (inactiveCountElement) {
+                inactiveCountElement.textContent = `${inactiveCount} Inactive`;
+            }
+        } else {
+            console.error('Error fetching class count:', data.message);
+            // Show error in badges
+            const totalCountElement = document.getElementById('totalCount');
+            if (totalCountElement) {
+                totalCountElement.textContent = 'Error';
+            }
+        }
+    })
+    .catch(error => {
+        console.error('Error fetching class count:', error);
+        // Show error in badges
+        const totalCountElement = document.getElementById('totalCount');
+        if (totalCountElement) {
+            totalCountElement.textContent = 'Error';
+        }
+    });
 }
 
 function clearFilters() {
@@ -1391,6 +1457,13 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Attach listeners to initial row(s)
     container.querySelectorAll('.class-row').forEach(function(r){ attachRowListeners(r); });
+    
+    // Listen for stream changes and reload data
+    window.addEventListener('streamChanged', function(event) {
+        console.log('Stream changed to:', event.detail.streamName);
+        // Reload the page to show filtered data for the new stream
+        window.location.reload();
+    });
 });
 </script>
 

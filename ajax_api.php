@@ -11,6 +11,7 @@ header('Cache-Control: no-cache, must-revalidate');
 include 'connect.php';
 include 'includes/flash.php';
 include 'includes/stream_validation.php';
+include 'includes/stream_manager.php';
 
 // Start session for CSRF protection
 if (session_status() == PHP_SESSION_NONE) {
@@ -215,7 +216,32 @@ function handleDepartmentActions($action, $conn) {
             break;
             
         case 'get_list':
-            $sql = "SELECT d.*, COUNT(c.id) as course_count FROM departments d LEFT JOIN courses c ON d.id = c.department_id GROUP BY d.id ORDER BY d.name";
+            // Get stream manager for filtering
+            $streamManager = getStreamManager();
+            $current_stream_id = $streamManager->getCurrentStreamId();
+            
+            $sql = "SELECT d.*, COUNT(c.id) as course_count FROM departments d LEFT JOIN courses c ON d.id = c.department_id";
+            
+            // Check if departments table has stream_id column
+            $col = $conn->query("SHOW COLUMNS FROM departments LIKE 'stream_id'");
+            $has_dept_stream = ($col && $col->num_rows > 0);
+            if ($col) $col->close();
+            
+            // Check if courses table has stream_id column
+            $col = $conn->query("SHOW COLUMNS FROM courses LIKE 'stream_id'");
+            $has_course_stream = ($col && $col->num_rows > 0);
+            if ($col) $col->close();
+            
+            if ($has_dept_stream) {
+                $sql .= " WHERE d.stream_id = " . intval($current_stream_id);
+            }
+            
+            if ($has_course_stream) {
+                $sql .= ($has_dept_stream ? " AND" : " WHERE") . " (c.stream_id = " . intval($current_stream_id) . " OR c.id IS NULL)";
+            }
+            
+            $sql .= " GROUP BY d.id ORDER BY d.name";
+            
             $result = $conn->query($sql);
             
             $departments = [];
@@ -323,7 +349,23 @@ function handleCourseActions($action, $conn) {
             break;
             
         case 'get_list':
-            $sql = "SELECT c.*, d.name as department_name FROM courses c LEFT JOIN departments d ON c.department_id = d.id ORDER BY c.code";
+            // Get stream manager for filtering
+            $streamManager = getStreamManager();
+            $current_stream_id = $streamManager->getCurrentStreamId();
+            
+            $sql = "SELECT c.*, d.name as department_name FROM courses c LEFT JOIN departments d ON c.department_id = d.id";
+            
+            // Check if courses table has stream_id column
+            $col = $conn->query("SHOW COLUMNS FROM courses LIKE 'stream_id'");
+            $has_stream_col = ($col && $col->num_rows > 0);
+            if ($col) $col->close();
+            
+            if ($has_stream_col) {
+                $sql .= " WHERE c.stream_id = " . intval($current_stream_id);
+            }
+            
+            $sql .= " ORDER BY c.code";
+            
             $result = $conn->query($sql);
             
             $courses = [];
@@ -530,7 +572,23 @@ function handleLecturerActions($action, $conn) {
             break;
             
         case 'get_list':
-            $sql = "SELECT l.*, d.name as department_name FROM lecturers l LEFT JOIN departments d ON l.department_id = d.id ORDER BY l.name";
+            // Get stream manager for filtering
+            $streamManager = getStreamManager();
+            $current_stream_id = $streamManager->getCurrentStreamId();
+            
+            $sql = "SELECT l.*, d.name as department_name FROM lecturers l LEFT JOIN departments d ON l.department_id = d.id";
+            
+            // Check if lecturers table has stream_id column
+            $col = $conn->query("SHOW COLUMNS FROM lecturers LIKE 'stream_id'");
+            $has_stream_col = ($col && $col->num_rows > 0);
+            if ($col) $col->close();
+            
+            if ($has_stream_col) {
+                $sql .= " WHERE l.stream_id = " . intval($current_stream_id);
+            }
+            
+            $sql .= " ORDER BY l.name";
+            
             $result = $conn->query($sql);
             
             $lecturers = [];
@@ -651,7 +709,53 @@ function handleProgramActions($action, $conn) {
 }
 
 function handleClassActions($action, $conn) {
-    sendResponse(false, 'Class actions not yet implemented');
+    global $current_stream_id;
+    
+    switch ($action) {
+        case 'get_count':
+            // Get stream manager for filtering
+            include_once 'includes/stream_manager.php';
+            $streamManager = getStreamManager();
+            $current_stream_id = $streamManager->getCurrentStreamId();
+            
+            // Check if classes table has stream_id column
+            $col = $conn->query("SHOW COLUMNS FROM classes LIKE 'stream_id'");
+            $has_stream_col = ($col && $col->num_rows > 0);
+            if ($col) $col->close();
+            
+            // Build query based on stream support
+            if ($has_stream_col) {
+                $sql = "SELECT 
+                    COUNT(*) as total,
+                    SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) as active,
+                    SUM(CASE WHEN is_active = 0 THEN 1 ELSE 0 END) as inactive
+                    FROM classes WHERE stream_id = ?";
+                $stmt = $conn->prepare($sql);
+                $stmt->bind_param("i", $current_stream_id);
+            } else {
+                $sql = "SELECT 
+                    COUNT(*) as total,
+                    SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) as active,
+                    SUM(CASE WHEN is_active = 0 THEN 1 ELSE 0 END) as inactive
+                    FROM classes";
+                $stmt = $conn->prepare($sql);
+            }
+            
+            $stmt->execute();
+            $result = $stmt->get_result();
+            $row = $result->fetch_assoc();
+            $stmt->close();
+            
+            sendResponse(true, 'Class count retrieved successfully', [
+                'total' => intval($row['total']),
+                'active' => intval($row['active']),
+                'inactive' => intval($row['inactive'])
+            ]);
+            break;
+            
+        default:
+            sendResponse(false, 'Invalid class action');
+    }
 }
 
 function handleRoomActions($action, $conn) {

@@ -1192,6 +1192,13 @@ document.addEventListener('DOMContentLoaded', function() {
     const statusFilter = document.getElementById('statusFilter');
     const toggleStatusBtn = document.getElementById('toggleStatusBtn');
     
+    // Listen for stream changes and reload page
+    window.addEventListener('streamChanged', function(event) {
+        console.log('Stream changed to:', event.detail.streamName);
+        // Reload the page to show filtered data for the new stream
+        window.location.reload();
+    });
+    
     // Search functionality
     searchInput?.addEventListener('input', function() {
         filterRooms();

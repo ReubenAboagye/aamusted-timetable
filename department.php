@@ -319,6 +319,13 @@ $(document).ready(function() {
     
     // Initialize search functionality
     AjaxUtils.initSearch('searchInput', 'tableBody');
+    
+    // Listen for stream changes and reload data
+    window.addEventListener('streamChanged', function(event) {
+        console.log('Stream changed to:', event.detail.streamName);
+        // Reload data for the new stream
+        loadInitialData();
+    });
 
     // Load initial data from server
     function loadInitialData() {
@@ -340,7 +347,7 @@ $(document).ready(function() {
             }
         }, 10000); // 10 second timeout
         
-        AjaxUtils.makeRequest('department', 'get_list', {}, 3, 'ajax_test_simple.php')
+        AjaxUtils.makeRequest('department', 'get_list')
         .then(data => {
             clearTimeout(timeoutId);
             if (data.success) {
@@ -551,7 +558,7 @@ function loadInitialData() {
         }
     }, 10000); // 10 second timeout
     
-    AjaxUtils.makeRequest('department', 'get_list', {}, 3, 'ajax_test_simple.php')
+    AjaxUtils.makeRequest('department', 'get_list')
     .then(data => {
         clearTimeout(timeoutId);
         if (data.success) {
@@ -633,7 +640,7 @@ function refreshData() {
     refreshBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Refreshing...';
     refreshBtn.disabled = true;
     
-    AjaxUtils.makeRequest('department', 'get_list', {}, 3, 'ajax_test_simple.php')
+    AjaxUtils.makeRequest('department', 'get_list')
     .then(data => {
         if (data.success) {
             departments = data.data;
@@ -672,7 +679,7 @@ function deleteDepartment(id) {
     deleteBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
     deleteBtn.disabled = true;
     
-    AjaxUtils.makeRequest('department', 'delete', { id: id }, 3, 'ajax_test_simple.php')
+    AjaxUtils.makeRequest('department', 'delete', { id: id })
     .then(data => {
         if (data.success) {
             AjaxUtils.showAlert(data.message, 'success');

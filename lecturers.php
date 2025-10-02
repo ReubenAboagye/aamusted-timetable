@@ -404,6 +404,13 @@ $(document).ready(function() {
 
     // Setup import functionality
     setupImportFunctionality();
+    
+    // Listen for stream changes and reload data
+    window.addEventListener('streamChanged', function(event) {
+        console.log('Stream changed to:', event.detail.streamName);
+        // Reload data for the new stream
+        loadInitialData();
+    });
 
     // Load initial data from server
     function loadInitialData() {

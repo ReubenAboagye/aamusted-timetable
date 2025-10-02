@@ -758,8 +758,21 @@ if (!function_exists('getCount')) {
     .then(response => response.json())
     .then(data => {
       if (data.success) {
-        // Reload the page to show filtered data
-        window.location.reload();
+        // Update the current stream display
+        const currentStreamElement = document.querySelector('#currentStream strong');
+        if (currentStreamElement) {
+          currentStreamElement.textContent = data.stream_name;
+        }
+        
+        // Trigger custom event for pages to listen to
+        window.dispatchEvent(new CustomEvent('streamChanged', {
+          detail: { streamId: streamId, streamName: data.stream_name }
+        }));
+        
+        // Show success message
+        if (typeof showNotification === 'function') {
+          showNotification('Stream changed to ' + data.stream_name, 'success');
+        }
       } else {
         alert('Error changing stream: ' + data.message);
       }

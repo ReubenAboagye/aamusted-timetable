@@ -1,13 +1,29 @@
 <?php
 header('Content-Type: application/json');
 include 'connect.php';
+include 'includes/stream_manager.php';
 
 $department_id = isset($_GET['department_id']) ? (int)$_GET['department_id'] : 0; // still supported but optional
 $level = isset($_GET['level']) ? (int)$_GET['level'] : 0;
 
+// Get stream manager for filtering
+$streamManager = getStreamManager();
+$current_stream_id = $streamManager->getCurrentStreamId();
+
 $query = "SELECT id, code, name FROM courses WHERE is_active = 1";
 $params = [];
 $types = '';
+
+// Check if courses table has stream_id column and apply filter
+$col = $conn->query("SHOW COLUMNS FROM courses LIKE 'stream_id'");
+$has_stream_col = ($col && $col->num_rows > 0);
+if ($col) $col->close();
+
+if ($has_stream_col) {
+    $query .= " AND stream_id = ?";
+    $params[] = $current_stream_id;
+    $types .= 'i';
+}
 
 if ($department_id > 0) {
     $query .= " AND department_id = ?";

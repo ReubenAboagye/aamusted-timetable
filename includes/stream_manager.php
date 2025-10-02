@@ -190,10 +190,21 @@ class StreamManager {
      */
     public function addStreamFilter($sql, $table_alias = '') {
         $alias = $table_alias ? $table_alias . '.' : '';
-        // Only apply stream filter for the classes table (alias 'c' or 'classes').
-        // Other tables are considered global and should not be filtered by stream.
+        // Apply stream filter for tables that have stream_id column
         $aliasTrim = rtrim($table_alias, '.');
-        if (!in_array(strtolower($aliasTrim), ['c', 'classes'])) {
+        $streamFilteredTables = [
+            'c', 'classes',
+            'co', 'courses', 
+            'l', 'lecturers',
+            'cc', 'class_courses',
+            'lc', 'lecturer_courses',
+            't', 'timetable',
+            'p', 'programs',
+            'r', 'rooms',
+            'crt', 'course_room_types'
+        ];
+        
+        if (!in_array(strtolower($aliasTrim), $streamFilteredTables)) {
             return $sql;
         }
 
@@ -210,9 +221,21 @@ class StreamManager {
      * Get stream filter condition for manual queries
      */
     public function getStreamFilterCondition($table_alias = '') {
-        // Only return a condition for the classes table alias; otherwise return empty string
+        // Return condition for tables that have stream_id column
         $aliasTrim = rtrim($table_alias, '.');
-        if (!in_array(strtolower($aliasTrim), ['c', 'classes'])) {
+        $streamFilteredTables = [
+            'c', 'classes',
+            'co', 'courses', 
+            'l', 'lecturers',
+            'cc', 'class_courses',
+            'lc', 'lecturer_courses',
+            't', 'timetable',
+            'p', 'programs',
+            'r', 'rooms',
+            'crt', 'course_room_types'
+        ];
+        
+        if (!in_array(strtolower($aliasTrim), $streamFilteredTables)) {
             return '';
         }
         $alias = $table_alias ? $table_alias . '.' : '';
@@ -223,9 +246,13 @@ class StreamManager {
      * Check if a record belongs to current stream
      */
     public function isRecordInCurrentStream($table_name, $record_id) {
-        // Only valid for tables that have a stream_id column (we treat 'classes' as canonical here).
-        if (strtolower($table_name) !== 'classes') {
-            // Non-classes are considered global; return true so checks relying on this don't block.
+        $streamFilteredTables = [
+            'classes', 'courses', 'lecturers', 'class_courses', 
+            'lecturer_courses', 'timetable', 'programs', 'rooms', 'course_room_types'
+        ];
+        
+        if (!in_array(strtolower($table_name), $streamFilteredTables)) {
+            // Non-stream tables are considered global; return true so checks relying on this don't block.
             return true;
         }
 

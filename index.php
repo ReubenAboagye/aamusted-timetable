@@ -38,11 +38,51 @@ function getCount($conn, $query, $stream_id = null) {
     return $row ? intval($row['c']) : 0;
 }
 
-// Counts per stream
-$dept_count      = getCount($conn, "SELECT COUNT(*) AS c FROM departments WHERE is_active = 1", $active_stream);
-$course_count    = getCount($conn, "SELECT COUNT(*) AS c FROM courses WHERE is_active = 1", $active_stream);
-$lect_count      = getCount($conn, "SELECT COUNT(*) AS c FROM lecturers WHERE is_active = 1", $active_stream);
-$room_count      = getCount($conn, "SELECT COUNT(*) AS c FROM rooms WHERE is_active = 1", $active_stream);
+// Counts per stream - check if tables have stream_id column
+$dept_count = 0;
+$course_count = 0;
+$lect_count = 0;
+$room_count = 0;
+
+// Check departments table
+$col = $conn->query("SHOW COLUMNS FROM departments LIKE 'stream_id'");
+$has_dept_stream = ($col && $col->num_rows > 0);
+if ($col) $col->close();
+if ($has_dept_stream) {
+    $dept_count = getCount($conn, "SELECT COUNT(*) AS c FROM departments WHERE is_active = 1 AND stream_id = ?", $active_stream);
+} else {
+    $dept_count = getCount($conn, "SELECT COUNT(*) AS c FROM departments WHERE is_active = 1");
+}
+
+// Check courses table
+$col = $conn->query("SHOW COLUMNS FROM courses LIKE 'stream_id'");
+$has_course_stream = ($col && $col->num_rows > 0);
+if ($col) $col->close();
+if ($has_course_stream) {
+    $course_count = getCount($conn, "SELECT COUNT(*) AS c FROM courses WHERE is_active = 1 AND stream_id = ?", $active_stream);
+} else {
+    $course_count = getCount($conn, "SELECT COUNT(*) AS c FROM courses WHERE is_active = 1");
+}
+
+// Check lecturers table
+$col = $conn->query("SHOW COLUMNS FROM lecturers LIKE 'stream_id'");
+$has_lect_stream = ($col && $col->num_rows > 0);
+if ($col) $col->close();
+if ($has_lect_stream) {
+    $lect_count = getCount($conn, "SELECT COUNT(*) AS c FROM lecturers WHERE is_active = 1 AND stream_id = ?", $active_stream);
+} else {
+    $lect_count = getCount($conn, "SELECT COUNT(*) AS c FROM lecturers WHERE is_active = 1");
+}
+
+// Check rooms table
+$col = $conn->query("SHOW COLUMNS FROM rooms LIKE 'stream_id'");
+$has_room_stream = ($col && $col->num_rows > 0);
+if ($col) $col->close();
+if ($has_room_stream) {
+    $room_count = getCount($conn, "SELECT COUNT(*) AS c FROM rooms WHERE is_active = 1 AND stream_id = ?", $active_stream);
+} else {
+    $room_count = getCount($conn, "SELECT COUNT(*) AS c FROM rooms WHERE is_active = 1");
+}
 
 // Count classes that need timetables (more meaningful than total timetable entries)
 $classes_count = getCount($conn, "SELECT COUNT(*) AS c FROM classes WHERE stream_id = ? AND is_active = 1", $active_stream);
