@@ -154,7 +154,9 @@ $timetable_query = "
            d.name as day_name, d.id as day_id,
            ts.start_time, ts.end_time, ts.id as time_slot_id,
            r.name as room_name, r.id as room_id,
-           CONCAT(cl.name, COALESCE(CONCAT(' - ', t.division_label), '')) as class_division_name
+           CONCAT(cl.name, COALESCE(CONCAT(' - ', t.division_label), '')) as class_division_name,
+           t.is_combined,
+           t.combined_classes
     FROM timetable t
     JOIN lecturer_courses lc ON t.lecturer_course_id = lc.id
     JOIN lecturers l ON lc.lecturer_id = l.id
@@ -254,7 +256,10 @@ foreach ($timetable_entries as $entry) {
         <?php if (!empty($class_colors)): ?>
         <div class="class-legend">
             <h6><i class="fas fa-palette me-2"></i>Class Color Legend</h6>
-            <p class="text-muted small mb-2">Each class has a unique color. Divisions (A, B, C, D) share the same color as their parent class.</p>
+            <p class="text-muted small mb-2">
+                Each class has a unique color. Divisions (A, B, C, D) share the same color as their parent class.
+                <br><i class="fas fa-users text-warning me-1"></i> <strong>Combined Classes:</strong> Multiple classes taught together in the same room.
+            </p>
             <?php foreach ($class_colors as $class_name => $color): ?>
                 <span class="legend-item" style="background: linear-gradient(135deg, <?php echo $color; ?>, <?php echo $color; ?>dd);">
                     <?php echo htmlspecialchars($class_name); ?>
@@ -292,7 +297,32 @@ foreach ($timetable_entries as $entry) {
                                     <td class="timetable-cell" data-day="<?php echo $day['id']; ?>" data-time-slot="<?php echo $slot['id']; ?>">
                                         <?php if (isset($timetable_grid[$day['id']][$slot['id']])): ?>
                                             <?php foreach ($timetable_grid[$day['id']][$slot['id']] as $entry): ?>
-                                                <div class="timetable-entry" 
+                                                <?php
+                                                // Check if this is a combined class
+                                                $is_combined = $entry['is_combined'] == 1;
+                                                $combined_classes_display = '';
+                                                
+                                                if ($is_combined && !empty($entry['combined_classes'])) {
+                                                    $combined_class_ids = json_decode($entry['combined_classes'], true);
+                                                    if (is_array($combined_class_ids) && count($combined_class_ids) > 1) {
+                                                        // Get class names for combined classes
+                                                        $combined_names = [];
+                                                        foreach ($combined_class_ids as $class_course_id) {
+                                                            // Find the class name for this class_course_id
+                                                            foreach ($timetable_entries as $other_entry) {
+                                                                if ($other_entry['class_course_id'] == $class_course_id) {
+                                                                    $combined_names[] = $other_entry['class_division_name'];
+                                                                    break;
+                                                                }
+                                                            }
+                                                        }
+                                                        if (count($combined_names) > 1) {
+                                                            $combined_classes_display = implode(', ', $combined_names);
+                                                        }
+                                                    }
+                                                }
+                                                ?>
+                                                <div class="timetable-entry <?php echo $is_combined ? 'combined-entry' : ''; ?>" 
                                                      data-entry-id="<?php echo $entry['id']; ?>"
                                                      data-class="<?php echo htmlspecialchars($entry['class_division_name']); ?>"
                                                      data-course="<?php echo htmlspecialchars($entry['course_name']); ?>"
@@ -302,7 +332,14 @@ foreach ($timetable_entries as $entry) {
                                                      style="background: linear-gradient(135deg, <?php echo $class_colors[$entry['class_name']]; ?>, <?php echo $class_colors[$entry['class_name']]; ?>dd);"
                                                      draggable="true">
                                                     <div class="entry-content">
-                                                        <div class="entry-class"><?php echo htmlspecialchars($entry['class_division_name']); ?></div>
+                                                        <div class="entry-class">
+                                                            <?php if ($is_combined && !empty($combined_classes_display)): ?>
+                                                                <i class="fas fa-users me-1" title="Combined Classes"></i>
+                                                                <?php echo htmlspecialchars($combined_classes_display); ?>
+                                                            <?php else: ?>
+                                                                <?php echo htmlspecialchars($entry['class_division_name']); ?>
+                                                            <?php endif; ?>
+                                                        </div>
                                                         <div class="entry-course"><?php echo htmlspecialchars($entry['course_name']); ?></div>
                                                         <div class="entry-lecturer"><?php echo htmlspecialchars($entry['lecturer_name']); ?></div>
                                                         <div class="entry-room"><?php echo htmlspecialchars($entry['room_name']); ?></div>
@@ -405,6 +442,16 @@ foreach ($timetable_entries as $entry) {
     position: relative;
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     border: 1px solid rgba(255,255,255,0.2);
+}
+
+.timetable-entry.combined-entry {
+    border: 2px solid #ffc107;
+    box-shadow: 0 2px 8px rgba(255, 193, 7, 0.3);
+}
+
+.timetable-entry.combined-entry:hover {
+    border-color: #ffca2c;
+    box-shadow: 0 6px 16px rgba(255, 193, 7, 0.4);
 }
 
 

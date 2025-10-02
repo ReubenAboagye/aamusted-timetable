@@ -130,7 +130,7 @@ $days_query = "SELECT id, name FROM days WHERE is_active = 1 ORDER BY id";
 $days_result = $conn->query($days_query);
 $available_days = $days_result->fetch_all(MYSQLI_ASSOC);
 
-$time_slots_query = "SELECT id, start_time, end_time FROM time_slots WHERE is_active = 1 ORDER BY start_time";
+$time_slots_query = "SELECT id, start_time, end_time FROM time_slots ORDER BY start_time";
 $time_slots_result = $conn->query($time_slots_query);
 $available_time_slots = $time_slots_result->fetch_all(MYSQLI_ASSOC);
 
