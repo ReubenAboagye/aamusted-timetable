@@ -454,7 +454,9 @@ class GeneticAlgorithm {
                                 'semester' => $this->options['semester'],
                                 'academic_year' => $this->options['academic_year'],
                                 'timetable_type' => 'lecture',
-                                'is_active' => 1
+                                'is_active' => 1,
+                                'is_combined' => 1,
+                                'combined_classes' => json_encode(array_column($gene['combined_classes'] ?? [], 'class_course_id'))
                             ];
                         } else {
                             // Log duplicate for debugging
@@ -496,7 +498,9 @@ class GeneticAlgorithm {
                                 'semester' => $this->options['semester'],
                                 'academic_year' => $this->options['academic_year'],
                                 'timetable_type' => 'lecture',
-                                'is_active' => 1
+                                'is_active' => 1,
+                                'is_combined' => 0,
+                                'combined_classes' => null
                             ];
                         } else {
                             // Log duplicate for debugging

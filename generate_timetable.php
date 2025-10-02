@@ -623,7 +623,9 @@ function insertTimetableEntries($conn, $entries, $version = 'regular') {
         }
             
             // Add to batch
-            $batchValues[] = "(" . (int)$entry['class_course_id'] . ", " . (int)$lecturerCourseId . ", " . (int)$entry['day_id'] . ", " . (int)$entry['time_slot_id'] . ", " . (int)$entry['room_id'] . ", '" . $conn->real_escape_string($entry['division_label']) . "', '" . $conn->real_escape_string($semesterVal) . "', '" . $conn->real_escape_string($academicYearVal) . "', '" . $conn->real_escape_string($version) . "')";
+            $isCombined = isset($entry['is_combined']) ? (int)$entry['is_combined'] : 0;
+            $combinedClasses = isset($entry['combined_classes']) ? "'" . $conn->real_escape_string($entry['combined_classes']) . "'" : 'NULL';
+            $batchValues[] = "(" . (int)$entry['class_course_id'] . ", " . (int)$lecturerCourseId . ", " . (int)$entry['day_id'] . ", " . (int)$entry['time_slot_id'] . ", " . (int)$entry['room_id'] . ", '" . $conn->real_escape_string($entry['division_label']) . "', '" . $conn->real_escape_string($semesterVal) . "', '" . $conn->real_escape_string($academicYearVal) . "', '" . $conn->real_escape_string($version) . "', " . $isCombined . ", " . $combinedClasses . ")";
             $occupiedSlotKeys[$slotKey] = true;
         }
         
@@ -635,7 +637,7 @@ function insertTimetableEntries($conn, $entries, $version = 'regular') {
         
         // Execute batch insert if we have valid entries
         if (!empty($batchValues)) {
-            $sql = "INSERT INTO timetable (class_course_id, lecturer_course_id, day_id, time_slot_id, room_id, division_label, semester, academic_year, version) VALUES " . implode(', ', $batchValues);
+            $sql = "INSERT INTO timetable (class_course_id, lecturer_course_id, day_id, time_slot_id, room_id, division_label, semester, academic_year, version, is_combined, combined_classes) VALUES " . implode(', ', $batchValues);
             
             if ($conn->query($sql)) {
                 $batchInserted = $conn->affected_rows;
@@ -687,12 +689,14 @@ function insertTimetableEntries($conn, $entries, $version = 'regular') {
                     
                     // Note: Lecturer conflicts are now allowed and will be reported for manual review
                     
-        $sql = "INSERT INTO timetable (class_course_id, lecturer_course_id, day_id, time_slot_id, room_id, division_label, semester, academic_year) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+        $sql = "INSERT INTO timetable (class_course_id, lecturer_course_id, day_id, time_slot_id, room_id, division_label, semester, academic_year, is_combined, combined_classes) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         
         $stmt = $conn->prepare($sql);
         if ($stmt) {
-            $stmt->bind_param("iiiiisss", 
+            $isCombined = isset($entry['is_combined']) ? (int)$entry['is_combined'] : 0;
+            $combinedClasses = isset($entry['combined_classes']) ? $entry['combined_classes'] : null;
+            $stmt->bind_param("iiiiisssis", 
                 $entry['class_course_id'],
                 $lecturerCourseId,
                 $entry['day_id'],
@@ -700,7 +704,9 @@ function insertTimetableEntries($conn, $entries, $version = 'regular') {
                 $entry['room_id'],
                 $entry['division_label'],
                 $semesterVal,
-                $academicYearVal
+                $academicYearVal,
+                $isCombined,
+                $combinedClasses
             );
             
             if ($stmt->execute()) {
@@ -1180,8 +1186,8 @@ function scheduleUnscheduledClasses($conn, $stream_id, $semester) {
                     $insert_query = "
                         INSERT INTO timetable (
                             class_course_id, lecturer_course_id, day_id, time_slot_id, 
-                            room_id, division_label, semester, created_at, updated_at
-                        ) VALUES (?, ?, ?, ?, ?, '', ?, NOW(), NOW())
+                            room_id, division_label, semester, created_at, updated_at, is_combined, combined_classes
+                        ) VALUES (?, ?, ?, ?, ?, '', ?, NOW(), NOW(), 0, NULL)
                     ";
                     
                     $insert_stmt = $conn->prepare($insert_query);
