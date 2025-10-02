@@ -144,13 +144,8 @@ class TimetableRepresentation {
                 }
             }
 
-            if (count($classCourses) > 1 && $isSameClass) {
-                // Divisions of same class: schedule independently, do not combine
-                foreach ($classCourses as $classCourse) {
-                    $individual = array_merge($individual, self::createIndividualAssignment($classCourse, $data));
-                }
-            } elseif (count($classCourses) > 1) {
-                // Different classes: attempt to combine
+            if (count($classCourses) > 1) {
+                // Multiple classes/divisions: attempt to combine (same class divisions or different classes)
                 $combinedAssignment = self::createCombinedAssignment($classCourses, $data);
                 if ($combinedAssignment) {
                     $individual = array_merge($individual, $combinedAssignment);
@@ -214,42 +209,151 @@ class TimetableRepresentation {
     private static function createCombinedAssignment(array $classCourses, array $data): array {
         $assignments = [];
         
-        // Check if combination is feasible based on room capacity
-        $totalStudents = 0;
+        // Group classes by lecturer to ensure same lecturer for combinations
+        $lecturerGroups = [];
         foreach ($classCourses as $classCourse) {
-            // Use individual_capacity from expanded class divisions
-            $totalStudents += $classCourse['individual_capacity'] ?? self::getClassSize($classCourse['class_id']);
-        }
-        
-        // Find rooms that can accommodate all students
-        $suitableRooms = array_filter($data['rooms'], function($room) use ($totalStudents) {
-            return ($room['capacity'] ?? 0) >= $totalStudents;
-        });
-        
-        // Further filter by preferred room type if available for this course
-        if (!empty($data['course_room_types'])) {
-            $baseCourseId = $classCourses[0]['course_id'] ?? null;
-            if ($baseCourseId) {
-                $preferredType = $data['course_room_types'][$baseCourseId] ?? null;
-                if ($preferredType) {
-                    $filtered = array_values(array_filter($suitableRooms, function($room) use ($preferredType) {
-                        return isset($room['room_type']) && strtolower((string)$room['room_type']) === $preferredType;
-                    }));
-                    if (!empty($filtered)) {
-                        $suitableRooms = $filtered;
-                    }
+            $lecturerId = $classCourse['lecturer_id'] ?? null;
+            if ($lecturerId) {
+                if (!isset($lecturerGroups[$lecturerId])) {
+                    $lecturerGroups[$lecturerId] = [];
                 }
+                $lecturerGroups[$lecturerId][] = $classCourse;
             }
         }
         
+        // Process each lecturer group separately
+        foreach ($lecturerGroups as $lecturerId => $lecturerClasses) {
+            if (count($lecturerClasses) > 1) {
+                // Try to combine classes with same lecturer
+                $combinations = self::createLecturerCombinations($lecturerClasses, $data);
+                $assignments = array_merge($assignments, $combinations);
+            } else {
+                // Single class for this lecturer, create individual assignment
+                $assignments = array_merge($assignments, self::createIndividualAssignment($lecturerClasses[0], $data));
+            }
+        }
+        
+        // Handle any remaining classes without lecturer assignments
+        $unassignedClasses = array_filter($classCourses, function($classCourse) {
+            return !isset($classCourse['lecturer_id']) || !$classCourse['lecturer_id'];
+        });
+        
+        foreach ($unassignedClasses as $classCourse) {
+            $assignments = array_merge($assignments, self::createIndividualAssignment($classCourse, $data));
+        }
+        
+        return $assignments;
+    }
+    
+    /**
+     * Create combinations for classes with same lecturer
+     */
+    private static function createLecturerCombinations(array $lecturerClasses, array $data): array {
+        $assignments = [];
+        $remainingClasses = $lecturerClasses;
+        
+        // Sort classes by level and size for better combination opportunities
+        usort($remainingClasses, function($a, $b) {
+            // First sort by class level (same level classes together)
+            $levelA = $a['class_name'] ?? '';
+            $levelB = $b['class_name'] ?? '';
+            if ($levelA !== $levelB) {
+                return strcmp($levelA, $levelB);
+            }
+            
+            // Then by size (smallest first)
+            $sizeA = $a['individual_capacity'] ?? self::getClassSize($a['class_id']);
+            $sizeB = $b['individual_capacity'] ?? self::getClassSize($b['class_id']);
+            return $sizeA - $sizeB;
+        });
+        
+        while (!empty($remainingClasses)) {
+            $currentGroup = [];
+            $currentTotal = 0;
+            $processedKeys = [];
+            $attendanceFactor = 0.7; // Assume 70% attendance rate
+            
+            // Try to form a group that can fit in available rooms
+            foreach ($remainingClasses as $key => $classCourse) {
+                $classSize = $classCourse['individual_capacity'] ?? self::getClassSize($classCourse['class_id']);
+                
+                // Check if we can add this class to the current group
+                // Apply attendance factor: allow over-capacity bookings
+                $newTotal = $currentTotal + $classSize;
+                $effectiveCapacity = $newTotal * $attendanceFactor; // 70% of total students
+                
+                $suitableRooms = array_filter($data['rooms'], function($room) use ($effectiveCapacity) {
+                    return ($room['capacity'] ?? 0) >= $effectiveCapacity;
+                });
+                
+                if (!empty($suitableRooms)) {
+                    $currentGroup[] = $classCourse;
+                    $currentTotal = $newTotal;
+                    $processedKeys[] = $key;
+                }
+            }
+            
+            // Remove processed classes from the list
+            foreach ($processedKeys as $key) {
+                unset($remainingClasses[$key]);
+            }
+            
+            // Safety check to prevent infinite loop
+            if (empty($currentGroup)) {
+                // If no group could be formed, process remaining classes individually
+                foreach ($remainingClasses as $classCourse) {
+                    $assignments = array_merge($assignments, self::createIndividualAssignment($classCourse, $data));
+                }
+                break;
+            }
+            
+            if (count($currentGroup) > 1) {
+                // Create combined assignment for this group
+                $combinedAssignment = self::createCombinedAssignmentForGroup($currentGroup, $data);
+                if (!empty($combinedAssignment)) {
+                    $assignments = array_merge($assignments, $combinedAssignment);
+                } else {
+                    // If combination fails, add individual assignments
+                    foreach ($currentGroup as $classCourse) {
+                        $assignments = array_merge($assignments, self::createIndividualAssignment($classCourse, $data));
+                    }
+                }
+            } else {
+                // Single class, create individual assignment
+                $assignments = array_merge($assignments, self::createIndividualAssignment($currentGroup[0], $data));
+            }
+        }
+        
+        return $assignments;
+    }
+    
+    /**
+     * Create combined assignment for a group of classes
+     */
+    private static function createCombinedAssignmentForGroup(array $classGroup, array $data): array {
+        $assignments = [];
+        
+        // Calculate total students for this group
+        $totalStudents = 0;
+        foreach ($classGroup as $classCourse) {
+            $totalStudents += $classCourse['individual_capacity'] ?? self::getClassSize($classCourse['class_id']);
+        }
+        
+        // Apply attendance factor for flexible room capacity
+        $attendanceFactor = 0.7; // Assume 70% attendance rate
+        $effectiveCapacity = $totalStudents * $attendanceFactor;
+        
+        // Find rooms that can accommodate this group (with attendance factor)
+        $suitableRooms = array_filter($data['rooms'], function($room) use ($effectiveCapacity) {
+            return ($room['capacity'] ?? 0) >= $effectiveCapacity;
+        });
+        
         if (empty($suitableRooms)) {
-            // No suitable room found for combination
             return [];
         }
         
         // Use the first class course as the base for the combined assignment
-        $baseClassCourse = $classCourses[0];
-        // Enforce once-per-week per course per division: always one period
+        $baseClassCourse = $classGroup[0];
         $courseDuration = 1;
         
         // Create combined assignment
@@ -259,16 +363,17 @@ class TimetableRepresentation {
                 $baseClassCourse,
                 $data['days'],
                 $data['time_slots'],
-                $suitableRooms, // Use only suitable rooms
+                $suitableRooms,
                 $data['lecturer_courses'],
                 $i,
                 true, // Mark as combined
-                $classCourses // Include all class divisions in this combination
+                $classGroup // Include all classes in this combination
             );
         }
         
         return $assignments;
     }
+    
     
     /**
      * Create a random gene (timetable slot) for a class-course
