@@ -1446,9 +1446,9 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                         <?php if (!empty($existing_versions)): ?>
                         <div class="mb-3">
                             <h6>Existing Versions:</h6>
-                            <div class="list-group list-group-flush">
+                            <div class="list-group list-group-flush" style="max-height: 200px; overflow-y: auto; border: 1px solid #dee2e6; border-radius: 0.375rem;">
                                 <?php foreach ($existing_versions as $version_info): ?>
-                                <div class="list-group-item d-flex justify-content-between align-items-center px-0">
+                                <div class="list-group-item d-flex justify-content-between align-items-center" style="padding-left: 15px;">
                                     <div>
                                         <strong><?php echo htmlspecialchars($version_info['version']); ?></strong>
                                         <br>
