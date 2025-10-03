@@ -392,26 +392,6 @@ $(document).ready(function() {
     let importDataLecturers = [];
     let currentImportStep = 1;
 
-    // Load initial data
-    loadInitialData();
-
-    // Form submission handlers
-    $('#addLecturerForm').on('submit', handleAddLecturer);
-    $('#editLecturerForm').on('submit', handleEditLecturer);
-    
-    // Initialize search functionality
-    AjaxUtils.initSearch('searchInput', 'tableBody');
-
-    // Setup import functionality
-    setupImportFunctionality();
-    
-    // Listen for stream changes and reload data
-    window.addEventListener('streamChanged', function(event) {
-        console.log('Stream changed to:', event.detail.streamName);
-        // Reload data for the new stream
-        loadInitialData();
-    });
-
     // Load initial data from server
     function loadInitialData() {
         // Set a timeout for loading
@@ -460,8 +440,8 @@ $(document).ready(function() {
                 <tr>
                     <td colspan="4" class="text-center py-4">
                         <div class="alert alert-danger">
-                            <i class="fas fa-exclamation-circle me-2"></i>
-                            Failed to load data: ${error.message}
+                            <i class="fas fa-exclamation-triangle me-2"></i>
+                            ${AjaxUtils.escapeHtml(error.message)}
                             <button class="btn btn-sm btn-outline-danger ms-2" onclick="loadInitialData()">
                                 <i class="fas fa-redo me-1"></i>Retry
                             </button>
@@ -471,6 +451,30 @@ $(document).ready(function() {
             `;
         });
     }
+
+    // Initialize AjaxUtils (including CSRF token)
+    AjaxUtils.init();
+    
+    // Load initial data
+    loadInitialData();
+
+    // Form submission handlers
+    $('#addLecturerForm').on('submit', handleAddLecturer);
+    $('#editLecturerForm').on('submit', handleEditLecturer);
+    
+    // Initialize search functionality
+    AjaxUtils.initSearch('searchInput', 'tableBody');
+
+    // Setup import functionality
+    setupImportFunctionality();
+    
+    // Listen for stream changes and reload data
+    window.addEventListener('streamChanged', function(event) {
+        console.log('Stream changed to:', event.detail.streamName);
+        // Reload data for the new stream
+        loadInitialData();
+    });
+
 
     // Populate department dropdowns
     function populateDepartmentDropdowns() {
