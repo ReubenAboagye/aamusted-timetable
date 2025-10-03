@@ -11,6 +11,18 @@ if (isset($_GET['stream_id'])) {
 // Fallback: default = 1 (Regular)
 $active_stream = $_SESSION['active_stream'] ?? 1;
 
+// Validate stream selection
+include 'includes/stream_validation.php';
+$stream_validation = getCurrentStreamInfo($conn);
+if (!$stream_validation['valid']) {
+    // Show warning but don't redirect on dashboard
+    $stream_warning = $stream_validation['message'];
+} else {
+    // Ensure we have proper stream information for header
+    $active_stream = $stream_validation['stream_id'];
+    $current_stream_name = $stream_validation['stream_name'];
+}
+
 // Helper function to safely count rows
 function getCount($conn, $query, $stream_id = null) {
     $stmt = $conn->prepare($query);
@@ -30,16 +42,99 @@ function getCount($conn, $query, $stream_id = null) {
     return $row ? intval($row['c']) : 0;
 }
 
-// Counts per stream
-$dept_count      = getCount($conn, "SELECT COUNT(*) AS c FROM departments WHERE is_active = 1", $active_stream);
-$course_count    = getCount($conn, "SELECT COUNT(*) AS c FROM courses WHERE is_active = 1", $active_stream);
-$lect_count      = getCount($conn, "SELECT COUNT(*) AS c FROM lecturers WHERE is_active = 1", $active_stream);
-$room_count      = getCount($conn, "SELECT COUNT(*) AS c FROM rooms WHERE is_active = 1", $active_stream);
-$timetable_count = getCount($conn, "SELECT COUNT(*) AS c FROM timetable", $active_stream);
+// Counts per stream - check if tables have stream_id column
+$dept_count = 0;
+$course_count = 0;
+$lect_count = 0;
+$room_count = 0;
+
+// Check departments table
+$col = $conn->query("SHOW COLUMNS FROM departments LIKE 'stream_id'");
+$has_dept_stream = ($col && $col->num_rows > 0);
+if ($col) $col->close();
+if ($has_dept_stream) {
+    $dept_count = getCount($conn, "SELECT COUNT(*) AS c FROM departments WHERE is_active = 1 AND stream_id = ?", $active_stream);
+} else {
+    $dept_count = getCount($conn, "SELECT COUNT(*) AS c FROM departments WHERE is_active = 1");
+}
+
+// Check courses table
+$col = $conn->query("SHOW COLUMNS FROM courses LIKE 'stream_id'");
+$has_course_stream = ($col && $col->num_rows > 0);
+if ($col) $col->close();
+if ($has_course_stream) {
+    $course_count = getCount($conn, "SELECT COUNT(*) AS c FROM courses WHERE is_active = 1 AND stream_id = ?", $active_stream);
+} else {
+    $course_count = getCount($conn, "SELECT COUNT(*) AS c FROM courses WHERE is_active = 1");
+}
+
+// Check lecturers table
+$col = $conn->query("SHOW COLUMNS FROM lecturers LIKE 'stream_id'");
+$has_lect_stream = ($col && $col->num_rows > 0);
+if ($col) $col->close();
+if ($has_lect_stream) {
+    $lect_count = getCount($conn, "SELECT COUNT(*) AS c FROM lecturers WHERE is_active = 1 AND stream_id = ?", $active_stream);
+} else {
+    $lect_count = getCount($conn, "SELECT COUNT(*) AS c FROM lecturers WHERE is_active = 1");
+}
+
+// Check rooms table
+$col = $conn->query("SHOW COLUMNS FROM rooms LIKE 'stream_id'");
+$has_room_stream = ($col && $col->num_rows > 0);
+if ($col) $col->close();
+if ($has_room_stream) {
+    $room_count = getCount($conn, "SELECT COUNT(*) AS c FROM rooms WHERE is_active = 1 AND stream_id = ?", $active_stream);
+} else {
+    $room_count = getCount($conn, "SELECT COUNT(*) AS c FROM rooms WHERE is_active = 1");
+}
+
+// Count classes that need timetables (more meaningful than total timetable entries)
+$classes_count = getCount($conn, "SELECT COUNT(*) AS c FROM classes WHERE stream_id = ? AND is_active = 1", $active_stream);
+
+// Count distinct saved timetable versions (grouped by stream, version, semester)
+$saved_timetables_count = 0;
+try {
+    // Check if we have the newer schema with class_course_id
+    $col = $conn->query("SHOW COLUMNS FROM timetable LIKE 'class_course_id'");
+    $has_class_course = ($col && $col->num_rows > 0);
+    if ($col) $col->close();
+    
+    if ($has_class_course) {
+        // Newer schema: use class_course_id
+        $saved_query = "
+            SELECT COUNT(DISTINCT CONCAT(c.stream_id, '-', COALESCE(t.version, 'regular'), '-', t.semester)) AS c 
+            FROM timetable t
+            JOIN class_courses cc ON t.class_course_id = cc.id
+            JOIN classes c ON cc.class_id = c.id
+            WHERE c.stream_id = ?
+        ";
+    } else {
+        // Older schema: use class_id
+        $saved_query = "
+            SELECT COUNT(DISTINCT CONCAT(c.stream_id, '-', COALESCE(t.version, 'regular'), '-', t.semester)) AS c 
+            FROM timetable t
+            JOIN classes c ON t.class_id = c.id
+            WHERE c.stream_id = ?
+        ";
+    }
+    
+    $stmt = $conn->prepare($saved_query);
+    if ($stmt) {
+        $stmt->bind_param("i", $active_stream);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $row = $result->fetch_assoc();
+        $saved_timetables_count = $row ? intval($row['c']) : 0;
+        $stmt->close();
+    }
+} catch (Exception $e) {
+    // Fallback to 0 if there's an error
+    $saved_timetables_count = 0;
+}
 
 // Get streams dynamically
 $streams = [];
-$result = $conn->query("SELECT id, name FROM streams WHERE is_active = 1 ORDER BY id ASC");
+$result = $conn->query("SELECT id, name, is_active FROM streams ORDER BY id ASC");
 while ($row = $result->fetch_assoc()) {
     $streams[] = $row;
 }
@@ -100,6 +195,14 @@ foreach ($streams as $s) {
     padding: 0 8px;
     backdrop-filter: blur(2px);
   }
+  .count-description {
+    font-size: 0.75rem;
+    opacity: 0.8;
+    text-align: left;
+    line-height: 1.1;
+    font-weight: normal;
+    margin-top: 4px;
+  }
   .stream-select { margin: 15px 0; }
 
   /* Page header: Dashboard title on left, stream switch aligned right */
@@ -156,18 +259,38 @@ foreach ($streams as $s) {
   <div class="page-header">
     <h2>Dashboard</h2>
     <div class="stream-select">
-      <form method="get" id="streamForm">
+      <form id="streamForm">
         <label for="stream_id"><strong>Switch Stream:</strong></label>
-        <select name="stream_id" id="stream_id" onchange="document.getElementById('streamForm').submit();">
+        <select name="stream_id" id="stream_id">
           <?php foreach ($streams as $s): ?>
             <option value="<?= $s['id'] ?>" <?= ($active_stream == $s['id'] ? 'selected' : '') ?>>
-              <?= htmlspecialchars($s['name']) ?>
+              <?= htmlspecialchars($s['name']) ?><?= isset($s['is_active']) && !$s['is_active'] ? ' (inactive)' : '' ?>
             </option>
           <?php endforeach; ?>
         </select>
+        <button type="button" id="switchStreamBtn" class="btn btn-outline-primary btn-sm ms-2">Switch</button>
       </form>
     </div>
   </div>
+
+  <!-- Stream Selection Notice -->
+  <?php if (isset($stream_warning)): ?>
+    <div class="alert alert-warning alert-dismissible fade show mb-3" role="alert">
+      <div class="d-flex align-items-center">
+        <i class="fas fa-exclamation-triangle fa-2x me-3"></i>
+        <div class="flex-grow-1">
+          <h6 class="alert-heading mb-1">No Stream Selected</h6>
+          <p class="mb-2"><?= htmlspecialchars($stream_warning) ?></p>
+          <div class="btn-group" role="group">
+            <a href="streams.php" class="btn btn-sm btn-outline-warning">
+              <i class="fas fa-stream me-1"></i>Select Stream
+            </a>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+          </div>
+        </div>
+      </div>
+    </div>
+  <?php endif; ?>
 
   <!-- Dashboard Search Bar -->
   <div class="dashboard-search">
@@ -179,26 +302,29 @@ foreach ($streams as $s) {
 
   <!-- Grid Buttons -->
   <div class="row g-3 mb-3" id="dashboardGrid">
+         <div class="col-md-3">
+       <a href="generate_timetable.php" class="grid-button">
+         <i class="fas fa-calendar-plus"></i>
+         <div>Generate Timetable</div>
+         <div class="count-description">active classes</div>
+         <span class="count-circle"><?= $classes_count ?></span>
+       </a>
+     </div>
+     
+     <div class="col-md-3">
+       <a href="saved_timetable.php" class="grid-button">
+         <i class="fas fa-save"></i>
+         <div>Saved Timetables</div>
+         <div class="count-description">distinct versions</div>
+         <span class="count-circle"><?= $saved_timetables_count ?></span>
+       </a>
+     </div>
+
     <div class="col-md-3">
-      <?php if ($timetable_count > 0): ?>
-        <a href="view_timetable.php" class="grid-button">
-          <i class="fas fa-table"></i>
-          <div>View Timetable</div>
-          <span class="count-circle"><?= $timetable_count ?></span>
-        </a>
-      <?php else: ?>
-        <a href="generate_timetable.php" class="grid-button">
-          <i class="fas fa-calendar-plus"></i>
-          <div>Generate Timetable</div>
-          <span class="count-circle">0</span>
-        </a>
-      <?php endif; ?>
-    </div>
-    
-    <div class="col-md-3">
-      <a href="adddepartmentform.php" class="grid-button">
+      <a href="department.php" class="grid-button">
         <i class="fas fa-building"></i>
         <div>Departments</div>
+        <div class="count-description">active depts</div>
         <span class="count-circle"><?= $dept_count ?></span>
       </a>
     </div>
@@ -207,6 +333,7 @@ foreach ($streams as $s) {
       <a href="lecturers.php" class="grid-button">
         <i class="fas fa-chalkboard-teacher"></i>
         <div>Lecturers</div>
+        <div class="count-description">teaching staff</div>
         <span class="count-circle"><?= $lect_count ?></span>
       </a>
     </div>
@@ -215,6 +342,7 @@ foreach ($streams as $s) {
       <a href="rooms.php" class="grid-button">
         <i class="fas fa-door-open"></i>
         <div>Rooms</div>
+        <div class="count-description">available spaces</div>
         <span class="count-circle"><?= $room_count ?></span>
       </a>
     </div>
@@ -223,6 +351,7 @@ foreach ($streams as $s) {
       <a href="courses.php" class="grid-button">
         <i class="fas fa-book"></i>
         <div>Courses</div>
+        <div class="count-description">active courses</div>
         <span class="count-circle"><?= $course_count ?></span>
       </a>
     </div>
@@ -232,11 +361,11 @@ foreach ($streams as $s) {
   <div class="card">
     <div class="card-body">
       <h5 class="card-title">Dashboard Overview</h5>
-      <p class="card-text">Welcome to the University Timetable Generator! This dashboard provides quick access to the core modules for the 
+      <p class="card-text">Welcome to the AAMUSTED Timetable Generator! This dashboard provides quick access to the core modules for the 
         <strong><?= htmlspecialchars($current_stream_name) ?></strong> stream:
       </p>
       <ul class="mb-0">
-        <li><strong>Timetable:</strong> <?= ($timetable_count > 0) ? 'View existing timetables' : 'Generate new timetables'; ?></li>
+        <li><strong>Timetable:</strong> <?= ($saved_timetables_count > 0) ? 'View existing timetables' : 'Generate new timetables'; ?></li>
         <li><strong>Departments:</strong> Manage academic departments</li>
         <li><strong>Courses:</strong> Manage courses offered</li>
         <li><strong>Lecturers:</strong> Manage teaching staff</li>
@@ -271,6 +400,25 @@ foreach ($streams as $s) {
       const text = button.textContent.toLowerCase();
       button.parentElement.style.display = text.includes(searchValue) ? '' : 'none';
     });
+  });
+
+  // Switch stream button: activates selected stream (server) and reloads
+  document.getElementById('switchStreamBtn').addEventListener('click', function(){
+    const sel = document.getElementById('stream_id');
+    const streamId = sel ? sel.value : null;
+    if (!streamId) return;
+
+    fetch('change_stream.php', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'stream_id=' + encodeURIComponent(streamId)
+    }).then(r => r.json()).then(data => {
+      if (data && data.success) {
+        window.location.reload();
+      } else {
+        alert('Failed to switch stream: ' + (data.message || 'unknown'));
+      }
+    }).catch(() => { alert('Network error while switching stream'); });
   });
 </script>
 </body>

@@ -1,3 +1,8 @@
+# Use absolute path for the custom error handler to avoid include_path issues on Windows
+php_value auto_prepend_file "C:/xampp/htdocs/timetable/includes/custom_error_handler.php"
+
+# Optional: keep raw PHP notices out of JSON responses
+php_flag display_errors Off
 # Auto-prepend custom error handler so fatal/parse errors are caught and displayed
 # Ensure this path is correct relative to the webroot
 php_value auto_prepend_file "includes/custom_error_handler.php"

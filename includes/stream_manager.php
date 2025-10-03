@@ -8,6 +8,7 @@ class StreamManager {
     private $conn;
     private $current_stream_id;
     private $current_stream_name;
+    private $current_academic_year;
     
     public function __construct($conn) {
         $this->conn = $conn;
@@ -35,20 +36,60 @@ class StreamManager {
             $this->current_stream_id = $_SESSION['stream_id'];
             $_SESSION['current_stream_id'] = $this->current_stream_id;
         } else {
-            // Set default stream (Regular)
-            $this->current_stream_id = 1;
+            // Get the currently active stream from database instead of hardcoding
+            $active_stream_sql = "SELECT id FROM streams WHERE is_active = 1 LIMIT 1";
+            $active_result = $this->conn->query($active_stream_sql);
+            if ($active_result && $active_result->num_rows > 0) {
+                $active_row = $active_result->fetch_assoc();
+                $this->current_stream_id = $active_row['id'];
+            } else {
+                // Fallback to first stream if no active stream found
+                $fallback_sql = "SELECT id FROM streams ORDER BY id LIMIT 1";
+                $fallback_result = $this->conn->query($fallback_sql);
+                if ($fallback_result && $fallback_result->num_rows > 0) {
+                    $fallback_row = $fallback_result->fetch_assoc();
+                    $this->current_stream_id = $fallback_row['id'];
+                } else {
+                    $this->current_stream_id = 1; // Ultimate fallback
+                }
+            }
             $_SESSION['current_stream_id'] = $this->current_stream_id;
         }
         
         // Get stream name
         $this->loadStreamName();
+        // Initialize academic year from session or compute default
+        $this->initializeAcademicYear();
+    }
+
+    /**
+     * Initialize academic year from session or compute default
+     */
+    private function initializeAcademicYear() {
+        if (session_status() == PHP_SESSION_NONE) {
+            session_start();
+        }
+
+        if (isset($_SESSION['academic_year']) && !empty($_SESSION['academic_year'])) {
+            $this->current_academic_year = $_SESSION['academic_year'];
+        } else {
+            // Compute default academic year: if month >= Aug then current/(current+1) else (current-1)/current
+            $m = (int)date('n');
+            $y = (int)date('Y');
+            if ($m >= 8) {
+                $this->current_academic_year = $y . '/' . ($y + 1);
+            } else {
+                $this->current_academic_year = ($y - 1) . '/' . $y;
+            }
+            $_SESSION['academic_year'] = $this->current_academic_year;
+        }
     }
     
     /**
      * Load the current stream name
      */
     private function loadStreamName() {
-        $sql = "SELECT name FROM streams WHERE id = ? AND is_active = 1";
+        $sql = "SELECT name FROM streams WHERE id = ?";
         $stmt = $this->conn->prepare($sql);
         $stmt->bind_param("i", $this->current_stream_id);
         $stmt->execute();
@@ -58,7 +99,15 @@ class StreamManager {
             $row = $result->fetch_assoc();
             $this->current_stream_name = $row['name'];
         } else {
-            $this->current_stream_name = "Regular";
+            // Try to get the active stream name as fallback
+            $fallback_sql = "SELECT name FROM streams WHERE is_active = 1 LIMIT 1";
+            $fallback_result = $this->conn->query($fallback_sql);
+            if ($fallback_result && $fallback_result->num_rows > 0) {
+                $fallback_row = $fallback_result->fetch_assoc();
+                $this->current_stream_name = $fallback_row['name'];
+            } else {
+                $this->current_stream_name = "Regular";
+            }
         }
         $stmt->close();
     }
@@ -76,6 +125,13 @@ class StreamManager {
     public function getCurrentStreamName() {
         return $this->current_stream_name;
     }
+
+    /**
+     * Get current academic year
+     */
+    public function getCurrentAcademicYear() {
+        return $this->current_academic_year;
+    }
     
     /**
      * Set current stream
@@ -89,6 +145,25 @@ class StreamManager {
             $_SESSION['stream_id'] = $stream_id;
             $this->loadStreamName();
             return true;
+        }
+        return false;
+    }
+    
+    /**
+     * Sync session with currently active stream from database
+     */
+    public function syncWithActiveStream() {
+        $active_stream_sql = "SELECT id FROM streams WHERE is_active = 1 LIMIT 1";
+        $active_result = $this->conn->query($active_stream_sql);
+        if ($active_result && $active_result->num_rows > 0) {
+            $active_row = $active_result->fetch_assoc();
+            $active_stream_id = $active_row['id'];
+            
+            // Update session if different from current
+            if ($active_stream_id != $this->current_stream_id) {
+                $this->setCurrentStream($active_stream_id);
+                return true;
+            }
         }
         return false;
     }
@@ -115,10 +190,21 @@ class StreamManager {
      */
     public function addStreamFilter($sql, $table_alias = '') {
         $alias = $table_alias ? $table_alias . '.' : '';
-        // Only apply stream filter for the classes table (alias 'c' or 'classes').
-        // Other tables are considered global and should not be filtered by stream.
+        // Apply stream filter for tables that have stream_id column
         $aliasTrim = rtrim($table_alias, '.');
-        if (!in_array(strtolower($aliasTrim), ['c', 'classes'])) {
+        $streamFilteredTables = [
+            'c', 'classes',
+            'co', 'courses', 
+            'l', 'lecturers',
+            'cc', 'class_courses',
+            'lc', 'lecturer_courses',
+            't', 'timetable',
+            'p', 'programs',
+            'r', 'rooms',
+            'crt', 'course_room_types'
+        ];
+        
+        if (!in_array(strtolower($aliasTrim), $streamFilteredTables)) {
             return $sql;
         }
 
@@ -135,9 +221,21 @@ class StreamManager {
      * Get stream filter condition for manual queries
      */
     public function getStreamFilterCondition($table_alias = '') {
-        // Only return a condition for the classes table alias; otherwise return empty string
+        // Return condition for tables that have stream_id column
         $aliasTrim = rtrim($table_alias, '.');
-        if (!in_array(strtolower($aliasTrim), ['c', 'classes'])) {
+        $streamFilteredTables = [
+            'c', 'classes',
+            'co', 'courses', 
+            'l', 'lecturers',
+            'cc', 'class_courses',
+            'lc', 'lecturer_courses',
+            't', 'timetable',
+            'p', 'programs',
+            'r', 'rooms',
+            'crt', 'course_room_types'
+        ];
+        
+        if (!in_array(strtolower($aliasTrim), $streamFilteredTables)) {
             return '';
         }
         $alias = $table_alias ? $table_alias . '.' : '';
@@ -148,9 +246,13 @@ class StreamManager {
      * Check if a record belongs to current stream
      */
     public function isRecordInCurrentStream($table_name, $record_id) {
-        // Only valid for tables that have a stream_id column (we treat 'classes' as canonical here).
-        if (strtolower($table_name) !== 'classes') {
-            // Non-classes are considered global; return true so checks relying on this don't block.
+        $streamFilteredTables = [
+            'classes', 'courses', 'lecturers', 'class_courses', 
+            'lecturer_courses', 'timetable', 'programs', 'rooms', 'course_room_types'
+        ];
+        
+        if (!in_array(strtolower($table_name), $streamFilteredTables)) {
+            // Non-stream tables are considered global; return true so checks relying on this don't block.
             return true;
         }
 
@@ -232,6 +334,16 @@ if (!function_exists('getStreamFilterCondition')) {
 function getStreamFilterCondition($table_alias = '') {
     $streamManager = getStreamManager();
     return $streamManager->getStreamFilterCondition($table_alias);
+}
+}
+
+/**
+ * Helper function to sync with active stream
+ */
+if (!function_exists('syncWithActiveStream')) {
+function syncWithActiveStream() {
+    $streamManager = getStreamManager();
+    return $streamManager->syncWithActiveStream();
 }
 }
 ?>

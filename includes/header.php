@@ -1,6 +1,6 @@
 <?php
 if (!isset($pageTitle)) {
-  $pageTitle = 'University Timetable Generator';
+  $pageTitle = 'AAMUSTED Timetable Generator';
 }
 
 // Ensure session is started early (before any output) so StreamManager can use sessions
@@ -161,27 +161,68 @@ if (!isset($streams) || !is_array($streams) || empty($streams)) {
 }
 
 // --- Get current stream name if not provided by caller ---
-if (!isset($current_stream_name) || $current_stream_name === '') {
+if (!isset($current_stream_name) || empty($current_stream_name)) {
     $current_stream_name = '';
-    foreach ($streams as $s) {
-        if ($s['id'] == $active_stream) {
-            $current_stream_name = $s['name'];
-            break;
+    
+    // Check if we have active stream and streams
+    $has_active_stream = isset($active_stream) && $active_stream > 0;
+    $has_streams = !empty($streams) && is_array($streams);
+    
+    if ($has_active_stream && $has_streams) {
+        foreach ($streams as $s) {
+            if ($s['id'] == $active_stream) {
+                $current_stream_name = $s['name'];
+                break;
+            }
+        }
+    }
+    
+    // Fallback: If we still don't have a name, try to get it directly from database
+    if (empty($current_stream_name) && isset($conn) && $active_stream && $active_stream > 0) {
+        $stream_query = "SELECT name FROM streams WHERE id = ? AND is_active = 1 LIMIT 1";
+        $stmt = $conn->prepare($stream_query);
+        if ($stmt) {
+            $stmt->bind_param("i", $active_stream);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            $row = $result->fetch_assoc();
+            if ($row) {
+                $current_stream_name = $row['name'];
+            }
+            $stmt->close();
         }
     }
 }
 
-// Render any flash message (if included by pages)
-if (function_exists('flash_get')) {
+// Render any flash message (if included by pages), except on rooms.php per request
+$__current_script = basename($_SERVER['PHP_SELF'] ?? '');
+if ($__current_script !== 'rooms.php') {
+  if (function_exists('flash_get')) {
     $flash = flash_get();
     if ($flash) {
-        // Make available to the page templates; assign to the conventional variables
-        if (isset($flash['type']) && in_array($flash['type'], ['error', 'danger'])) {
-            $error_message = $flash['message'];
-        } else {
-            $success_message = $flash['message'];
-        }
+      // Make available to the page templates; assign to the conventional variables
+      if (isset($flash['type']) && in_array($flash['type'], ['error', 'danger'])) {
+        $error_message = $flash['message'];
+      } else {
+        $success_message = $flash['message'];
+      }
     }
+  }
+}
+// Include admin jobs modal so it's available across admin pages (allow disabling)
+// Temporarily disable admin jobs modal to prevent fetchJobs errors
+$show_admin_jobs_modal = false;
+if (!isset($show_admin_jobs_modal) || $show_admin_jobs_modal !== false) {
+    $adminJobsModal = __DIR__ . '/admin_jobs_modal.php';
+    if (file_exists($adminJobsModal)) {
+        include_once $adminJobsModal;
+    }
+}
+
+// Include stream selection modal component
+$streamSelectionModal = __DIR__ . '/stream_selection_modal.php';
+if (file_exists($streamSelectionModal)) {
+    include_once $streamSelectionModal;
 }
 
 // --- Helper function for counts (guard against redeclaration) ---
@@ -211,9 +252,16 @@ if (!function_exists('getCount')) {
   <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600&display=swap" rel="stylesheet" />
   <style>
     :root {
+      /* Primary brand maroon (header/cards) */
       --primary-color: #800020;
+      /* Slightly darker hover for maroon elements */
       --hover-color: #600010;
+      /* Primary action blue (Add buttons) */
+      --brand-blue: #0d6efd;
+      /* Accent / warning gold used for yellow cards */
       --accent-color: #FFD700;
+      /* Brand success green used on success buttons/cards */
+      --brand-green: #198754;
       --bg-color: #ffffff;
       --sidebar-bg: #f8f8f8;
       --footer-bg: #800020;
@@ -518,9 +566,9 @@ if (!function_exists('getCount')) {
 
     /* Theme-specific card colors matching logo: red, gold, green */
     :root {
-      --theme-red: #800020; /* primary maroon */
-      --theme-gold: #B8860B; /* dark gold accent */
-      --theme-green: #2E7D32; /* deep green */
+      --theme-red: #7a0b1c; /* primary maroon */
+      --theme-gold: #FFC107; /* gold / warning */
+      --theme-green: #198754; /* success green */
     }
 
     .bg-theme-primary { background-color: var(--theme-red) !important; color: #fff !important; }
@@ -536,14 +584,20 @@ if (!function_exists('getCount')) {
     <div class="container-fluid">
       <button id="sidebarToggle"><i class="fas fa-bars"></i></button>
       <a class="navbar-brand text-white" href="#">
-        <img src="images/aamustedLog.png" alt="AAMUSTED Logo">University Timetable Generator
+        <img src="images/aamustedLog.png" alt="AAMUSTED Logo">AAMUSTED Timetable Generator
       </a>
       <div class="mx-auto text-white" id="currentStream">
         <i class="fas fa-clock me-2"></i>Current Stream: 
-        <span class="me-2"><strong><?= htmlspecialchars($current_stream_name) ?></strong></span>
+        <?php if (!empty($current_stream_name)): ?>
+          <span class="me-2"><strong><?= htmlspecialchars($current_stream_name) ?></strong></span>
+        <?php else: ?>
+          <span class="me-2 text-warning">
+            <strong>No Stream Selected</strong>
+            <a href="index.php" class="ms-2 text-white-50">Switch Now</a>
+          </span>
+        <?php endif; ?>
       </div>
       <div class="ms-auto text-white" id="currentTime"></div>
-    </div>
   </nav>
   
   <script>
@@ -716,6 +770,15 @@ if (!function_exists('getCount')) {
 
   <!-- Bootstrap JS Bundle (includes Popper) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.2/js/bootstrap.bundle.min.js"></script>
+  
+  <!-- jQuery -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+  
+  <!-- AJAX Utilities -->
+  <script src="js/ajax-utils.js"></script>
+  
+  <!-- CSRF Token Meta Tag -->
+  <meta name="csrf-token" content="<?php echo $_SESSION['csrf_token'] ?? ''; ?>">
 
   <!-- Stream Change JavaScript -->
   <script>
@@ -730,8 +793,21 @@ if (!function_exists('getCount')) {
     .then(response => response.json())
     .then(data => {
       if (data.success) {
-        // Reload the page to show filtered data
-        window.location.reload();
+        // Update the current stream display
+        const currentStreamElement = document.querySelector('#currentStream strong');
+        if (currentStreamElement) {
+          currentStreamElement.textContent = data.stream_name;
+        }
+        
+        // Trigger custom event for pages to listen to
+        window.dispatchEvent(new CustomEvent('streamChanged', {
+          detail: { streamId: streamId, streamName: data.stream_name }
+        }));
+        
+        // Show success message
+        if (typeof showNotification === 'function') {
+          showNotification('Stream changed to ' + data.stream_name, 'success');
+        }
       } else {
         alert('Error changing stream: ' + data.message);
       }
@@ -745,20 +821,37 @@ if (!function_exists('getCount')) {
   // Set the current stream based on session
   document.addEventListener('DOMContentLoaded', function() {
     // This will be populated by PHP when the page loads
-    const currentStreamId = '<?php 
-      if (isset($conn)) {
-        include_once "includes/stream_manager.php";
-        $streamManager = getStreamManager();
-        echo $streamManager->getCurrentStreamId();
-      } else {
-        echo "1";
-      }
-    ?>';
+    const currentStreamId = '<?php echo isset($active_stream) ? $active_stream : 1; ?>';
+    const currentStreamName = '<?php echo isset($current_stream_name) ? addslashes($current_stream_name) : ""; ?>';
+    
+    // Update header display if we have stream name but it's showing "Selected"
+    const currentStreamElement = document.querySelector('#currentStream strong');
+    if (currentStreamElement && currentStreamName && currentStreamElement.textContent.trim() === 'Selected') {
+      currentStreamElement.textContent = currentStreamName;
+    }
     
     if (currentStreamId && document.getElementById('streamSelect')) {
       document.getElementById('streamSelect').value = currentStreamId;
     }
   });
+
+  // Global AJAX error handler for stream validation errors
+  function handleAjaxStreamError(response) {
+    if (response && response.action_required === 'stream_selection') {
+      // Show user-friendly modal instead of alert
+      if (typeof showStreamSelectionModal === 'function') {
+        showStreamSelectionModal(response.message);
+      } else {
+        // Fallback to simple notification with redirect option
+        const confirmed = confirm(response.message + '\n\nWould you like to go to the Dashboard to select a stream now?');
+        if (confirmed) {
+          window.location.href = 'index.php';
+        }
+      }
+      return true; // Handled
+    }
+    return false; // Not handled
+  }
   </script>
 
 

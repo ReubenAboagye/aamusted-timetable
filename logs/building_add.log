@@ -1,0 +1,8 @@
+
+---
+2025-09-05T02:22:11+02:00 REQUEST: {"action":"add_building","building_name":"New Library Block","building_code":"NLB","building_description":""}
+SUCCESS: inserted id=3
+
+---
+2025-09-05T02:23:14+02:00 REQUEST: {"action":"add_building","building_name":"CBT","building_code":"CBT","building_description":""}
+SUCCESS: inserted id=4
