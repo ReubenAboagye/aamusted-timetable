@@ -1,4 +1,7 @@
 <?php
+// Include custom error handler for better error display
+include_once 'includes/custom_error_handler.php';
+
 // Enable error reporting for debugging
 error_reporting(E_ALL);
 ini_set('display_errors', 1);

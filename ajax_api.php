@@ -1,5 +1,8 @@
 <?php
 // Centralized AJAX API Handler for the entire project
+// Include custom error handler for better error display
+include_once 'includes/custom_error_handler.php';
+
 // Ensure no output before JSON response is sent 
 ob_start();
 
@@ -261,6 +264,10 @@ function handleDepartmentActions($action, $conn) {
 
 // Course Actions
 function handleCourseActions($action, $conn) {
+    // Get current stream ID
+    $streamManager = getStreamManager();
+    $current_stream_id = $streamManager->getCurrentStreamId();
+    
     switch ($action) {
         case 'add':
             $name = sanitizeInput($_POST['name'] ?? '');
@@ -273,20 +280,20 @@ function handleCourseActions($action, $conn) {
                 sendResponse(false, 'Name, code, and department are required');
             }
             
-            // Check if course code already exists
-            $check_sql = "SELECT id FROM courses WHERE code = ?";
+            // Check if course code already exists in the current stream
+            $check_sql = "SELECT id FROM courses WHERE code = ? AND stream_id = ?";
             $check_stmt = $conn->prepare($check_sql);
-            $check_stmt->bind_param("s", $code);
+            $check_stmt->bind_param("si", $code, $current_stream_id);
             $check_stmt->execute();
             $result = $check_stmt->get_result();
             
             if ($result->num_rows > 0) {
-                sendResponse(false, 'Course code already exists');
+                sendResponse(false, 'Course code already exists in this stream');
             }
             
-            $sql = "INSERT INTO courses (name, code, department_id, hours_per_week, is_active) VALUES (?, ?, ?, ?, ?)";
+            $sql = "INSERT INTO courses (name, code, department_id, stream_id, hours_per_week, is_active) VALUES (?, ?, ?, ?, ?, ?)";
             $stmt = $conn->prepare($sql);
-            $stmt->bind_param("ssiii", $name, $code, $department_id, $hours_per_week, $is_active);
+            $stmt->bind_param("ssiiii", $name, $code, $department_id, $current_stream_id, $hours_per_week, $is_active);
             
             if ($stmt->execute()) {
                 $new_id = $conn->insert_id;
@@ -308,20 +315,20 @@ function handleCourseActions($action, $conn) {
                 sendResponse(false, 'Invalid input');
             }
             
-            // Check if course code already exists (excluding current record)
-            $check_sql = "SELECT id FROM courses WHERE code = ? AND id != ?";
+            // Check if course code already exists in the current stream (excluding current record)
+            $check_sql = "SELECT id FROM courses WHERE code = ? AND stream_id = ? AND id != ?";
             $check_stmt = $conn->prepare($check_sql);
-            $check_stmt->bind_param("si", $code, $id);
+            $check_stmt->bind_param("sii", $code, $current_stream_id, $id);
             $check_stmt->execute();
             $result = $check_stmt->get_result();
             
             if ($result->num_rows > 0) {
-                sendResponse(false, 'Course code already exists');
+                sendResponse(false, 'Course code already exists in this stream');
             }
             
-            $sql = "UPDATE courses SET name = ?, code = ?, department_id = ?, hours_per_week = ?, is_active = ? WHERE id = ?";
+            $sql = "UPDATE courses SET name = ?, code = ?, department_id = ?, hours_per_week = ?, is_active = ? WHERE id = ? AND stream_id = ?";
             $stmt = $conn->prepare($sql);
-            $stmt->bind_param("ssiiii", $name, $code, $department_id, $hours_per_week, $is_active, $id);
+            $stmt->bind_param("ssiiiii", $name, $code, $department_id, $hours_per_week, $is_active, $id, $current_stream_id);
             
             if ($stmt->execute()) {
                 sendResponse(true, 'Course updated successfully!');
@@ -337,9 +344,9 @@ function handleCourseActions($action, $conn) {
                 sendResponse(false, 'Invalid course ID');
             }
             
-            $sql = "DELETE FROM courses WHERE id = ?";
+            $sql = "DELETE FROM courses WHERE id = ? AND stream_id = ?";
             $stmt = $conn->prepare($sql);
-            $stmt->bind_param("i", $id);
+            $stmt->bind_param("ii", $id, $current_stream_id);
             
             if ($stmt->execute()) {
                 sendResponse(true, 'Course deleted successfully!');
@@ -395,15 +402,19 @@ function handleCourseActions($action, $conn) {
             $skipped_count = 0;
             $added_courses = [];
             
-            // Get existing course codes for duplicate checking
+            // Get existing course codes for duplicate checking within current stream
             $existing_codes = [];
-            $existing_sql = "SELECT code FROM courses";
-            $existing_result = $conn->query($existing_sql);
+            $existing_sql = "SELECT code FROM courses WHERE stream_id = ?";
+            $existing_stmt = $conn->prepare($existing_sql);
+            $existing_stmt->bind_param("i", $current_stream_id);
+            $existing_stmt->execute();
+            $existing_result = $existing_stmt->get_result();
             if ($existing_result) {
                 while ($row = $existing_result->fetch_assoc()) {
                     $existing_codes[strtolower($row['code'])] = true;
                 }
             }
+            $existing_stmt->close();
             
             foreach ($import_data as $course_data) {
                 $name = sanitizeInput($course_data['name'] ?? '');
@@ -440,9 +451,9 @@ function handleCourseActions($action, $conn) {
                     continue;
                 }
                 
-                $sql = "INSERT INTO courses (name, code, department_id, hours_per_week, is_active) VALUES (?, ?, ?, ?, ?)";
+                $sql = "INSERT INTO courses (name, code, department_id, stream_id, hours_per_week, is_active) VALUES (?, ?, ?, ?, ?, ?)";
                 $stmt = $conn->prepare($sql);
-                $stmt->bind_param("ssiii", $name, $code, $department_id, $hours_per_week, $is_active);
+                $stmt->bind_param("ssiiii", $name, $code, $department_id, $current_stream_id, $hours_per_week, $is_active);
                 
                 if ($stmt->execute()) {
                     $new_id = $conn->insert_id;
@@ -705,7 +716,127 @@ function handleLecturerActions($action, $conn) {
 
 // Placeholder functions for other modules (to be implemented)
 function handleProgramActions($action, $conn) {
-    sendResponse(false, 'Program actions not yet implemented');
+    // Get current stream ID
+    $streamManager = getStreamManager();
+    $current_stream_id = $streamManager->getCurrentStreamId();
+    
+    switch ($action) {
+        case 'add':
+            $name = sanitizeInput($_POST['name'] ?? '');
+            $code = sanitizeInput($_POST['code'] ?? '');
+            $department_id = (int)($_POST['department_id'] ?? 0);
+            $duration = (int)($_POST['duration'] ?? 4);
+            
+            if (empty($name) || empty($code) || $department_id <= 0) {
+                sendResponse(false, 'Name, code, and department are required');
+            }
+            
+            // Check if program code already exists in the current stream
+            $check_sql = "SELECT id FROM programs WHERE code = ? AND stream_id = ?";
+            $check_stmt = $conn->prepare($check_sql);
+            $check_stmt->bind_param("si", $code, $current_stream_id);
+            $check_stmt->execute();
+            $result = $check_stmt->get_result();
+            
+            if ($result->num_rows > 0) {
+                sendResponse(false, 'Program code already exists in this stream');
+            }
+            
+            $sql = "INSERT INTO programs (name, code, department_id, stream_id, duration_years) VALUES (?, ?, ?, ?, ?)";
+            $stmt = $conn->prepare($sql);
+            $stmt->bind_param("ssiii", $name, $code, $department_id, $current_stream_id, $duration);
+            
+            if ($stmt->execute()) {
+                $new_id = $conn->insert_id;
+                sendResponse(true, 'Program added successfully!', ['id' => $new_id]);
+            } else {
+                sendResponse(false, 'Error adding program: ' . $stmt->error);
+            }
+            break;
+            
+        case 'edit':
+            $id = (int)($_POST['id'] ?? 0);
+            $name = sanitizeInput($_POST['name'] ?? '');
+            $code = sanitizeInput($_POST['code'] ?? '');
+            $department_id = (int)($_POST['department_id'] ?? 0);
+            $duration = (int)($_POST['duration'] ?? 4);
+            
+            if ($id <= 0 || empty($name) || empty($code) || $department_id <= 0) {
+                sendResponse(false, 'Invalid input');
+            }
+            
+            // Check if program code already exists in the current stream (excluding current record)
+            $check_sql = "SELECT id FROM programs WHERE code = ? AND stream_id = ? AND id != ?";
+            $check_stmt = $conn->prepare($check_sql);
+            $check_stmt->bind_param("sii", $code, $current_stream_id, $id);
+            $check_stmt->execute();
+            $result = $check_stmt->get_result();
+            
+            if ($result->num_rows > 0) {
+                sendResponse(false, 'Program code already exists in this stream');
+            }
+            
+            $sql = "UPDATE programs SET name = ?, code = ?, department_id = ?, duration_years = ? WHERE id = ? AND stream_id = ?";
+            $stmt = $conn->prepare($sql);
+            $stmt->bind_param("ssiiii", $name, $code, $department_id, $duration, $id, $current_stream_id);
+            
+            if ($stmt->execute()) {
+                sendResponse(true, 'Program updated successfully!');
+            } else {
+                sendResponse(false, 'Error updating program: ' . $stmt->error);
+            }
+            break;
+            
+        case 'delete':
+            $id = (int)($_POST['id'] ?? 0);
+            
+            if ($id <= 0) {
+                sendResponse(false, 'Invalid program ID');
+            }
+            
+            $sql = "DELETE FROM programs WHERE id = ? AND stream_id = ?";
+            $stmt = $conn->prepare($sql);
+            $stmt->bind_param("ii", $id, $current_stream_id);
+            
+            if ($stmt->execute()) {
+                sendResponse(true, 'Program deleted successfully!');
+            } else {
+                sendResponse(false, 'Error deleting program: ' . $stmt->error);
+            }
+            break;
+            
+        case 'get_list':
+            $sql = "SELECT p.*, d.name as department_name FROM programs p LEFT JOIN departments d ON p.department_id = d.id WHERE p.stream_id = ? ORDER BY p.code";
+            $stmt = $conn->prepare($sql);
+            $stmt->bind_param("i", $current_stream_id);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            
+            $programs = [];
+            while ($row = $result->fetch_assoc()) {
+                $programs[] = $row;
+            }
+            
+            sendResponse(true, 'Programs retrieved successfully', $programs);
+            break;
+            
+        case 'get_departments':
+            $sql = "SELECT id, name FROM departments WHERE is_active = 1 ORDER BY name";
+            $result = $conn->query($sql);
+            
+            $departments = [];
+            if ($result) {
+                while ($row = $result->fetch_assoc()) {
+                    $departments[] = $row;
+                }
+            }
+            
+            sendResponse(true, 'Departments retrieved successfully', $departments);
+            break;
+            
+        default:
+            sendResponse(false, 'Invalid program action');
+    }
 }
 
 function handleClassActions($action, $conn) {

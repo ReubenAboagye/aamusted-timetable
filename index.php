@@ -1,4 +1,7 @@
 <?php
+// Include custom error handler for better error display
+include_once 'includes/custom_error_handler.php';
+
 session_start();
 include 'connect.php';
 
