@@ -36,7 +36,9 @@ if (!function_exists('redirect_with_flash')) {
         } else {
             // Attempt a safe client-side redirect while preserving the flash in session
             $escaped = htmlspecialchars($location, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
-            echo '<!doctype html><html><head><meta charset="utf-8"><title>Redirecting</title>';
+            echo '<!doctype html><html><head><meta charset="utf-8"><title>AAMUSTED - Redirecting</title>';
+            echo '<link rel="icon" type="image/x-icon" href="/timetable/images/aamustedLog.ico">';
+            echo '<link rel="shortcut icon" type="image/x-icon" href="/timetable/images/aamustedLog.ico">';
             echo '<meta http-equiv="refresh" content="0;url=' . $escaped . '">';
             echo '<script>try{window.location.replace(' . json_encode($location) . ');}catch(e){window.location.href=' . json_encode($location) . ';}</script>';
             echo '</head><body><p>Redirecting... If you are not redirected, <a href="' . $escaped . '">click here</a>.</p></body></html>';

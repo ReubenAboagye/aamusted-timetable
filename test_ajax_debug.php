@@ -38,7 +38,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <!DOCTYPE html>
 <html>
 <head>
-    <title>AJAX Test</title>
+    <title>AAMUSTED - AJAX Test</title>
+    <!-- Favicon -->
+    <link rel="icon" type="image/x-icon" href="/timetable/images/aamustedLog.ico">
+    <link rel="shortcut icon" type="image/x-icon" href="/timetable/images/aamustedLog.ico">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
     <script src="js/ajax-utils.js"></script>
     <meta name="csrf-token" content="<?php echo $_SESSION['csrf_token']; ?>">

@@ -1,6 +1,11 @@
 <?php
 if (!isset($pageTitle)) {
   $pageTitle = 'AAMUSTED Timetable Generator';
+} else {
+  // Format page title with AAMUSTED prefix if not already present
+  if (strpos($pageTitle, 'AAMUSTED -') !== 0) {
+    $pageTitle = 'AAMUSTED - ' . $pageTitle;
+  }
 }
 
 // Ensure session is started early (before any output) so StreamManager can use sessions
@@ -244,6 +249,13 @@ if (!function_exists('getCount')) {
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title><?php echo htmlspecialchars($pageTitle); ?></title>
+  <!-- Favicon with cache busting -->
+  <link rel="icon" type="image/x-icon" href="/timetable/images/aamustedLog.ico?v=<?php echo time(); ?>">
+  <link rel="shortcut icon" type="image/x-icon" href="/timetable/images/aamustedLog.ico?v=<?php echo time(); ?>">
+  <link rel="apple-touch-icon" href="/timetable/images/aamustedLog.ico?v=<?php echo time(); ?>">
+  <!-- Additional favicon formats for better compatibility -->
+  <link rel="icon" sizes="16x16" type="image/x-icon" href="/timetable/images/aamustedLog.ico?v=<?php echo time(); ?>">
+  <link rel="icon" sizes="32x32" type="image/x-icon" href="/timetable/images/aamustedLog.ico?v=<?php echo time(); ?>">
   <!-- Bootstrap CSS -->
   <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.2/css/bootstrap.min.css" rel="stylesheet" />
   <!-- Font Awesome -->

@@ -27,7 +27,9 @@ if (!defined('CUSTOM_ERROR_HANDLER_LOADED')) {
             http_response_code(500);
 
             // Simple HTML error card matching app styles (no dependencies)
-            echo "<!doctype html><html><head><meta charset=\"utf-8\"><title>Application Error</title>";
+            echo "<!doctype html><html><head><meta charset=\"utf-8\"><title>AAMUSTED - Application Error</title>";
+            echo '<link rel="icon" type="image/x-icon" href="/timetable/images/aamustedLog.ico">';
+            echo '<link rel="shortcut icon" type="image/x-icon" href="/timetable/images/aamustedLog.ico">';
             // Use CDN bootstrap so the error page still looks decent even when static paths break
             echo "<link rel=\"stylesheet\" href=\"https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.2/css/bootstrap.min.css\">";
             echo "</head><body style=\"padding:20px;font-family:Arial,Helvetica,sans-serif\">";
