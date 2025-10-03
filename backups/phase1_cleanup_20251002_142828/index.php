@@ -17,10 +17,6 @@ $stream_validation = getCurrentStreamInfo($conn);
 if (!$stream_validation['valid']) {
     // Show warning but don't redirect on dashboard
     $stream_warning = $stream_validation['message'];
-} else {
-    // Ensure we have proper stream information for header
-    $active_stream = $stream_validation['stream_id'];
-    $current_stream_name = $stream_validation['stream_name'];
 }
 
 // Helper function to safely count rows
@@ -273,22 +269,13 @@ foreach ($streams as $s) {
     </div>
   </div>
 
-  <!-- Stream Selection Notice -->
+  <!-- Stream Warning -->
   <?php if (isset($stream_warning)): ?>
     <div class="alert alert-warning alert-dismissible fade show mb-3" role="alert">
-      <div class="d-flex align-items-center">
-        <i class="fas fa-exclamation-triangle fa-2x me-3"></i>
-        <div class="flex-grow-1">
-          <h6 class="alert-heading mb-1">No Stream Selected</h6>
-          <p class="mb-2"><?= htmlspecialchars($stream_warning) ?></p>
-          <div class="btn-group" role="group">
-            <a href="streams.php" class="btn btn-sm btn-outline-warning">
-              <i class="fas fa-stream me-1"></i>Select Stream
-            </a>
-            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-          </div>
-        </div>
-      </div>
+      <i class="fas fa-exclamation-triangle me-2"></i>
+      <strong>Stream Selection Required:</strong> <?= htmlspecialchars($stream_warning) ?>
+      <a href="streams.php" class="btn btn-sm btn-outline-warning ms-2">Select Stream</a>
+      <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
     </div>
   <?php endif; ?>
 

@@ -16,7 +16,7 @@ window.AjaxUtils = {
     // CSRF token management
     csrfToken: null,
 
-    // Enhanced AJAX call with retry functionality
+    // Enhanced AJAX call with retry functionality and stream validation handling
     makeRequest: function(module, action, data = {}, retries = this.config.retryAttempts, customUrl = null) {
         const formData = new FormData();
         formData.append('module', module);
@@ -53,7 +53,18 @@ window.AjaxUtils = {
             
             return response.text().then(text => {
                 try {
-                    return JSON.parse(text);
+                    const parsed = JSON.parse(text);
+                    
+                    // Check for stream validation errors
+                    if (parsed && parsed.action_required === 'stream_selection') {
+                        // Trigger global stream validation handler
+                        if (typeof window.handleAjaxStreamError === 'function') {
+                            window.handleAjaxStreamError(parsed);
+                        }
+                        throw new Error(parsed.message || 'Stream selection required');
+                    }
+                    
+                    return parsed;
                 } catch (e) {
                     console.error('Invalid JSON response:', text);
                     throw new Error('Invalid JSON response: ' + text.substring(0, 100));
