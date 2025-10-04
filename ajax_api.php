@@ -133,24 +133,20 @@ function handleDepartmentActions($action, $conn) {
                 sendResponse(false, 'Name and code are required');
             }
             
-            // Get current stream ID
-            $streamManager = getStreamManager();
-            $current_stream_id = $streamManager->getCurrentStreamId();
-            
-            // Check if department code already exists in current stream
-            $check_sql = "SELECT id FROM departments WHERE code = ? AND stream_id = ?";
+            // Check if department code already exists
+            $check_sql = "SELECT id FROM departments WHERE code = ?";
             $check_stmt = $conn->prepare($check_sql);
-            $check_stmt->bind_param("si", $code, $current_stream_id);
+            $check_stmt->bind_param("s", $code);
             $check_stmt->execute();
             $result = $check_stmt->get_result();
             
             if ($result->num_rows > 0) {
-                sendResponse(false, 'Department code already exists in this stream');
+                sendResponse(false, 'Department code already exists');
             }
             
-            $sql = "INSERT INTO departments (name, code, stream_id, is_active) VALUES (?, ?, ?, ?)";
+            $sql = "INSERT INTO departments (name, code, is_active) VALUES (?, ?, ?)";
             $stmt = $conn->prepare($sql);
-            $stmt->bind_param("ssii", $name, $code, $current_stream_id, $is_active);
+            $stmt->bind_param("ssi", $name, $code, $is_active);
             
             if ($stmt->execute()) {
                 $new_id = $conn->insert_id;
@@ -170,24 +166,20 @@ function handleDepartmentActions($action, $conn) {
                 sendResponse(false, 'Invalid input');
             }
             
-            // Get current stream ID
-            $streamManager = getStreamManager();
-            $current_stream_id = $streamManager->getCurrentStreamId();
-            
-            // Check if department code already exists in current stream (excluding current record)
-            $check_sql = "SELECT id FROM departments WHERE code = ? AND stream_id = ? AND id != ?";
+            // Check if department code already exists (excluding current record)
+            $check_sql = "SELECT id FROM departments WHERE code = ? AND id != ?";
             $check_stmt = $conn->prepare($check_sql);
-            $check_stmt->bind_param("sii", $code, $current_stream_id, $id);
+            $check_stmt->bind_param("si", $code, $id);
             $check_stmt->execute();
             $result = $check_stmt->get_result();
             
             if ($result->num_rows > 0) {
-                sendResponse(false, 'Department code already exists in this stream');
+                sendResponse(false, 'Department code already exists');
             }
             
-            $sql = "UPDATE departments SET name = ?, code = ?, stream_id = ?, is_active = ? WHERE id = ?";
+            $sql = "UPDATE departments SET name = ?, code = ?, is_active = ? WHERE id = ?";
             $stmt = $conn->prepare($sql);
-            $stmt->bind_param("ssiii", $name, $code, $current_stream_id, $is_active, $id);
+            $stmt->bind_param("ssii", $name, $code, $is_active, $id);
             
             if ($stmt->execute()) {
                 sendResponse(true, 'Department updated successfully!');
@@ -203,25 +195,21 @@ function handleDepartmentActions($action, $conn) {
                 sendResponse(false, 'Invalid department ID');
             }
             
-            // Get current stream ID
-            $streamManager = getStreamManager();
-            $current_stream_id = $streamManager->getCurrentStreamId();
-            
-            // Check if department has associated courses in current stream
-            $check_sql = "SELECT COUNT(*) as count FROM courses WHERE department_id = ? AND stream_id = ?";
+            // Check if department has associated courses
+            $check_sql = "SELECT COUNT(*) as count FROM courses WHERE department_id = ?";
             $check_stmt = $conn->prepare($check_sql);
-            $check_stmt->bind_param("ii", $id, $current_stream_id);
+            $check_stmt->bind_param("i", $id);
             $check_stmt->execute();
             $result = $check_stmt->get_result();
             $row = $result->fetch_assoc();
             
             if ($row['count'] > 0) {
-                sendResponse(false, 'Cannot delete department with associated courses in current stream');
+                sendResponse(false, 'Cannot delete department with associated courses');
             }
             
-            $sql = "DELETE FROM departments WHERE id = ? AND stream_id = ?";
+            $sql = "DELETE FROM departments WHERE id = ?";
             $stmt = $conn->prepare($sql);
-            $stmt->bind_param("ii", $id, $current_stream_id);
+            $stmt->bind_param("i", $id);
             
             if ($stmt->execute()) {
                 sendResponse(true, 'Department deleted successfully!');
@@ -231,28 +219,22 @@ function handleDepartmentActions($action, $conn) {
             break;
             
         case 'get_list':
-            // Departments are now stream-specific - filter by current stream
-            $streamManager = getStreamManager();
-            $current_stream_id = $streamManager->getCurrentStreamId();
-            
+            // Departments are global - they should not be filtered by stream
+            // Only courses and programs are stream-specific
             $sql = "SELECT d.*, COUNT(c.id) as course_count FROM departments d LEFT JOIN courses c ON d.id = c.department_id";
             
-            // Check if departments table has stream_id column
-            $col = $conn->query("SHOW COLUMNS FROM departments LIKE 'stream_id'");
-            $has_dept_stream = ($col && $col->num_rows > 0);
-            if ($col) $col->close();
-            
-            // Check if courses table has stream_id column
+            // Check if courses table has stream_id column for course counting
             $col = $conn->query("SHOW COLUMNS FROM courses LIKE 'stream_id'");
             $has_course_stream = ($col && $col->num_rows > 0);
             if ($col) $col->close();
             
-            if ($has_dept_stream) {
-                $sql .= " WHERE d.stream_id = " . intval($current_stream_id);
-            }
+            // Get current stream for course counting (but don't filter departments)
+            $streamManager = getStreamManager();
+            $current_stream_id = $streamManager->getCurrentStreamId();
             
             if ($has_course_stream) {
-                $sql .= ($has_dept_stream ? " AND" : " WHERE") . " (c.stream_id = " . intval($current_stream_id) . " OR c.id IS NULL)";
+                // Count only courses in the current stream, but show all departments
+                $sql .= " AND (c.stream_id = " . intval($current_stream_id) . " OR c.id IS NULL)";
             }
             
             $sql .= " GROUP BY d.id ORDER BY d.name";
