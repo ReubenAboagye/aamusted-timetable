@@ -101,12 +101,15 @@ try {
         $check_code_stmt->close();
 
         // Insert the program
-        $sql = "INSERT INTO programs (name, department_id, code, duration_years, is_active) VALUES (?, ?, ?, ?, ?)";
+        $sql = "INSERT INTO programs (name, department_id, code, duration_years, is_active, stream_id) VALUES (?, ?, ?, ?, ?, ?)";
         $stmt = $conn->prepare($sql);
         if (!$stmt) {
             throw new Exception("Database error: " . $conn->error);
         }
-        $stmt->bind_param("sisii", $name, $department_id, $code, $duration, $is_active);
+        
+        // Get current stream_id from session or default to 1
+        $current_stream_id = $_SESSION['current_stream_id'] ?? 1;
+        $stmt->bind_param("sisiii", $name, $department_id, $code, $duration, $is_active, $current_stream_id);
         
         if ($stmt->execute()) {
             $new_id = $conn->insert_id;
@@ -148,12 +151,15 @@ try {
         $is_active = isset($_POST['is_active']) ? 1 : 0;
 
         // Simple update without complex validation for now
-        $sql = "UPDATE programs SET name = ?, department_id = ?, code = ?, duration_years = ? WHERE id = ?";
+        $sql = "UPDATE programs SET name = ?, department_id = ?, code = ?, duration_years = ? WHERE id = ? AND stream_id = ?";
         $stmt = $conn->prepare($sql);
         if (!$stmt) {
             throw new Exception("Database error: " . $conn->error);
         }
-        $stmt->bind_param("sisii", $name, $department_id, $code, $duration, $id);
+        
+        // Get current stream_id from session or default to 1
+        $current_stream_id = $_SESSION['current_stream_id'] ?? 1;
+        $stmt->bind_param("sisiii", $name, $department_id, $code, $duration, $id, $current_stream_id);
         
         if ($stmt->execute()) {
             $stmt->close();
@@ -184,14 +190,17 @@ try {
         }
 
         $id = (int)$_POST['id'];
+        
+        // Get current stream_id from session or default to 1
+        $current_stream_id = $_SESSION['current_stream_id'] ?? 1;
 
-        // Soft delete: set is_active = 0
-        $sql = "UPDATE programs SET is_active = 0 WHERE id = ?";
+        // Soft delete: set is_active = 0, but only for the current stream
+        $sql = "UPDATE programs SET is_active = 0 WHERE id = ? AND stream_id = ?";
         $stmt = $conn->prepare($sql);
         if (!$stmt) {
             throw new Exception("Database error: " . $conn->error);
         }
-        $stmt->bind_param("i", $id);
+        $stmt->bind_param("ii", $id, $current_stream_id);
         
         if ($stmt->execute()) {
             $stmt->close();
@@ -204,13 +213,22 @@ try {
         $stmt->close();
 
     } elseif ($action === 'get_programs') {
-        // Get all active programs with department names
+        // Get current stream_id from session or default to 1
+        $current_stream_id = $_SESSION['current_stream_id'] ?? 1;
+        
+        // Get all active programs with department names for current stream
         $sql = "SELECT p.*, d.name as department_name 
                 FROM programs p 
                 LEFT JOIN departments d ON p.department_id = d.id 
-                WHERE p.is_active = 1 
+                WHERE p.is_active = 1 AND p.stream_id = ?
                 ORDER BY p.name";
-        $result = $conn->query($sql);
+        $stmt = $conn->prepare($sql);
+        if (!$stmt) {
+            throw new Exception("Database error: " . $conn->error);
+        }
+        $stmt->bind_param("i", $current_stream_id);
+        $stmt->execute();
+        $result = $stmt->get_result();
         
         if (!$result) {
             throw new Exception("Error fetching programs: " . $conn->error);
