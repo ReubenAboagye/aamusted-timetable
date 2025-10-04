@@ -200,7 +200,7 @@ $conn->close();
                                             <tr>
                                                 <td>
                                                     <span class="badge bg-primary">
-                                                        <?= ucfirst($record['table_name']) ?> (Stream <?= $current_stream_id ?>)
+                                                        <?= ucfirst($record['table_name']) ?>
                                                     </span>
                                                 </td>
                                                 <td><?= htmlspecialchars($record['name']) ?></td>
