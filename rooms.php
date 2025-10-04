@@ -1270,7 +1270,7 @@ document.addEventListener('DOMContentLoaded', function() {
         
         rows.forEach(row => {
             const text = row.textContent.toLowerCase();
-            const statusCell = row.querySelector('td:nth-child(6)'); // Updated column index
+            const statusCell = row.querySelector('td:nth-child(5)'); // Status column is 5th
             const isActive = statusCell && statusCell.textContent.includes('Active');
             
             let showBySearch = text.includes(searchTerm);
