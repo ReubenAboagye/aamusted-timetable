@@ -4,6 +4,9 @@
  * Extracted from generate_timetable.php for API use
  */
 
+// Include semester helper for consistent semester handling
+require_once __DIR__ . '/includes/semester_helper.php';
+
 /**
  * Schedule unscheduled classes in available slots after GA generation
  * @param mysqli $conn Database connection
@@ -26,7 +29,7 @@ function scheduleUnscheduledClasses($conn, $stream_id, $semester, $version = nul
                 ORDER BY t.created_at DESC
                 LIMIT 1
             ";
-            $semester_param = is_numeric($semester) ? (($semester == 1) ? 'first' : 'second') : $semester;
+            $semester_param = normalizeSemester($semester);
             $stmt = $conn->prepare($version_query);
             $stmt->bind_param("is", $stream_id, $semester_param);
             $stmt->execute();

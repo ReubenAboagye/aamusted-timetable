@@ -231,7 +231,12 @@ class DBLoader {
     private function loadLecturerCourses($streamId = null) {
         $sql = "SELECT lc.id, lc.lecturer_id, lc.course_id, lc.is_active 
                 FROM lecturer_courses lc 
-                WHERE lc.is_active = 1";
+                JOIN courses c ON lc.course_id = c.id
+                WHERE lc.is_active = 1 AND c.is_active = 1";
+        
+        if ($streamId) {
+            $sql .= " AND c.stream_id = " . intval($streamId);
+        }
         
         return $this->fetchAll($sql);
     }
@@ -248,22 +253,34 @@ class DBLoader {
     }
 
     private function loadCourses($streamId = null) {
-        $sql = "SELECT id, code, name, department_id, credits, hours_per_week, is_active 
+        $sql = "SELECT id, code, name, department_id, credits, hours_per_week, is_active, stream_id 
                 FROM courses WHERE is_active = 1";
+        
+        if ($streamId) {
+            $sql .= " AND stream_id = " . intval($streamId);
+        }
         
         return $this->fetchAll($sql);
     }
 
     private function loadLecturers($streamId = null) {
-        $sql = "SELECT id, name, department_id, is_active 
+        $sql = "SELECT id, name, department_id, is_active, stream_id 
                 FROM lecturers WHERE is_active = 1";
+        
+        if ($streamId) {
+            $sql .= " AND stream_id = " . intval($streamId);
+        }
         
         return $this->fetchAll($sql);
     }
 
     private function loadRooms($streamId = null) {
-        $sql = "SELECT id, name, room_type, capacity, building_id, is_active 
+        $sql = "SELECT id, name, room_type, capacity, building_id, is_active, stream_id 
                 FROM rooms WHERE is_active = 1";
+        
+        if ($streamId) {
+            $sql .= " AND stream_id = " . intval($streamId);
+        }
         
         return $this->fetchAll($sql);
     }
@@ -382,8 +399,12 @@ class DBLoader {
     }
 
     private function loadPrograms($streamId = null) {
-        $sql = "SELECT id, department_id, name, code, description, duration_years, is_active 
+        $sql = "SELECT id, department_id, name, code, description, duration_years, is_active, stream_id 
                 FROM programs WHERE is_active = 1";
+        
+        if ($streamId) {
+            $sql .= " AND stream_id = " . intval($streamId);
+        }
         
         return $this->fetchAll($sql);
     }

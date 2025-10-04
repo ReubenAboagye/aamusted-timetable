@@ -7,6 +7,8 @@ set_time_limit(1800);                // Alternative way to set execution time
 include 'connect.php';
 // Ensure flash helper is available for PRG redirects
 if (file_exists(__DIR__ . '/includes/flash.php')) include_once __DIR__ . '/includes/flash.php';
+// Include semester helper for consistent semester handling
+require_once __DIR__ . '/includes/semester_helper.php';
 
 // Include genetic algorithm components
 require_once __DIR__ . '/ga/GeneticAlgorithm.php';
@@ -103,20 +105,14 @@ if (isset($_GET['version']) && !empty($_GET['version'])) {
 // Check if we have form data or URL parameters
 if (isset($_POST['semester']) && !empty($_POST['semester'])) {
     $semester_input = $_POST['semester'];
-    if ($semester_input === 'first' || $semester_input === '1') {
-        $current_semester = 1;
-    } elseif ($semester_input === 'second' || $semester_input === '2') {
-        $current_semester = 2;
+    $current_semester = semesterToNumeric($semester_input);
     }
 }
 
 // Also check URL parameters for when page is redirected after generation
 if (isset($_GET['semester']) && !empty($_GET['semester'])) {
     $semester_param = $_GET['semester'];
-    if ($semester_param === 'first' || $semester_param === '1') {
-        $current_semester = 1;
-    } elseif ($semester_param === 'second' || $semester_param === '2') {
-        $current_semester = 2;
+    $current_semester = semesterToNumeric($semester_param);
     }
 }
 
@@ -133,11 +129,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         
         // Convert semester to integer for genetic algorithm
         $semester_int = 0;
-        if ($semester === '1' || strtolower($semester) === 'first' || strtolower($semester) === 'semester 1') {
-            $semester_int = 1;
-        } elseif ($semester === '2' || strtolower($semester) === 'second' || strtolower($semester) === 'semester 2') {
-            $semester_int = 2;
-        }
+        $semester_int = semesterToNumeric($semester);
         
         // Get stream name for version naming
         $stream_name = getStreamName($conn, $stream_id);
@@ -204,24 +196,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'statistics' => $results['statistics']
                     ];
                     
-                    // Validate solution for duplicates before conversion
-                    $duplicateCheck = validateSolutionForDuplicates($results['solution']);
-                    if (!empty($duplicateCheck['duplicates'])) {
-                        error_log("Duplicate entries found in GA solution: " . implode(', ', $duplicateCheck['duplicates']));
-                        // Log the problematic entries for debugging
-                        foreach ($duplicateCheck['duplicate_entries'] as $entry) {
-                            error_log("Duplicate entry: " . json_encode($entry));
-                        }
-                    }
-                    
                     // Convert solution to database format
                     $timetableEntries = $ga->convertToDatabaseFormat($results['solution']);
-                    
-                    // Additional validation after conversion
-                    $convertedDuplicates = validateTimetableEntries($timetableEntries);
-                    if (!empty($convertedDuplicates)) {
-                        error_log("Duplicates found after conversion: " . implode(', ', $convertedDuplicates));
-                    }
                     
                     // Insert into database
                     $inserted_count = insertTimetableEntries($conn, $timetableEntries, $version);
@@ -258,7 +234,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             ) as conflicts
                         ";
                         
-                        $semester_param = is_numeric($semester_int) ? (($semester_int == 1) ? 'first' : 'second') : $semester_int;
+                        // Also check for cross-version conflicts (same lecturer, same time, different versions)
+                        $cross_version_conflict_query = "
+                            SELECT COUNT(*) as cross_version_conflict_count
+                            FROM (
+                                SELECT lc.lecturer_id, t.day_id, t.time_slot_id
+                                FROM timetable t
+                                JOIN lecturer_courses lc ON t.lecturer_course_id = lc.id
+                                WHERE t.semester = ? AND t.academic_year = ? AND t.version != ?
+                                GROUP BY lc.lecturer_id, t.day_id, t.time_slot_id
+                                HAVING COUNT(*) > 1
+                            ) as cross_conflicts
+                        ";
+                        
+                        $semester_param = normalizeSemester($semester_int);
                         $academic_year = '2025/2026';
                         
                         $stmt = $conn->prepare($conflict_query);
@@ -270,8 +259,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         }
                         $stmt->close();
                         
+                        // Check cross-version conflicts
+                        $crossVersionConflictCount = 0;
+                        $stmt2 = $conn->prepare($cross_version_conflict_query);
+                        $stmt2->bind_param("sss", $semester_param, $academic_year, $version);
+                        $stmt2->execute();
+                        $result2 = $stmt2->get_result();
+                        if ($row2 = $result2->fetch_assoc()) {
+                            $crossVersionConflictCount = $row2['cross_version_conflict_count'];
+                        }
+                        $stmt2->close();
+                        
                         if ($conflictCount > 0) {
                             $msg .= " <strong>Note:</strong> $conflictCount lecturer conflicts detected in this version. <a href='lecturer_conflicts.php?version=" . urlencode($version) . "' class='alert-link'>Review and resolve conflicts</a>";
+                        }
+                        
+                        if ($crossVersionConflictCount > 0) {
+                            $msg .= " <strong>Warning:</strong> $crossVersionConflictCount cross-version lecturer conflicts detected. <a href='lecturer_conflicts.php' class='alert-link'>Review all conflicts</a>";
                         }
                         
                         if (function_exists('redirect_with_flash')) {
@@ -287,7 +291,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 
             } catch (Exception $e) {
-                $error_message = 'Timetable generation failed: ' . $e->getMessage();
+                // Log detailed error information
+                error_log("Timetable generation error: " . $e->getMessage() . " in " . $e->getFile() . ":" . $e->getLine());
+                error_log("Stack trace: " . $e->getTraceAsString());
+                
+                // Provide user-friendly error message
+                $error_message = 'Timetable generation failed. ';
+                
+                // Check for specific error types
+                if (strpos($e->getMessage(), 'memory') !== false) {
+                    $error_message .= 'Insufficient memory. Please try with a smaller dataset or increase memory limit.';
+                } elseif (strpos($e->getMessage(), 'timeout') !== false) {
+                    $error_message .= 'Generation timed out. Please try with fewer generations or increase time limit.';
+                } elseif (strpos($e->getMessage(), 'database') !== false) {
+                    $error_message .= 'Database error occurred. Please check your database connection and try again.';
+                } elseif (strpos($e->getMessage(), 'constraint') !== false) {
+                    $error_message .= 'Constraint violation detected. Please check your data for conflicts.';
+                } else {
+                    $error_message .= 'An unexpected error occurred. Please try again or contact support.';
+                }
+                
+                // Add technical details for debugging (only in development)
+                if (defined('DEBUG_MODE') && DEBUG_MODE) {
+                    $error_message .= ' Technical details: ' . $e->getMessage();
+                }
             }
         }
     }
@@ -303,7 +330,7 @@ function versionExists($conn, $stream_id, $semester, $version) {
         WHERE c.stream_id = ? AND t.semester = ? AND t.version = ?
     ";
     
-    $semester_param = is_numeric($semester) ? (($semester == 1) ? 'first' : 'second') : $semester;
+    $semester_param = normalizeSemester($semester);
     
     $stmt = $conn->prepare($query);
     $stmt->bind_param("iss", $stream_id, $semester_param, $version);
@@ -348,7 +375,7 @@ function generateStreamBasedVersion($conn, $stream_id, $semester, $stream_name) 
         ORDER BY t.version DESC
     ";
     
-    $semester_param = is_numeric($semester) ? (($semester == 1) ? 'first' : 'second') : $semester;
+    $semester_param = normalizeSemester($semester);
     
     $stmt = $conn->prepare($query);
     $stmt->bind_param("is", $stream_id, $semester_param);
@@ -572,7 +599,7 @@ function insertTimetableEntries($conn, $entries, $version = 'regular') {
         // Normalize semester for enum schemas: map numeric to names if needed
         $semesterVal = $entry['semester'] ?? '';
         if (is_numeric($semesterVal)) {
-            $semesterVal = ((int)$semesterVal === 1) ? 'first' : (((int)$semesterVal === 2) ? 'second' : (string)$semesterVal);
+            $semesterVal = normalizeSemester($semesterVal);
         } else {
             $sv = strtolower((string)$semesterVal);
             if ($sv === '1' || $sv === 'first' || $sv === 'semester 1') { $semesterVal = 'first'; }
@@ -658,7 +685,7 @@ function insertTimetableEntries($conn, $entries, $version = 'regular') {
                     // Individual insert logic here (simplified version)
                     $semesterVal = $entry['semester'] ?? '';
                     if (is_numeric($semesterVal)) {
-                        $semesterVal = ((int)$semesterVal === 1) ? 'first' : (((int)$semesterVal === 2) ? 'second' : (string)$semesterVal);
+                        $semesterVal = normalizeSemester($semesterVal);
                     } else {
                         $sv = strtolower((string)$semesterVal);
                         if ($sv === '1' || $sv === 'first' || $sv === 'semester 1') { $semesterVal = 'first'; }
@@ -809,54 +836,6 @@ function validateBatchForLecturerConflicts($batch, $conn) {
     return $conflicts; // Return conflicts for optional handling
 }
 
-/**
- * Validate GA solution for duplicate entries
- */
-function validateSolutionForDuplicates($solution) {
-    $duplicates = [];
-    $duplicateEntries = [];
-    $seenKeys = [];
-    
-    if (!isset($solution['individual']) || !is_array($solution['individual'])) {
-        return ['duplicates' => [], 'duplicate_entries' => []];
-    }
-    
-    foreach ($solution['individual'] as $geneKey => $gene) {
-        $key = $gene['class_course_id'] . '|' . $gene['day_id'] . '|' . $gene['time_slot_id'];
-        
-        if (isset($seenKeys[$key])) {
-            $duplicates[] = $key;
-            $duplicateEntries[] = $gene;
-        } else {
-            $seenKeys[$key] = true;
-        }
-    }
-    
-    return [
-        'duplicates' => $duplicates,
-        'duplicate_entries' => $duplicateEntries
-    ];
-}
-
-/**
- * Validate timetable entries for duplicates
- */
-function validateTimetableEntries($entries) {
-    $duplicates = [];
-    $seenKeys = [];
-    
-    foreach ($entries as $entry) {
-        $key = $entry['class_course_id'] . '-' . $entry['day_id'] . '-' . $entry['time_slot_id'] . '-' . $entry['division_label'];
-        
-        if (isset($seenKeys[$key])) {
-            $duplicates[] = $key;
-        } else {
-            $seenKeys[$key] = true;
-        }
-    }
-    
-    return $duplicates;
-}
 
 /**
  * Format time to HH:MM AM/PM format for display
@@ -1241,8 +1220,12 @@ $col = $conn->query("SHOW COLUMNS FROM classes LIKE 'stream_id'");
 $has_stream_col = ($col && $col->num_rows > 0);
 if ($has_stream_col && !empty($current_stream_id)) {
     // Count class_courses where the class belongs to the selected stream
-    $sql = "SELECT COUNT(*) as count FROM class_courses cc JOIN classes c ON cc.class_id = c.id WHERE cc.is_active = 1 AND c.stream_id = " . intval($current_stream_id);
-    $total_assignments = $conn->query($sql)->fetch_assoc()['count'];
+    $stmt = $conn->prepare("SELECT COUNT(*) as count FROM class_courses cc JOIN classes c ON cc.class_id = c.id WHERE cc.is_active = 1 AND c.stream_id = ?");
+    $stmt->bind_param("i", $current_stream_id);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $total_assignments = $result->fetch_assoc()['count'];
+    $stmt->close();
 } else {
     $total_assignments = $conn->query("SELECT COUNT(*) as count FROM class_courses WHERE is_active = 1")->fetch_assoc()['count'];
 }
@@ -1260,12 +1243,17 @@ $has_stream_col = ($col && $col->num_rows > 0);
 if ($has_stream_col && !empty($current_stream_id)) {
     if ($has_t_class_course) {
         // New schema: join via class_course_id -> class_courses -> classes
-        $sql = "SELECT COUNT(*) as count FROM timetable t JOIN class_courses cc ON t.class_course_id = cc.id JOIN classes c ON cc.class_id = c.id WHERE c.stream_id = " . intval($current_stream_id);
+        $stmt = $conn->prepare("SELECT COUNT(*) as count FROM timetable t JOIN class_courses cc ON t.class_course_id = cc.id JOIN classes c ON cc.class_id = c.id WHERE c.stream_id = ?");
+        $stmt->bind_param("i", $current_stream_id);
+        $stmt->execute();
+        $res = $stmt->get_result();
     } else {
         // Old schema: timetable stores class_id directly
-        $sql = "SELECT COUNT(*) as count FROM timetable t JOIN classes c ON t.class_id = c.id WHERE c.stream_id = " . intval($current_stream_id);
+        $stmt = $conn->prepare("SELECT COUNT(*) as count FROM timetable t JOIN classes c ON t.class_id = c.id WHERE c.stream_id = ?");
+        $stmt->bind_param("i", $current_stream_id);
+        $stmt->execute();
+        $res = $stmt->get_result();
     }
-    $res = $conn->query($sql);
     $total_timetable_entries = $res ? $res->fetch_assoc()['count'] : 0;
     error_log("DEBUG: Current stream ID: $current_stream_id, Timetable entries for this stream: $total_timetable_entries");
 } else {
@@ -1281,7 +1269,12 @@ $total_classes = 0;
 $col = $conn->query("SHOW COLUMNS FROM classes LIKE 'stream_id'");
 $has_stream_col = ($col && $col->num_rows > 0);
 if ($has_stream_col && !empty($current_stream_id)) {
-    $total_classes = $conn->query("SELECT COUNT(*) as count FROM classes WHERE is_active = 1 AND stream_id = " . intval($current_stream_id))->fetch_assoc()['count'];
+    $stmt = $conn->prepare("SELECT COUNT(*) as count FROM classes WHERE is_active = 1 AND stream_id = ?");
+    $stmt->bind_param("i", $current_stream_id);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $total_classes = $result->fetch_assoc()['count'];
+    $stmt->close();
 } else {
     $total_classes = $conn->query("SELECT COUNT(*) as count FROM classes WHERE is_active = 1")->fetch_assoc()['count'];
 }
@@ -1635,7 +1628,10 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
         try {
             if (!empty($current_stream_id)) {
                 // First try to get stream-specific time slots from stream_time_slots mapping
-                $sts_result = $conn->query("SELECT COUNT(*) as count FROM stream_time_slots WHERE stream_id = " . intval($current_stream_id) . " AND is_active = 1");
+                $stmt = $conn->prepare("SELECT COUNT(*) as count FROM stream_time_slots WHERE stream_id = ? AND is_active = 1");
+                $stmt->bind_param("i", $current_stream_id);
+                $stmt->execute();
+                $sts_result = $stmt->get_result();
                 $stream_time_slots_count = $sts_result ? $sts_result->fetch_assoc()['count'] : 0;
             }
             
@@ -1935,7 +1931,10 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
             // First try to get stream-specific time slots from stream_time_slots mapping
             $sts_exists = $conn->query("SHOW TABLES LIKE 'stream_time_slots'");
             if ($sts_exists && $sts_exists->num_rows > 0) {
-                $ts_rs = $conn->query("SELECT ts.id, ts.start_time, ts.end_time, ts.duration, ts.is_break FROM stream_time_slots sts JOIN time_slots ts ON ts.id = sts.time_slot_id WHERE sts.stream_id = " . intval($current_stream_id) . " AND sts.is_active = 1 ORDER BY ts.start_time");
+                $stmt = $conn->prepare("SELECT ts.id, ts.start_time, ts.end_time, ts.duration, ts.is_break FROM stream_time_slots sts JOIN time_slots ts ON ts.id = sts.time_slot_id WHERE sts.stream_id = ? AND sts.is_active = 1 ORDER BY ts.start_time");
+                $stmt->bind_param("i", $current_stream_id);
+                $stmt->execute();
+                $ts_rs = $stmt->get_result();
                 if ($ts_rs && $ts_rs->num_rows > 0) {
                     while ($slot = $ts_rs->fetch_assoc()) {
                         // Ensure is_break is properly set from database
@@ -2804,8 +2803,11 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                                                 FROM timetable t
                                                 JOIN class_courses cc ON t.class_course_id = cc.id
                                                 JOIN classes c ON cc.class_id = c.id
-                                                WHERE c.stream_id = " . intval($current_stream_id);
-                                    $res_cov = $conn->query($sql_cov);
+                                                WHERE c.stream_id = ?");
+                                    $stmt_cov = $conn->prepare($sql_cov);
+                                    $stmt_cov->bind_param("i", $current_stream_id);
+                                    $stmt_cov->execute();
+                                    $res_cov = $stmt_cov->get_result();
                                     $scheduled_assignments = $res_cov ? (int)$res_cov->fetch_assoc()['cnt'] : 0;
                                 } else {
                                     // Fallback: use timetable entry count within stream
