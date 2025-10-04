@@ -763,9 +763,9 @@ async function makeAjaxRequest(data) {
     }
 }
 
-async function refreshData() {
-    const refreshBtn = event.target.closest('button');
-    setLoading(refreshBtn, true);
+async function refreshData(event = null) {
+    const refreshBtn = event ? event.target.closest('button') : document.querySelector('button[onclick="refreshData()"]');
+    if (refreshBtn) setLoading(refreshBtn, true);
     
     try {
         const response = await fetch('ajax_get_data.php');
@@ -805,9 +805,25 @@ async function refreshData() {
         console.error('Error refreshing data:', error);
         showAjaxMessage('Error refreshing data: ' + error.message, 'error');
     } finally {
-        setLoading(refreshBtn, false);
+        if (refreshBtn) setLoading(refreshBtn, false);
     }
 }
+
+// Auto-refresh data when page loads and periodically
+document.addEventListener('DOMContentLoaded', function() {
+    // Initial data load
+    refreshData();
+    
+    // Auto-refresh every 30 seconds to catch changes from other modules
+    setInterval(() => {
+        refreshData();
+    }, 30000);
+    
+    // Listen for focus events to refresh when user returns to tab
+    window.addEventListener('focus', () => {
+        refreshData();
+    });
+});
 
 // Card click handler
 document.addEventListener('DOMContentLoaded', function() {
@@ -966,6 +982,11 @@ async function bulkReactivate() {
             });
             
             setTimeout(() => {
+                // Update the data structure - remove the reactivated records
+                const reactivatedIds = ids.map(id => parseInt(id));
+                inactiveData[currentTable].records = inactiveData[currentTable].records.filter(record => !reactivatedIds.includes(record.id));
+                inactiveData[currentTable].count = inactiveData[currentTable].records.length;
+                
                 selectedCheckboxes.forEach(checkbox => {
                     const row = checkbox.closest('tr');
                     row.remove();
@@ -1019,6 +1040,11 @@ async function reactivateRecord(tableName, id, recordName, buttonElement) {
             setTimeout(() => {
                 row.remove();
                 
+                // Update the data structure - remove the reactivated record
+                const recordId = parseInt(id);
+                inactiveData[tableName].records = inactiveData[tableName].records.filter(record => record.id !== recordId);
+                inactiveData[tableName].count = inactiveData[tableName].records.length;
+                
                 // Update counts
                 updateModuleCounts();
                 updateSelection();
@@ -1036,13 +1062,10 @@ async function reactivateRecord(tableName, id, recordName, buttonElement) {
 }
 
 function updateModuleCounts() {
-    // Update the module cards with new counts
+    // Update the module cards with counts from the data structure (not DOM elements)
     Object.keys(inactiveData).forEach(tableName => {
-        const remainingRecords = document.querySelectorAll(`[data-table="${tableName}"] .record-checkbox`);
-        const newCount = remainingRecords.length;
-        
-        // Update the data structure
-        inactiveData[tableName].count = newCount;
+        const data = inactiveData[tableName];
+        const newCount = data.count; // Use the actual count from data, not DOM elements
         
         // Update the UI - check if elements exist first
         const moduleCard = document.querySelector(`[data-table="${tableName}"]`);
