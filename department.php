@@ -29,32 +29,9 @@ include 'includes/sidebar.php';
 $departments = [];
 ?>
 
-<!-- Additional CSS for enhanced styling -->
+<!-- Enhanced styling using design system -->
 <style>
-    .search-container {
-        margin-bottom: 20px;
-    }
-    
-    .search-input {
-        border: 2px solid #e9ecef;
-        border-radius: 25px;
-        padding: 10px 20px;
-        width: 100%;
-        max-width: 400px;
-        height: 38px; /* Match button height */
-        transition: all 0.3s ease;
-        display: flex;
-        align-items: center;
-    }
-    
-    .search-input:focus {
-        border-color: var(--primary-color);
-        box-shadow: 0 0 0 0.2rem rgba(128, 0, 32, 0.25);
-        outline: none;
-    }
-    
-    
-    
+    /* Page-specific enhancements */
     .fade-in {
         animation: fadeInRow 0.5s ease-in;
     }
@@ -88,7 +65,7 @@ $departments = [];
     
     .table-header .d-flex {
         flex-wrap: wrap;
-        gap: 0.5rem;
+        gap: var(--spacing-sm);
     }
     
     .search-container {
@@ -96,6 +73,19 @@ $departments = [];
         min-width: 200px;
         display: flex;
         align-items: center;
+    }
+    
+    /* Mobile optimizations for department page */
+    @media (max-width: 768px) {
+        .table-header .d-flex {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: var(--spacing-sm);
+        }
+        .search-container {
+            width: 100%;
+            min-width: auto;
+        }
     }
     
     /* Ensure buttons and search input have consistent height */

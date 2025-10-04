@@ -3136,33 +3136,76 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
 
 
 <style>
-/* Timetable Template Styles */
+/* Enhanced Timetable Template Styles */
 .timetable-template {
-    font-size: 0.875rem;
+    font-size: var(--font-size-sm);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    box-shadow: var(--shadow-md);
 }
 
 .timetable-template th,
 .timetable-template td {
     vertical-align: middle;
-    padding: 0.5rem;
+    padding: var(--spacing-sm);
+    border: 1px solid var(--border-color);
 }
 
 /* Day Header Row */
 .day-header-row {
-    background-color: #e9ecef;
+    background-color: var(--sidebar-bg);
 }
 
 .day-header {
-    background-color: #495057;
+    background: linear-gradient(135deg, var(--primary-color), var(--hover-color));
     color: white;
-    font-weight: bold;
+    font-weight: var(--font-weight-bold);
     text-align: center;
-    padding: 0.75rem;
+    padding: var(--spacing-md);
 }
 
 .day-name {
-    font-size: 1.1rem;
-    font-weight: 600;
+    font-size: var(--font-size-lg);
+    font-weight: var(--font-weight-semibold);
+}
+
+/* Enhanced Mobile Responsiveness for Timetable */
+@media (max-width: 768px) {
+    .timetable-template {
+        font-size: var(--font-size-xs);
+    }
+    
+    .timetable-template th,
+    .timetable-template td {
+        padding: var(--spacing-xs);
+    }
+    
+    .day-header {
+        padding: var(--spacing-sm);
+    }
+    
+    .day-name {
+        font-size: var(--font-size-base);
+    }
+}
+
+@media (max-width: 576px) {
+    .timetable-template {
+        font-size: 0.7rem;
+    }
+    
+    .timetable-template th,
+    .timetable-template td {
+        padding: 2px;
+    }
+    
+    .day-header {
+        padding: var(--spacing-xs);
+    }
+    
+    .day-name {
+        font-size: var(--font-size-sm);
+    }
 }
 
 /* Room Name Cell */

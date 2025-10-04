@@ -550,14 +550,45 @@ if ($result && $result->num_rows > 0) {
 ?>
 
 <style>
-/* Record count styling */
+/* Enhanced Rooms Page Styling */
 .record-count-info {
-    margin-top: 8px;
+    margin-top: var(--spacing-sm);
 }
 
 .record-count-info .badge {
-    font-size: 0.8rem;
-    padding: 0.4em 0.6em;
+    font-size: var(--font-size-xs);
+    padding: var(--spacing-xs) var(--spacing-sm);
+    margin-right: var(--spacing-xs);
+}
+
+/* Mobile optimizations for rooms page */
+@media (max-width: 768px) {
+    .table-header .d-flex {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: var(--spacing-sm);
+    }
+    
+    .record-count-info {
+        margin-top: var(--spacing-xs);
+    }
+    
+    .record-count-info .badge {
+        display: block;
+        margin-bottom: var(--spacing-xs);
+        margin-right: 0;
+    }
+}
+
+@media (max-width: 576px) {
+    .table-header h4 {
+        font-size: var(--font-size-lg);
+    }
+    
+    .record-count-info .badge {
+        font-size: 0.7rem;
+        padding: var(--spacing-xs);
+    }
 }
 </style>
 

@@ -157,106 +157,231 @@ if (isset($stream_validation['stream_name'])) {
 <?php $pageTitle = 'Dashboard'; include 'includes/header.php'; include 'includes/sidebar.php'; ?>
 
 <style>
-  .dashboard-search { margin: 10px 0 20px; }
-  #dashboardGrid .col-md-3 { min-width: 260px; }
+  /* Enhanced Dashboard Styling with Design System */
+  .dashboard-search { 
+    margin: var(--spacing-sm) 0 var(--spacing-lg); 
+  }
+  
+  #dashboardGrid .col-md-3 { 
+    min-width: 260px; 
+    margin-bottom: var(--spacing-md);
+  }
+  
   .grid-button {
     position: relative;
     display: block;
-    padding: 20px;
-    border-radius: 14px;
+    padding: var(--spacing-lg);
+    border-radius: var(--radius-lg);
     color: #fff;
     text-decoration: none;
     min-height: 120px;
-    box-shadow: 0 8px 18px rgba(0,0,0,0.15);
-    transition: transform 0.15s ease, box-shadow 0.15s ease;
+    box-shadow: var(--shadow-md);
+    transition: all 0.2s ease;
     background-color: var(--primary-color);
+    border: 1px solid rgba(255,255,255,0.1);
   }
+  
   .grid-button:hover {
     transform: translateY(-3px);
-    box-shadow: 0 12px 24px rgba(0,0,0,0.2);
+    box-shadow: var(--shadow-lg);
     color: #fff;
     background-color: var(--hover-color);
+    text-decoration: none;
   }
+  
   .grid-button i {
-    font-size: 28px;
-    margin-bottom: 10px;
+    font-size: var(--font-size-2xl);
+    margin-bottom: var(--spacing-sm);
     opacity: 0.95;
   }
-  .grid-button > div { font-weight: 700; letter-spacing: 0.3px; }
+  
+  .grid-button > div { 
+    font-weight: var(--font-weight-bold); 
+    letter-spacing: 0.3px; 
+    font-size: var(--font-size-lg);
+  }
+  
   .count-circle {
     position: absolute;
-    top: 12px;
-    right: 12px;
+    top: var(--spacing-sm);
+    right: var(--spacing-sm);
     background: rgba(255,255,255,0.15);
     border: 1px solid rgba(255,255,255,0.3);
     color: #fff;
-    font-weight: 700;
+    font-weight: var(--font-weight-bold);
     min-width: 34px;
     height: 34px;
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 0 8px;
+    padding: 0 var(--spacing-sm);
     backdrop-filter: blur(2px);
+    font-size: var(--font-size-sm);
   }
+  
   .count-description {
-    font-size: 0.75rem;
+    font-size: var(--font-size-xs);
     opacity: 0.8;
     text-align: left;
     line-height: 1.1;
-    font-weight: normal;
-    margin-top: 4px;
+    font-weight: var(--font-weight-normal);
+    margin-top: var(--spacing-xs);
   }
-  .stream-select { margin: 15px 0; }
+  
+  .stream-select { 
+    margin: var(--spacing-md) 0; 
+  }
 
-  /* Page header: Dashboard title on left, stream switch aligned right */
+  /* Enhanced Page Header */
   .page-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 16px;
-    margin-bottom: 18px;
+    gap: var(--spacing-md);
+    margin-bottom: var(--spacing-lg);
+    flex-wrap: wrap;
   }
-  .page-header h2 { margin: 0; font-size: 1.35rem; font-weight: 700; }
-  .stream-select { margin: 0; }
+  
+  .page-header h2 { 
+    margin: 0; 
+    font-size: var(--font-size-2xl); 
+    font-weight: var(--font-weight-bold); 
+    color: var(--text-primary);
+  }
+  
+  .stream-select { 
+    margin: 0; 
+  }
 
-  /* Responsive: stack header elements on small screens */
-  @media (max-width: 576px) {
+  /* Enhanced Stream Selector */
+  .stream-select label {
+    display: inline-block;
+    margin-right: var(--spacing-sm);
+    font-weight: var(--font-weight-bold);
+    color: var(--text-primary);
+    font-size: var(--font-size-sm);
+  }
+  
+  .stream-select select {
+    padding: var(--spacing-sm) var(--spacing-md);
+    border: 2px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: #fff;
+    color: var(--text-primary);
+    font-size: var(--font-size-sm);
+    min-width: 220px;
+    box-shadow: var(--shadow-sm);
+    transition: all 0.2s ease;
+    font-weight: var(--font-weight-medium);
+  }
+  
+  .stream-select select:focus {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 0.2rem rgba(128,0,32,0.25);
+    outline: none;
+  }
+
+  /* Enhanced Mobile Responsiveness */
+  @media (max-width: 1200px) {
+    #dashboardGrid .col-md-3 { 
+      min-width: 240px; 
+    }
+    .grid-button {
+      min-height: 110px;
+      padding: var(--spacing-md);
+    }
+    .grid-button i {
+      font-size: var(--font-size-xl);
+    }
+  }
+  
+  @media (max-width: 992px) {
+    .page-header h2 { 
+      font-size: var(--font-size-xl); 
+    }
+    .grid-button {
+      min-height: 100px;
+      padding: var(--spacing-md);
+    }
+    .grid-button i {
+      font-size: var(--font-size-lg);
+    }
+    .grid-button > div {
+      font-size: var(--font-size-base);
+    }
+  }
+  
+  @media (max-width: 768px) {
     .page-header {
       flex-direction: column;
       align-items: flex-start;
-      gap: 8px;
+      gap: var(--spacing-sm);
     }
-    .page-header h2 { font-size: 1.2rem; }
-    .stream-select { width: 100%; }
-    .stream-select form { width: 100%; }
-    .stream-select select { width: 100%; min-width: 0; box-sizing: border-box; }
+    .page-header h2 { 
+      font-size: var(--font-size-lg); 
+    }
+    .stream-select { 
+      width: 100%; 
+    }
+    .stream-select form { 
+      width: 100%; 
+    }
+    .stream-select select { 
+      width: 100%; 
+      min-width: 0; 
+      box-sizing: border-box; 
+    }
+    #dashboardGrid .col-md-3 { 
+      min-width: 100%; 
+    }
+    .grid-button {
+      min-height: 90px;
+      padding: var(--spacing-md);
+    }
   }
-
-  /* Stream selector styling */
-  .stream-select label {
-    display: inline-block;
-    margin-right: 8px;
-    font-weight: 700;
-    color: #333;
-    font-size: 0.95rem;
+  
+  @media (max-width: 576px) {
+    .page-header h2 { 
+      font-size: var(--font-size-base); 
+    }
+    .grid-button {
+      min-height: 80px;
+      padding: var(--spacing-sm);
+    }
+    .grid-button i {
+      font-size: var(--font-size-base);
+    }
+    .grid-button > div {
+      font-size: var(--font-size-sm);
+    }
+    .count-circle {
+      min-width: 28px;
+      height: 28px;
+      font-size: var(--font-size-xs);
+    }
+    .count-description {
+      font-size: 0.7rem;
+    }
   }
-  .stream-select select {
-    padding: 8px 12px;
-    border: 1px solid #e9ecef;
-    border-radius: 8px;
-    background: #fff;
-    color: #333;
-    font-size: 0.95rem;
-    min-width: 220px;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.03);
-    transition: border-color 0.15s ease, box-shadow 0.15s ease;
-  }
-  .stream-select select:focus {
-    border-color: var(--primary-color);
-    box-shadow: 0 4px 12px rgba(128,0,32,0.08);
-    outline: none;
+  
+  @media (max-width: 480px) {
+    .grid-button {
+      min-height: 70px;
+      padding: var(--spacing-xs);
+    }
+    .grid-button i {
+      font-size: var(--font-size-sm);
+      margin-bottom: var(--spacing-xs);
+    }
+    .grid-button > div {
+      font-size: var(--font-size-xs);
+    }
+    .count-circle {
+      min-width: 24px;
+      height: 24px;
+      font-size: 0.7rem;
+    }
   }
 </style>
 
