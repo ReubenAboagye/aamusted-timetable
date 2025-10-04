@@ -16,10 +16,11 @@ $stream_info = validateStreamSelection($conn);
 $current_stream_id = $stream_info['stream_id'];
 $current_stream_name = $stream_info['stream_name'];
 
+// Include CSRF helper
+include 'includes/csrf_helper.php';
+
 // Generate CSRF token if not exists
-if (!isset($_SESSION['csrf_token'])) {
-    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
-}
+generateCSRFToken();
 
 include 'includes/header.php';
 include 'includes/sidebar.php';

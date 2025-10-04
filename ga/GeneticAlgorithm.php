@@ -33,6 +33,9 @@ class GeneticAlgorithm {
     private $progressCallback = null;
     private $progressUpdateInterval = 5; // seconds
     private $lastProgressUpdateTime = 0;
+    // Memory monitoring
+    private $memoryPeak = 0;
+    private $memoryWarningThreshold = 800 * 1024 * 1024; // 800MB
     
     public function __construct(mysqli $conn, array $options = []) {
         $this->conn = $conn;
@@ -82,8 +85,29 @@ class GeneticAlgorithm {
     public function run(): array {
         $this->startTime = microtime(true);
         
+        // Validate data before starting
+        if (empty($this->data['class_courses'])) {
+            throw new Exception('No class courses available for timetable generation');
+        }
+        
+        if (empty($this->data['days'])) {
+            throw new Exception('No days available for timetable generation');
+        }
+        
+        if (empty($this->data['time_slots'])) {
+            throw new Exception('No time slots available for timetable generation');
+        }
+        
+        if (empty($this->data['rooms'])) {
+            throw new Exception('No rooms available for timetable generation');
+        }
+        
         // Initialize population
         $population = $this->initializePopulation();
+        
+        if (empty($population)) {
+            throw new Exception('Failed to initialize population for genetic algorithm');
+        }
         
         // Main GA loop
         $stagnationCount = 0;
@@ -133,9 +157,34 @@ class GeneticAlgorithm {
                 'soft_violations' => $currentBest['fitness']['soft_violations']
             ];
             
-            // Periodic memory cleanup
-            if ($generation % 10 === 0 && function_exists('gc_collect_cycles')) {
+            // Periodic memory cleanup - more frequent for better memory management
+            if ($generation % 5 === 0 && function_exists('gc_collect_cycles')) {
                 gc_collect_cycles();
+            }
+            
+            // Additional memory cleanup for large populations
+            if ($generation % 20 === 0 && $this->populationSize > 50) {
+                if (function_exists('gc_mem_caches')) {
+                    gc_mem_caches();
+                }
+                if (function_exists('gc_collect_cycles')) {
+                    gc_collect_cycles();
+                }
+            }
+            
+            // Memory monitoring and warning
+            $currentMemory = memory_get_usage(true);
+            $this->memoryPeak = max($this->memoryPeak, $currentMemory);
+            
+            if ($currentMemory > $this->memoryWarningThreshold) {
+                error_log("Memory warning: " . round($currentMemory / 1024 / 1024, 2) . "MB used at generation $generation");
+                // Force aggressive cleanup
+                if (function_exists('gc_mem_caches')) {
+                    gc_mem_caches();
+                }
+                if (function_exists('gc_collect_cycles')) {
+                    gc_collect_cycles();
+                }
             }
             
             // Check for convergence
@@ -167,7 +216,9 @@ class GeneticAlgorithm {
             'solution' => $this->bestSolution,
             'statistics' => $this->generationStats,
             'runtime' => microtime(true) - $this->startTime,
-            'generations_completed' => count($this->generationStats)
+            'generations_completed' => count($this->generationStats),
+            'memory_peak_mb' => round($this->memoryPeak / 1024 / 1024, 2),
+            'memory_final_mb' => round(memory_get_usage(true) / 1024 / 1024, 2)
         ];
     }
     
@@ -178,8 +229,21 @@ class GeneticAlgorithm {
         $population = [];
         
         for ($i = 0; $i < $this->populationSize; $i++) {
-            $individual = TimetableRepresentation::createRandomIndividual($this->data);
-            $population[] = $individual;
+            try {
+                $individual = TimetableRepresentation::createRandomIndividual($this->data);
+                if ($individual && is_array($individual)) {
+                    $population[] = $individual;
+                } else {
+                    error_log("Failed to create individual $i in population initialization");
+                }
+            } catch (Exception $e) {
+                error_log("Error creating individual $i: " . $e->getMessage());
+                // Continue with other individuals
+            }
+        }
+        
+        if (empty($population)) {
+            throw new Exception('Failed to create any valid individuals for population');
         }
         
         return $population;

@@ -10,10 +10,11 @@ if (session_status() == PHP_SESSION_NONE) {
     session_start();
 }
 
+// Include CSRF helper
+include 'includes/csrf_helper.php';
+
 // Generate CSRF token if not exists
-if (!isset($_SESSION['csrf_token'])) {
-    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
-}
+generateCSRFToken();
 
 include 'includes/header.php';
 include 'includes/sidebar.php';
@@ -252,7 +253,7 @@ $room_types = [];
             </div>
             <form id="addRoomTypeForm">
                 <div class="modal-body">
-                    <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
+                    <?php echo csrfTokenField(); ?>
                     <input type="hidden" name="module" value="room_type">
                     <input type="hidden" name="action" value="add">
                     
@@ -299,7 +300,7 @@ $room_types = [];
             </div>
             <form id="editRoomTypeForm">
                 <div class="modal-body">
-                    <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
+                    <?php echo csrfTokenField(); ?>
                     <input type="hidden" name="module" value="room_type">
                     <input type="hidden" name="action" value="edit">
                     <input type="hidden" name="id" id="edit_id">
@@ -362,7 +363,7 @@ function loadRoomTypes() {
         body: new URLSearchParams({
             'module': 'room_type',
             'action': 'list',
-            'csrf_token': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+            'csrf_token': getCSRFToken()
         })
     })
     .then(response => response.json())
@@ -564,7 +565,7 @@ async function deleteRoomType(id, name) {
         formData.append('module', 'room_type');
         formData.append('action', 'delete');
         formData.append('id', id);
-        formData.append('csrf_token', document.querySelector('meta[name="csrf-token"]').getAttribute('content'));
+        formData.append('csrf_token', getCSRFToken());
         
         fetch('ajax_api.php', {
             method: 'POST',
