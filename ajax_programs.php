@@ -1,4 +1,7 @@
 <?php
+// Start output buffering to catch any unexpected output
+ob_start();
+
 // Disable custom error handler for AJAX requests to prevent HTML output
 if (isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest') {
     // This is an AJAX request, don't use custom error handler
@@ -17,6 +20,9 @@ if (session_status() == PHP_SESSION_NONE) {
 
 // Log the request for debugging
 error_log("AJAX Request: " . print_r($_POST, true));
+
+// Clear any output buffer content
+ob_clean();
 
 header('Content-Type: application/json');
 include 'connect.php';
@@ -268,5 +274,8 @@ try {
     error_log("AJAX Programs Error: " . $e->getMessage());
 }
 
+// Clear any output buffer and send clean JSON
+ob_clean();
 echo json_encode($response);
+exit;
 ?>
