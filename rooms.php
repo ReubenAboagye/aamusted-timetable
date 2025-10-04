@@ -417,8 +417,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action) {
         $stmt->close();
     }
     
-    // Toggle Status (toggle is_active for multiple rooms)
-    if ($action === 'toggle_status' && isset($_POST['room_ids'])) {
+    // Toggle Status (toggle is_active for a single room)
+    if ($action === 'toggle_status' && isset($_POST['id'])) {
+        $id = (int)$_POST['id'];
+        
+        // Get current status
+        $check_sql = "SELECT is_active FROM rooms WHERE id = ?";
+        $check_stmt = $conn->prepare($check_sql);
+        $check_stmt->bind_param("i", $id);
+        $check_stmt->execute();
+        $check_result = $check_stmt->get_result();
+        
+        if ($check_result && $check_result->num_rows > 0) {
+            $current_status = $check_result->fetch_assoc()['is_active'];
+            $new_status = $current_status ? 0 : 1; // Toggle
+            
+            $check_stmt->close();
+            
+            // Update with new status
+            $update_sql = "UPDATE rooms SET is_active = ? WHERE id = ?";
+            $update_stmt = $conn->prepare($update_sql);
+            $update_stmt->bind_param("ii", $new_status, $id);
+            
+            if ($update_stmt->execute()) {
+                $status_text = $new_status ? 'activated' : 'deactivated';
+                redirect_with_flash('rooms.php', 'success', "Room $status_text successfully!");
+            } else {
+                error_log("ERROR: Toggle Status - Update failed for room $id: " . $update_stmt->error);
+                $_SESSION['error_message'] = "Error updating room status: " . $update_stmt->error;
+                header('Location: rooms.php'); exit;
+            }
+            $update_stmt->close();
+        } else {
+            $_SESSION['error_message'] = "Room not found.";
+            header('Location: rooms.php'); exit;
+        }
+    }
+    
+    // Toggle Status (toggle is_active for multiple rooms) - DEPRECATED
+    if ($action === 'toggle_status_bulk' && isset($_POST['room_ids'])) {
         $room_ids = json_decode($_POST['room_ids'], true);
         if (!$room_ids || !is_array($room_ids)) {
             $_SESSION['error_message'] = "Invalid room selection.";
@@ -630,12 +667,7 @@ if ($result && $result->num_rows > 0) {
                     </select>
                 </div>
                 <div class="col-md-3">
-                    <button class="btn btn-outline-secondary" id="toggleStatusBtn" style="display: none;">
-                        <i class="fas fa-toggle-on me-2"></i>Toggle Status
-                    </button>
-                    <button class="btn btn-outline-primary" id="saveCheckboxBtn">
-                        <i class="fas fa-save me-2"></i>Save Active States
-                    </button>
+                    <!-- Status management buttons removed - individual toggle buttons added to each row -->
                 </div>
             </div>
         </div>
@@ -684,6 +716,10 @@ if ($result && $result->num_rows > 0) {
                                 <td>
                                     <button class="btn btn-sm btn-outline-primary me-1" onclick="editRoom(<?php echo (int)$row['id']; ?>, '<?php echo addslashes($row['name']); ?>', <?php echo (int)$row['building_id']; ?>, '<?php echo addslashes(ucwords(str_replace('_', ' ', $row['room_type']))); ?>', <?php echo (int)$row['capacity']; ?>)">
                                         <i class="fas fa-edit"></i>
+                                    </button>
+                                    <button class="btn btn-sm <?php echo $row['is_active'] ? 'btn-outline-warning' : 'btn-outline-success'; ?> me-1" onclick="toggleRoomStatus(<?php echo (int)$row['id']; ?>, '<?php echo addslashes($row['name']); ?>', <?php echo $row['is_active'] ? 'true' : 'false'; ?>)">
+                                        <i class="fas <?php echo $row['is_active'] ? 'fa-pause' : 'fa-play'; ?>"></i>
+                                        <?php echo $row['is_active'] ? 'Deactivate' : 'Activate'; ?>
                                     </button>
                                     <form method="POST" style="display: inline;" onsubmit="return confirmRoomDeletion(event, <?php echo $row['id']; ?>, '<?php echo addslashes($row['name']); ?>')">
                                         <input type="hidden" name="action" value="delete">
@@ -1035,6 +1071,44 @@ async function confirmRoomDeletion(event, roomId, roomName) {
     }
 }
 
+// Toggle room status function
+async function toggleRoomStatus(roomId, roomName, isCurrentlyActive) {
+    const action = isCurrentlyActive ? 'deactivate' : 'activate';
+    const actionText = isCurrentlyActive ? 'deactivate' : 'activate';
+    
+    const confirmed = await customWarning(
+        `Are you sure you want to ${actionText} the room "${roomName}"?<br><br>This will change the room's active status and may affect timetable generation.`,
+        {
+            title: `${actionText.charAt(0).toUpperCase() + actionText.slice(1)} Room`,
+            confirmText: actionText.charAt(0).toUpperCase() + actionText.slice(1),
+            cancelText: 'Cancel',
+            confirmButtonClass: isCurrentlyActive ? 'warning' : 'success'
+        }
+    );
+    
+    if (confirmed) {
+        // Create a form to submit the toggle request
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.style.display = 'none';
+        
+        const actionInput = document.createElement('input');
+        actionInput.type = 'hidden';
+        actionInput.name = 'action';
+        actionInput.value = 'toggle_status';
+        
+        const idInput = document.createElement('input');
+        idInput.type = 'hidden';
+        idInput.name = 'id';
+        idInput.value = roomId;
+        
+        form.appendChild(actionInput);
+        form.appendChild(idInput);
+        document.body.appendChild(form);
+        form.submit();
+    }
+}
+
 // Debug: Check if Bootstrap is loading
 console.log('Rooms page loading...');
 console.log('Bootstrap available:', typeof bootstrap !== 'undefined');
@@ -1233,34 +1307,7 @@ document.addEventListener('DOMContentLoaded', function() {
         filterRooms();
     });
     
-    // Toggle status functionality
-    toggleStatusBtn?.addEventListener('click', async function() {
-        const selectedRows = document.querySelectorAll('tbody tr:not([style*="display: none"]) input[type="checkbox"]:checked');
-        if (selectedRows.length === 0) {
-            alert('Please select at least one room to toggle status.');
-            return;
-        }
-        
-        if (await customWarning(`Are you sure you want to toggle the status of ${selectedRows.length} selected room(s)?<br><br>This will change the active/inactive status of the selected rooms.`)) {
-            const roomIds = Array.from(selectedRows).map(cb => cb.value);
-            toggleRoomStatus(roomIds);
-        }
-    });
-    
-    // Save checkbox states functionality
-    const saveCheckboxBtn = document.getElementById('saveCheckboxBtn');
-    saveCheckboxBtn?.addEventListener('click', async function() {
-        const roomCheckboxes = document.querySelectorAll('.room-checkbox');
-        const roomStates = {};
-        
-        roomCheckboxes.forEach(checkbox => {
-            roomStates[checkbox.value] = checkbox.checked ? 1 : 0;
-        });
-        
-        if (await customConfirm('Are you sure you want to save the current room active states?<br><br>This will update the database with the current checkbox selections.')) {
-            saveCheckboxStates(roomStates);
-        }
-    });
+    // Old toggle and save functionality removed - now using individual toggle buttons
     
     function filterRooms() {
         const searchTerm = searchInput.value.toLowerCase();
@@ -1285,166 +1332,10 @@ document.addEventListener('DOMContentLoaded', function() {
             row.style.display = (showBySearch && showByStatus) ? '' : 'none';
         });
         
-        // Show/hide toggle button based on filter
-        updateToggleButton();
+        // Toggle button functionality removed - using individual buttons now
     }
     
-    function updateToggleButton() {
-        const visibleRows = document.querySelectorAll('tbody tr:not([style*="display: none"])');
-        const hasVisibleRows = visibleRows.length > 0;
-        toggleStatusBtn.style.display = hasVisibleRows ? 'inline-block' : 'none';
-    }
-    
-    // Select all functionality
-    const selectAllCheckbox = document.getElementById('selectAllRooms');
-    const roomCheckboxes = document.querySelectorAll('.room-checkbox');
-    
-    if (selectAllCheckbox) {
-        selectAllCheckbox.addEventListener('change', function() {
-            const isChecked = this.checked;
-            roomCheckboxes.forEach(checkbox => {
-                checkbox.checked = isChecked;
-            });
-            // Auto-save after select all change with debouncing
-            clearTimeout(window.checkboxSaveTimeout);
-            window.checkboxSaveTimeout = setTimeout(() => {
-                const roomStates = {};
-                roomCheckboxes.forEach(checkbox => {
-                    roomStates[checkbox.value] = checkbox.checked ? 1 : 0;
-                });
-                saveCheckboxStates(roomStates);
-            }, 500); // Increased delay to 500ms for better debouncing
-        });
-    }
-    
-    // Individual checkbox functionality
-    roomCheckboxes.forEach(checkbox => {
-        checkbox.addEventListener('change', function() {
-            updateSelectAllCheckbox();
-            // Auto-save after individual checkbox change with debouncing
-            clearTimeout(window.checkboxSaveTimeout);
-            window.checkboxSaveTimeout = setTimeout(() => {
-                const roomStates = {};
-                roomCheckboxes.forEach(cb => {
-                    roomStates[cb.value] = cb.checked ? 1 : 0;
-                });
-                saveCheckboxStates(roomStates);
-            }, 500); // Increased delay to 500ms for better debouncing
-        });
-    });
-    
-    function updateSelectAllCheckbox() {
-        const checkedCount = document.querySelectorAll('.room-checkbox:checked').length;
-        const totalCount = roomCheckboxes.length;
-        
-        if (checkedCount === 0) {
-            selectAllCheckbox.indeterminate = false;
-            selectAllCheckbox.checked = false;
-        } else if (checkedCount === totalCount) {
-            selectAllCheckbox.indeterminate = false;
-            selectAllCheckbox.checked = true;
-        } else {
-            selectAllCheckbox.indeterminate = true;
-        }
-    }
-    
-    // Initialize select all checkbox state on page load
-    if (selectAllCheckbox && roomCheckboxes.length > 0) {
-        updateSelectAllCheckbox();
-    }
-    
-    function toggleRoomStatus(roomIds) {
-        // Create a form to submit the toggle request
-        const form = document.createElement('form');
-        form.method = 'POST';
-        form.style.display = 'none';
-        
-        const actionInput = document.createElement('input');
-        actionInput.type = 'hidden';
-        actionInput.name = 'action';
-        actionInput.value = 'toggle_status';
-        
-        const idsInput = document.createElement('input');
-        idsInput.type = 'hidden';
-        idsInput.name = 'room_ids';
-        idsInput.value = JSON.stringify(roomIds);
-        
-        form.appendChild(actionInput);
-        form.appendChild(idsInput);
-        document.body.appendChild(form);
-        form.submit();
-    }
-    
-    function saveCheckboxStates(roomStates) {
-        // Show saving indicator
-        const saveBtn = document.getElementById('saveCheckboxBtn');
-        if (saveBtn) {
-            const originalText = saveBtn.innerHTML;
-            saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Saving...';
-            saveBtn.disabled = true;
-            
-            // Restore button after save
-            setTimeout(() => {
-                saveBtn.innerHTML = originalText;
-                saveBtn.disabled = false;
-            }, 1000);
-        }
-        
-        // Use AJAX to save checkbox states without page refresh
-        const formData = new FormData();
-        formData.append('action', 'save_checkbox_states');
-        formData.append('room_states', JSON.stringify(roomStates));
-        
-        fetch('rooms.php', {
-            method: 'POST',
-            body: formData,
-            headers: {
-                'X-Requested-With': 'XMLHttpRequest'
-            }
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                console.log('Room active states saved successfully:', data.message);
-                showSaveIndicator('success');
-            } else {
-                console.error('Error saving room active states:', data.message);
-                showSaveIndicator('error');
-            }
-        })
-        .catch(error => {
-            console.error('Error:', error);
-            showSaveIndicator('error');
-        });
-    }
-    
-    function showSaveIndicator(type) {
-        // Create or update save indicator
-        let indicator = document.getElementById('saveIndicator');
-        if (!indicator) {
-            indicator = document.createElement('div');
-            indicator.id = 'saveIndicator';
-            indicator.style.cssText = 'position: fixed; top: 20px; right: 20px; z-index: 9999; padding: 10px 15px; border-radius: 5px; font-weight: bold;';
-            document.body.appendChild(indicator);
-        }
-        
-        if (type === 'success') {
-            indicator.style.backgroundColor = '#28a745';
-            indicator.style.color = 'white';
-            indicator.textContent = '✓ Saved';
-        } else {
-            indicator.style.backgroundColor = '#dc3545';
-            indicator.style.color = 'white';
-            indicator.textContent = '✗ Error';
-        }
-        
-        // Hide indicator after 2 seconds
-        setTimeout(() => {
-            if (indicator.parentNode) {
-                indicator.remove();
-            }
-        }, 2000);
-    }
+    // Checkbox functionality removed - using individual toggle buttons instead
 
     // Attach delegated handler for add-building links (works even if functions load later)
     document.body.addEventListener('click', function(e) {
