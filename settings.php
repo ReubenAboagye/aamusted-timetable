@@ -38,7 +38,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 // Get current stream ID
 $current_stream_id = $_SESSION['current_stream_id'] ?? 1;
 
-// Get inactive records from all tables (stream-specific where applicable)
+// Get inactive records from all tables (ALL stream-specific)
 $inactive_records = [];
 
 // Programs (stream-specific)
@@ -57,32 +57,60 @@ if ($result) {
     }
 }
 
-// Lecturers (not stream-specific)
-$result = $conn->query("SELECT id, name, NULL as code, 'lecturers' as table_name FROM lecturers WHERE is_active = 0 ORDER BY name");
+// Lecturers (stream-specific - only lecturers assigned to courses in this stream)
+$result = $conn->query("
+    SELECT DISTINCT l.id, l.name, NULL as code, 'lecturers' as table_name 
+    FROM lecturers l 
+    INNER JOIN lecturer_courses lc ON l.id = lc.lecturer_id 
+    INNER JOIN courses c ON lc.course_id = c.id 
+    WHERE l.is_active = 0 AND c.stream_id = $current_stream_id 
+    ORDER BY l.name
+");
 if ($result) {
     while ($row = $result->fetch_assoc()) {
         $inactive_records[] = $row;
     }
 }
 
-// Departments (not stream-specific)
-$result = $conn->query("SELECT id, name, NULL as code, 'departments' as table_name FROM departments WHERE is_active = 0 ORDER BY name");
+// Departments (stream-specific - only departments with programs/courses in this stream)
+$result = $conn->query("
+    SELECT DISTINCT d.id, d.name, NULL as code, 'departments' as table_name 
+    FROM departments d 
+    WHERE d.is_active = 0 
+    AND (d.id IN (SELECT DISTINCT department_id FROM programs WHERE stream_id = $current_stream_id) 
+         OR d.id IN (SELECT DISTINCT department_id FROM courses WHERE stream_id = $current_stream_id))
+    ORDER BY d.name
+");
 if ($result) {
     while ($row = $result->fetch_assoc()) {
         $inactive_records[] = $row;
     }
 }
 
-// Rooms (not stream-specific)
-$result = $conn->query("SELECT id, name, NULL as code, 'rooms' as table_name FROM rooms WHERE is_active = 0 ORDER BY name");
+// Rooms (stream-specific - only rooms used by courses in this stream)
+$result = $conn->query("
+    SELECT DISTINCT r.id, r.name, NULL as code, 'rooms' as table_name 
+    FROM rooms r 
+    INNER JOIN course_roomtype cr ON r.room_type_id = cr.room_type_id 
+    INNER JOIN courses c ON cr.course_id = c.id 
+    WHERE r.is_active = 0 AND c.stream_id = $current_stream_id 
+    ORDER BY r.name
+");
 if ($result) {
     while ($row = $result->fetch_assoc()) {
         $inactive_records[] = $row;
     }
 }
 
-// Room Types (not stream-specific)
-$result = $conn->query("SELECT id, name, NULL as code, 'room_types' as table_name FROM room_types WHERE is_active = 0 ORDER BY name");
+// Room Types (stream-specific - only room types used by courses in this stream)
+$result = $conn->query("
+    SELECT DISTINCT rt.id, rt.name, NULL as code, 'room_types' as table_name 
+    FROM room_types rt 
+    INNER JOIN course_roomtype cr ON rt.id = cr.room_type_id 
+    INNER JOIN courses c ON cr.course_id = c.id 
+    WHERE rt.is_active = 0 AND c.stream_id = $current_stream_id 
+    ORDER BY rt.name
+");
 if ($result) {
     while ($row = $result->fetch_assoc()) {
         $inactive_records[] = $row;
@@ -97,8 +125,8 @@ if ($result) {
     }
 }
 
-// Streams (not stream-specific - show all inactive streams)
-$result = $conn->query("SELECT id, name, code, 'streams' as table_name FROM streams WHERE is_active = 0 ORDER BY name");
+// Streams (only show the current stream if it's inactive)
+$result = $conn->query("SELECT id, name, code, 'streams' as table_name FROM streams WHERE is_active = 0 AND id = $current_stream_id ORDER BY name");
 if ($result) {
     while ($row = $result->fetch_assoc()) {
         $inactive_records[] = $row;
@@ -146,7 +174,7 @@ $conn->close();
                         <h5 class="mb-0">
                             <i class="fas fa-eye-slash me-2"></i>Inactive Records Management
                         </h5>
-                        <p class="text-muted mb-0 mt-2">Reactivate records that were previously set to inactive. Stream-specific records (Programs, Courses, Classes) show only for the current stream (ID: <?= $current_stream_id ?>). Global records (Lecturers, Departments, Rooms, Room Types, Streams) show across all streams.</p>
+                        <p class="text-muted mb-0 mt-2">Reactivate records that were previously set to inactive. <strong>All records shown are linked to Stream ID <?= $current_stream_id ?></strong> - only inactive records associated with this specific stream are displayed.</p>
                     </div>
                     <div class="card-body">
                         <?php if (empty($inactive_records)): ?>
@@ -168,15 +196,10 @@ $conn->close();
                                     </thead>
                                     <tbody>
                                         <?php foreach ($inactive_records as $record): ?>
-                                            <?php 
-                                            $is_stream_specific = in_array($record['table_name'], ['programs', 'courses', 'classes']);
-                                            $badge_class = $is_stream_specific ? 'bg-primary' : 'bg-secondary';
-                                            $badge_text = $is_stream_specific ? ucfirst($record['table_name']) . ' (Stream)' : ucfirst($record['table_name']) . ' (Global)';
-                                            ?>
                                             <tr>
                                                 <td>
-                                                    <span class="badge <?= $badge_class ?>">
-                                                        <?= $badge_text ?>
+                                                    <span class="badge bg-primary">
+                                                        <?= ucfirst($record['table_name']) ?> (Stream <?= $current_stream_id ?>)
                                                     </span>
                                                 </td>
                                                 <td><?= htmlspecialchars($record['name']) ?></td>
@@ -202,12 +225,10 @@ $conn->close();
                             <div class="mt-3">
                                 <small class="text-muted">
                                     <i class="fas fa-info-circle me-1"></i>
-                                    Total inactive records for Stream ID <?= $current_stream_id ?>: <?= count($inactive_records) ?>
+                                    Total inactive records linked to Stream ID <?= $current_stream_id ?>: <?= count($inactive_records) ?>
                                     <br>
                                     <i class="fas fa-stream me-1"></i>
-                                    Stream-specific: Programs, Courses, Classes | 
-                                    <i class="fas fa-globe me-1"></i>
-                                    Global: Lecturers, Departments, Rooms, Room Types, Streams
+                                    All records shown are associated with this stream through direct links or relationships
                                 </small>
                             </div>
                         <?php endif; ?>
