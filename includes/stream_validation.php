@@ -53,9 +53,9 @@ if (!function_exists('validateStreamSelection')) {
             }
         }
         
-        // Validate that the stream exists and is active
+        // Validate that the stream exists (regardless of active status)
         if ($stream_id && $stream_id > 0) {
-            $stream_check_sql = "SELECT id, name FROM streams WHERE id = ? AND is_active = 1";
+            $stream_check_sql = "SELECT id, name, is_active FROM streams WHERE id = ?";
             $stmt = $conn->prepare($stream_check_sql);
             if ($stmt) {
                 $stmt->bind_param("i", $stream_id);
@@ -68,6 +68,7 @@ if (!function_exists('validateStreamSelection')) {
                         'valid' => true,
                         'stream_id' => $stream_id,
                         'stream_name' => $stream_data['name'],
+                        'is_active' => $stream_data['is_active'],
                         'message' => 'Stream validation successful'
                     ];
                 }

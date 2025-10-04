@@ -11,19 +11,23 @@ if (isset($_GET['stream_id'])) {
     $_SESSION['active_stream'] = intval($_GET['stream_id']);
 }
 
-// Fallback: default = 1 (Regular)
-$active_stream = $_SESSION['active_stream'] ?? 1;
-
-// Validate stream selection
+// Validate stream selection first
 include 'includes/stream_validation.php';
 $stream_validation = getCurrentStreamInfo($conn);
+
 if (!$stream_validation['valid']) {
     // Show warning but don't redirect on dashboard
     $stream_warning = $stream_validation['message'];
+    // Set fallback values
+    $active_stream = 1;
+    $current_stream_name = 'No Stream Selected';
 } else {
     // Ensure we have proper stream information for header
     $active_stream = $stream_validation['stream_id'];
     $current_stream_name = $stream_validation['stream_name'];
+    // Update session to ensure consistency
+    $_SESSION['active_stream'] = $active_stream;
+    $_SESSION['current_stream_id'] = $active_stream;
 }
 
 // Helper function to safely count rows
@@ -142,13 +146,11 @@ while ($row = $result->fetch_assoc()) {
     $streams[] = $row;
 }
 
-// Get current stream name
-$current_stream_name = 'Selected';
-foreach ($streams as $s) {
-    if ($s['id'] == $active_stream) {
-        $current_stream_name = $s['name'];
-        break;
-    }
+// Get current stream name from validation result
+if (isset($stream_validation['stream_name'])) {
+    $current_stream_name = $stream_validation['stream_name'];
+} else {
+    $current_stream_name = 'No Stream Selected';
 }
 ?>
 
