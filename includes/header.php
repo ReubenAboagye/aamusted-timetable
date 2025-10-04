@@ -249,13 +249,10 @@ if (!function_exists('getCount')) {
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title><?php echo htmlspecialchars($pageTitle); ?></title>
-  <!-- Favicon with cache busting -->
-  <link rel="icon" type="image/x-icon" href="/timetable/images/aamustedLog.ico?v=<?php echo time(); ?>">
-  <link rel="shortcut icon" type="image/x-icon" href="/timetable/images/aamustedLog.ico?v=<?php echo time(); ?>">
-  <link rel="apple-touch-icon" href="/timetable/images/aamustedLog.ico?v=<?php echo time(); ?>">
-  <!-- Additional favicon formats for better compatibility -->
-  <link rel="icon" sizes="16x16" type="image/x-icon" href="/timetable/images/aamustedLog.ico?v=<?php echo time(); ?>">
-  <link rel="icon" sizes="32x32" type="image/x-icon" href="/timetable/images/aamustedLog.ico?v=<?php echo time(); ?>">
+  <!-- Favicon -->
+  <link rel="icon" type="image/x-icon" href="images/aamustedLog.ico">
+  <link rel="shortcut icon" type="image/x-icon" href="images/aamustedLog.ico">
+  <link rel="apple-touch-icon" href="images/aamustedLog.ico">
   <!-- Bootstrap CSS -->
   <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.2/css/bootstrap.min.css" rel="stylesheet" />
   <!-- Font Awesome -->
@@ -288,7 +285,7 @@ if (!function_exists('getCount')) {
     }
     .navbar { background-color: var(--primary-color); position: fixed; top: 0; width: 100%; z-index: 1050; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
     .navbar-brand { font-weight: 600; font-size: 1.25rem; display: flex; align-items: center; letter-spacing: 0.4px; }
-    .navbar-brand img { height: 32px; margin-right: 10px; }
+    .navbar-brand img { height: 32px; margin-right: 10px; cursor: pointer; }
     #sidebarToggle { 
       border: none; 
       background: transparent; 
@@ -595,7 +592,7 @@ if (!function_exists('getCount')) {
   <nav class="navbar navbar-dark">
     <div class="container-fluid">
       <button id="sidebarToggle"><i class="fas fa-bars"></i></button>
-      <a class="navbar-brand text-white" href="#">
+      <a class="navbar-brand text-white" href="index.php">
         <img src="images/aamustedLog.png" alt="AAMUSTED Logo">AAMUSTED Timetable Generator
       </a>
       <div class="mx-auto text-white" id="currentStream">
