@@ -105,6 +105,13 @@
       </a>
     </div>
 
+    <!-- Tutorial & User Guide -->
+    <div class="nav-section">
+      <a href="tutorial.php" class="nav-link <?= ($currentPage == 'tutorial.php') ? 'active' : '' ?>">
+        <i class="fas fa-graduation-cap me-2"></i>Tutorial & User Guide
+      </a>
+    </div>
+
   </div>
   
   <!-- Stream Management - Fixed at bottom -->
