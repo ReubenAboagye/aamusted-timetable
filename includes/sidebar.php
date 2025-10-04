@@ -105,6 +105,13 @@
       </a>
     </div>
 
+    <!-- Settings -->
+    <div class="nav-section">
+      <a href="settings.php" class="nav-link <?= ($currentPage == 'settings.php') ? 'active' : '' ?>">
+        <i class="fas fa-cog me-2"></i>Settings
+      </a>
+    </div>
+
   </div>
   
   <!-- Stream Management - Fixed at bottom -->
