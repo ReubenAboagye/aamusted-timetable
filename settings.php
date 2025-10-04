@@ -91,7 +91,7 @@ if ($result) {
 $result = $conn->query("
     SELECT DISTINCT r.id, r.name, NULL as code, 'rooms' as table_name 
     FROM rooms r 
-    INNER JOIN course_roomtype cr ON r.room_type_id = cr.room_type_id 
+    INNER JOIN course_room_types cr ON r.room_type_id = cr.room_type_id 
     INNER JOIN courses c ON cr.course_id = c.id 
     WHERE r.is_active = 0 AND c.stream_id = $current_stream_id 
     ORDER BY r.name
@@ -106,7 +106,7 @@ if ($result) {
 $result = $conn->query("
     SELECT DISTINCT rt.id, rt.name, NULL as code, 'room_types' as table_name 
     FROM room_types rt 
-    INNER JOIN course_roomtype cr ON rt.id = cr.room_type_id 
+    INNER JOIN course_room_types cr ON rt.id = cr.room_type_id 
     INNER JOIN courses c ON cr.course_id = c.id 
     WHERE rt.is_active = 0 AND c.stream_id = $current_stream_id 
     ORDER BY rt.name
