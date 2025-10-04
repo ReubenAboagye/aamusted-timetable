@@ -583,8 +583,8 @@ if (!function_exists('getCount')) {
       </a>
       <div class="mx-auto text-white" id="currentStream">
         <i class="fas fa-clock me-2"></i>Current Stream: 
-        <?php if (!empty($current_stream_name)): ?>
-          <span class="me-2"><strong><?= htmlspecialchars($current_stream_name) ?></strong></span>
+        <?php if (!empty($current_stream_name) && isset($active_stream)): ?>
+          <span class="me-2"><strong><?= htmlspecialchars($current_stream_name) ?> (ID: <?= $active_stream ?>)</strong></span>
         <?php else: ?>
           <span class="me-2 text-warning">
             <strong>No Stream Selected</strong>
@@ -788,10 +788,10 @@ if (!function_exists('getCount')) {
     .then(response => response.json())
     .then(data => {
       if (data.success) {
-        // Update the current stream display
+        // Update the current stream display with both name and ID
         const currentStreamElement = document.querySelector('#currentStream strong');
         if (currentStreamElement) {
-          currentStreamElement.textContent = data.stream_name;
+          currentStreamElement.textContent = data.stream_name + ' (ID: ' + streamId + ')';
         }
         
         // Trigger custom event for pages to listen to
@@ -822,7 +822,7 @@ if (!function_exists('getCount')) {
     // Update header display if we have stream name but it's showing "Selected"
     const currentStreamElement = document.querySelector('#currentStream strong');
     if (currentStreamElement && currentStreamName && currentStreamElement.textContent.trim() === 'Selected') {
-      currentStreamElement.textContent = currentStreamName;
+      currentStreamElement.textContent = currentStreamName + ' (ID: ' + currentStreamId + ')';
     }
     
     if (currentStreamId && document.getElementById('streamSelect')) {
