@@ -547,8 +547,8 @@ window.renderTable = function() {
                                 onclick="openEditModal(${course.id}, '${AjaxUtils.escapeHtml(course.name)}', '${AjaxUtils.escapeHtml(course.code)}', ${course.department_id}, ${course.hours_per_week}, ${course.is_active})">
                             <i class="fas fa-edit"></i>
                         </button>
-                        <button class="btn btn-danger btn-sm" 
-                                onclick="deleteCourse(${course.id})">
+                        <button class="btn btn-danger btn-sm delete-btn" 
+                                data-id="${course.id}">
                             <i class="fas fa-trash"></i>
                         </button>
                     </td>
@@ -584,6 +584,12 @@ $(document).ready(function() {
         // Reload data for the new stream
         window.loadInitialData();
     });
+});
+
+// Event delegation for delete buttons
+$(document).on('click', '.delete-btn', function() {
+    const id = $(this).data('id');
+    deleteCourse(id);
 });
 
 // Handle add course form submission
@@ -753,7 +759,7 @@ async function deleteCourse(id) {
         return;
     }
     
-    const deleteBtn = document.querySelector(`button[onclick="deleteCourse(${id})"]`);
+    const deleteBtn = document.querySelector(`.delete-btn[data-id="${id}"]`);
     const originalContent = deleteBtn.innerHTML;
     deleteBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
     deleteBtn.disabled = true;

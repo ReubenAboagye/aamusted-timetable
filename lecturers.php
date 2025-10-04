@@ -537,12 +537,15 @@ $(document).ready(function() {
                             </span>
                         </td>
                         <td>
-                            <button class="btn btn-warning btn-sm me-1" 
-                                    onclick="openEditModal(${lecturer.id}, '${AjaxUtils.escapeHtml(lecturer.name)}', ${lecturer.department_id}, ${lecturer.is_active})">
+                            <button class="btn btn-warning btn-sm me-1 edit-btn" 
+                                    data-id="${lecturer.id}" 
+                                    data-name="${AjaxUtils.escapeHtml(lecturer.name)}" 
+                                    data-department-id="${lecturer.department_id}" 
+                                    data-is-active="${lecturer.is_active}">
                                 <i class="fas fa-edit"></i>
                             </button>
-                            <button class="btn btn-danger btn-sm" 
-                                    onclick="deleteLecturer(${lecturer.id})">
+                            <button class="btn btn-danger btn-sm delete-btn" 
+                                    data-id="${lecturer.id}">
                                 <i class="fas fa-trash"></i>
                             </button>
                         </td>
@@ -551,6 +554,20 @@ $(document).ready(function() {
             });
         }
     }
+
+    // Event delegation for edit and delete buttons
+    $(document).on('click', '.edit-btn', function() {
+        const id = $(this).data('id');
+        const name = $(this).data('name');
+        const departmentId = $(this).data('department-id');
+        const isActive = $(this).data('is-active');
+        openEditModal(id, name, departmentId, isActive);
+    });
+
+    $(document).on('click', '.delete-btn', function() {
+        const id = $(this).data('id');
+        deleteLecturer(id);
+    });
 
     // Handle add lecturer form submission
     function handleAddLecturer(e) {
@@ -710,7 +727,7 @@ async function deleteLecturer(id) {
         return;
     }
     
-    const deleteBtn = document.querySelector(`button[onclick="deleteLecturer(${id})"]`);
+    const deleteBtn = document.querySelector(`.delete-btn[data-id="${id}"]`);
     const originalContent = deleteBtn.innerHTML;
     deleteBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
     deleteBtn.disabled = true;

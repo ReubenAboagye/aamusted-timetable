@@ -583,7 +583,6 @@ async function deleteRoomType(id, name) {
             console.error('Error:', error);
             showAlert('error', 'Failed to delete room type');
         });
-    }
 }
 
 // Utility functions

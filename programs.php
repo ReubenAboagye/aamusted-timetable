@@ -528,7 +528,7 @@ async function deleteProgram(id) {
         if (result.success) {
             showAlert('success', result.message);
             loadPrograms(); // Reload the table
-    } else {
+        } else {
             showAlert('error', result.message);
         }
     } catch (error) {
