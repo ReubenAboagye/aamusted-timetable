@@ -70,7 +70,7 @@ if ($result && $result->num_rows > 0) {
     echo "<p> " . count($correct_assignments) . " assignments are correct</p>\n";
     
 } else {
-    echo "<p style='color: red;'>❌ No class-course assignments found or error querying database</p>\n";
+    echo "<p style='color: red;'>No class-course assignments found or error querying database</p>\n";
 }
 
 // Check for academic year assignments

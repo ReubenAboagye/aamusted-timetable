@@ -1293,6 +1293,10 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
 ?>
 
 <?php include 'includes/header.php'; ?>
+
+<!-- Include custom dialog system -->
+<link rel="stylesheet" href="css/custom-dialogs.css">
+<script src="js/custom-dialogs.js"></script>
 <?php include 'includes/sidebar.php'; ?>
 
 <div class="main-content" id="mainContent">
@@ -3604,8 +3608,8 @@ function updateTimetableEntry(index, field, value) {
 }
 
 // Delete timetable entry
-function deleteTimetableEntry(index) {
-    if (confirm('Are you sure you want to delete this timetable entry?')) {
+async function deleteTimetableEntry(index) {
+    if (await customDanger('Are you sure you want to delete this timetable entry?<br><br>This action cannot be undone.')) {
         generatedTimetableData.splice(index, 1);
         showDetailedTimetableEditor(); // Refresh the editor
     }
@@ -3663,13 +3667,13 @@ function cancelTimetableEdit() {
 }
 
 // Save timetable to saved timetables
-function saveToSavedTimetables() {
+async function saveToSavedTimetables() {
     if (!currentGenerationParams) {
         showErrorMessage('No timetable generated to save.');
         return;
     }
     
-    if (!confirm('Are you sure you want to save this timetable to Saved Timetables?')) {
+    if (!(await customConfirm('Are you sure you want to save this timetable to Saved Timetables?<br><br>This will create a permanent copy of the current timetable.'))) {
         return;
     }
     
@@ -4995,8 +4999,8 @@ function loadVersion(versionName) {
     window.location.href = url.toString();
 }
 
-function deleteVersion(versionName) {
-    if (!confirm(`Are you sure you want to delete the "${versionName}" version? This action cannot be undone.`)) {
+async function deleteVersion(versionName) {
+    if (!(await customDanger(`Are you sure you want to delete the "${versionName}" version?<br><br><strong>This action cannot be undone!</strong><br><br>All timetable data for this version will be permanently removed.`))) {
         return;
     }
     
@@ -5087,7 +5091,7 @@ function autoScheduleUnscheduledCourses() {
             
             // Add detailed constraint failure information
             if (data.constraint_failures && data.constraint_failures.length > 0) {
-                message += `\n\n📋 Detailed Constraint Analysis:\n`;
+                message += `\n\nDetailed Constraint Analysis:\n`;
                 data.constraint_failures.forEach(failure => {
                     message += `\n• ${failure.course_code} - ${failure.class_name}: ${failure.reason}`;
                     if (failure.details) {

@@ -44,7 +44,7 @@ if (!empty($lecturer_courses)) {
     if ($lecturer_key === $expected_key) {
         echo "<p style='color: green;'>✓ getLecturerConflictKey is working correctly</p>\n";
     } else {
-        echo "<p style='color: red;'>❌ getLecturerConflictKey is not working correctly</p>\n";
+        echo "<p style='color: red;'>getLecturerConflictKey is not working correctly</p>\n";
     }
     
     // Test with multiple genes that should conflict
@@ -76,7 +76,7 @@ if (!empty($lecturer_courses)) {
     if ($conflicts) {
         echo "<p style='color: green;'>✓ Conflict detection is working correctly</p>\n";
     } else {
-        echo "<p style='color: red;'>❌ Conflict detection is not working correctly</p>\n";
+        echo "<p style='color: red;'>Conflict detection is not working correctly</p>\n";
     }
     
     // Test with different lecturers (should not conflict)
@@ -98,7 +98,7 @@ if (!empty($lecturer_courses)) {
         if (!$conflicts2) {
             echo "<p style='color: green;'>✓ Non-conflict detection is working correctly</p>\n";
         } else {
-            echo "<p style='color: red;'>❌ Non-conflict detection is not working correctly</p>\n";
+            echo "<p style='color: red;'>Non-conflict detection is not working correctly</p>\n";
         }
     }
 }

@@ -26,9 +26,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     
     echo "<h3>CSRF Check:</h3>";
     if (isset($_POST['csrf_token']) && $_POST['csrf_token'] === $_SESSION['csrf_token']) {
-        echo "✅ CSRF token is valid";
+        echo "CSRF token is valid";
     } else {
-        echo "❌ CSRF token validation failed";
+        echo "CSRF token validation failed";
         echo "<br>Expected: " . $_SESSION['csrf_token'];
         echo "<br>Received: " . ($_POST['csrf_token'] ?? 'none');
     }

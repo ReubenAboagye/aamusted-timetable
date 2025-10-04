@@ -25,11 +25,11 @@ if (isset($_POST['confirm_remove'])) {
             if ($conn->query($drop_query)) {
                 echo "<p style='color: green;'>✓ Removed constraint: {$constraint}</p>";
             } else {
-                echo "<p style='color: orange;'>⚠ Constraint {$constraint} may not exist: " . $conn->error . "</p>";
+                echo "<p style='color: orange;'>Constraint {$constraint} may not exist: " . $conn->error . "</p>";
             }
         }
         
-        echo "<h3 style='color: green;'>✅ All problematic constraints removed!</h3>";
+        echo "<h3 style='color: green;'>All problematic constraints removed!</h3>";
         echo "<p><strong>You can now generate timetable versions without constraint conflicts.</strong></p>";
         echo "<p><em>Note: This removes some data integrity checks. Make sure your application logic handles duplicates appropriately.</em></p>";
         
@@ -64,7 +64,7 @@ if (isset($_POST['confirm_remove'])) {
             echo "<tr>";
             echo "<td>{$name}</td>";
             echo "<td>{$columns_str}</td>";
-            echo "<td>" . ($will_remove ? '❌ Yes' : '✅ Keep') . "</td>";
+            echo "<td>" . ($will_remove ? 'Yes' : 'Keep') . "</td>";
             echo "</tr>";
         }
         echo "</table>";

@@ -139,7 +139,7 @@ try {
     // Commit transaction
     $conn->commit();
     
-    echo "\n🎉 MIGRATION COMPLETED SUCCESSFULLY! 🎉\n";
+    echo "\nMIGRATION COMPLETED SUCCESSFULLY!\n";
     echo "\nThe system now supports:\n";
     echo "• Same course codes across different streams\n";
     echo "• Same program codes across different streams\n";
@@ -151,7 +151,7 @@ try {
 } catch (Exception $e) {
     // Rollback transaction on error
     $conn->rollback();
-    echo "\n❌ MIGRATION FAILED: " . $e->getMessage() . "\n";
+    echo "\nMIGRATION FAILED: " . $e->getMessage() . "\n";
     echo "Transaction rolled back. No changes were made.\n";
 }
 

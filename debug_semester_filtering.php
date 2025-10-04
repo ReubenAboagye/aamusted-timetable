@@ -94,7 +94,7 @@ try {
         echo "</ul>\n";
         
         if ($filteredCount == 0) {
-            echo "<p style='color: red;'>❌ All class courses were filtered out!</p>\n";
+            echo "<p style='color: red;'>All class courses were filtered out!</p>\n";
             echo "<p>This means either:</p>\n";
             echo "<ul>\n";
             echo "<li>Course codes don't follow the expected pattern</li>\n";
@@ -174,7 +174,7 @@ try {
     }
     
 } catch (Exception $e) {
-    echo "<p style='color: red;'>❌ Error: " . $e->getMessage() . "</p>\n";
+    echo "<p style='color: red;'>Error: " . $e->getMessage() . "</p>\n";
 }
 
 echo "<hr>\n";

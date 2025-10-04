@@ -29,7 +29,7 @@ try {
         
         foreach ($constraint_info as $name => $columns) {
             $includes_version = in_array('version', $columns);
-            $action = $includes_version ? '✅ OK' : '❌ Needs Fix';
+            $action = $includes_version ? 'OK' : 'Needs Fix';
             $columns_str = implode(', ', $columns);
             
             echo "<tr>";
@@ -72,13 +72,13 @@ try {
     $verify_result = $conn->query($verify_query);
     
     if ($verify_result && $verify_result->num_rows > 0) {
-        echo "<p style='color: green;'>✅ Constraint verification successful!</p>";
+        echo "<p style='color: green;'>Constraint verification successful!</p>";
         echo "<p>New constraint includes version field, allowing proper versioning.</p>";
     } else {
-        echo "<p style='color: red;'>❌ Constraint verification failed!</p>";
+        echo "<p style='color: red;'>Constraint verification failed!</p>";
     }
     
-    echo "<h3 style='color: green;'>✅ All constraint fixes applied successfully!</h3>";
+    echo "<h3 style='color: green;'>All constraint fixes applied successfully!</h3>";
     echo "<p><strong>You can now generate multiple timetable versions without constraint conflicts.</strong></p>";
     
     // Optional: Show alternative approach

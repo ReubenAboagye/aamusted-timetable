@@ -125,7 +125,7 @@ if (!empty($fitness['hard_violations']['lecturer_conflict'])) {
         echo "<p>Class Course ID {$violation['class_course_id']}: {$violation['message']}</p>\n";
     }
 } else {
-    echo "<p style='color: red;'>❌ No lecturer conflicts detected - this indicates the fix is not working</p>\n";
+    echo "<p style='color: red;'>No lecturer conflicts detected - this indicates the fix is not working</p>\n";
 }
 
 // Test 3: Test the getLecturerConflictKey method directly
@@ -152,7 +152,7 @@ echo "<p>Expected key format: {$lecturer_id}|1|1</p>\n";
 if ($lecturer_key === "{$lecturer_id}|1|1") {
     echo "<p style='color: green;'>✓ getLecturerConflictKey is working correctly</p>\n";
 } else {
-    echo "<p style='color: red;'>❌ getLecturerConflictKey is not working correctly</p>\n";
+    echo "<p style='color: red;'>getLecturerConflictKey is not working correctly</p>\n";
 }
 
 $conn->close();

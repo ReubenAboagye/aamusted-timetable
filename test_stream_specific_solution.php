@@ -22,7 +22,7 @@ try {
     if ($course_constraints && $course_constraints->num_rows > 0) {
         echo "✓ Course stream-specific constraint exists\n";
     } else {
-        echo "❌ Course stream-specific constraint missing - please run migration first\n";
+        echo "Course stream-specific constraint missing - please run migration first\n";
         exit;
     }
     
@@ -31,7 +31,7 @@ try {
     if ($program_constraints && $program_constraints->num_rows > 0) {
         echo "✓ Program stream-specific constraint exists\n";
     } else {
-        echo "❌ Program stream-specific constraint missing - please run migration first\n";
+        echo "Program stream-specific constraint missing - please run migration first\n";
         exit;
     }
     
@@ -45,14 +45,14 @@ try {
     }
     
     if (count($streams) < 2) {
-        echo "❌ Need at least 2 streams for testing. Please add more streams.\n";
+        echo "Need at least 2 streams for testing. Please add more streams.\n";
         exit;
     }
     
     // Get a department for testing
     $dept_result = $conn->query("SELECT id, name FROM departments WHERE is_active = 1 LIMIT 1");
     if (!$dept_result || $dept_result->num_rows === 0) {
-        echo "❌ No active departments found. Please add a department first.\n";
+        echo "No active departments found. Please add a department first.\n";
         exit;
     }
     $department = $dept_result->fetch_assoc();
@@ -80,7 +80,7 @@ try {
         if ($stmt->execute()) {
             echo "  ✓ Successfully added\n";
         } else {
-            echo "  ❌ Failed: " . $stmt->error . "\n";
+            echo "  Failed: " . $stmt->error . "\n";
         }
         $stmt->close();
     }
@@ -121,7 +121,7 @@ try {
         if ($stmt->execute()) {
             echo "  ✓ Successfully added\n";
         } else {
-            echo "  ❌ Failed: " . $stmt->error . "\n";
+            echo "  Failed: " . $stmt->error . "\n";
         }
         $stmt->close();
     }
@@ -153,7 +153,7 @@ try {
     $duplicate_stmt->bind_param("ssii", 'ITC343', 'Machine Learning', $department['id'], $streams[0]['id']);
     
     if ($duplicate_stmt->execute()) {
-        echo "  ❌ ERROR: Duplicate course code was allowed!\n";
+        echo "  ERROR: Duplicate course code was allowed!\n";
     } else {
         echo "  ✓ Correctly prevented duplicate course code: " . $duplicate_stmt->error . "\n";
     }
@@ -166,7 +166,7 @@ try {
     $duplicate_stmt->bind_param("ssii", 'Information Technology', 'CS101', $department['id'], $streams[0]['id']);
     
     if ($duplicate_stmt->execute()) {
-        echo "  ❌ ERROR: Duplicate program code was allowed!\n";
+        echo "  ERROR: Duplicate program code was allowed!\n";
     } else {
         echo "  ✓ Correctly prevented duplicate program code: " . $duplicate_stmt->error . "\n";
     }
@@ -187,7 +187,7 @@ try {
     if ($cross_stmt->execute()) {
         echo "  ✓ Successfully added same course code in different stream\n";
     } else {
-        echo "  ❌ Failed to add same course code in different stream: " . $cross_stmt->error . "\n";
+        echo "  Failed to add same course code in different stream: " . $cross_stmt->error . "\n";
     }
     $cross_stmt->close();
     
@@ -208,7 +208,7 @@ try {
     echo "- ITC347: Artificial Intelligence (Weekend stream)\n";
     
 } catch (Exception $e) {
-    echo "\n❌ TEST FAILED: " . $e->getMessage() . "\n";
+    echo "\nTEST FAILED: " . $e->getMessage() . "\n";
 }
 
 echo "</pre>\n";

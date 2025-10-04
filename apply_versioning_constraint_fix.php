@@ -66,10 +66,10 @@ try {
     if ($conn->query($add_index)) {
         echo "<p style='color: green;'>✓ Performance index added successfully</p>";
     } else {
-        echo "<p style='color: orange;'>⚠ Index might already exist: " . $conn->error . "</p>";
+        echo "<p style='color: orange;'>Index might already exist: " . $conn->error . "</p>";
     }
     
-    echo "<h3 style='color: green;'>✅ Timetable versioning constraint fix applied successfully!</h3>";
+    echo "<h3 style='color: green;'>Timetable versioning constraint fix applied successfully!</h3>";
     echo "<p>You can now generate multiple timetable versions without constraint conflicts.</p>";
     
 } catch (Exception $e) {
