@@ -133,10 +133,25 @@ if (file_exists($flashFile)) {
 // --- Handle stream switching (keep session key consistent with index.php) ---
 if (isset($_GET['stream_id'])) {
     $_SESSION['active_stream'] = intval($_GET['stream_id']);
+    $_SESSION['current_stream_id'] = intval($_GET['stream_id']);
 }
 
-// Determine active stream (use value from including page if provided)
-$active_stream = $active_stream ?? $_SESSION['active_stream'] ?? $_SESSION['stream_id'] ?? 1; // default to Regular (id=1)
+// Always validate and ensure we have a proper active stream
+include_once __DIR__ . '/stream_validation.php';
+$stream_validation = getCurrentStreamInfo($conn);
+
+if ($stream_validation['valid']) {
+    // Use validated stream information
+    $active_stream = $stream_validation['stream_id'];
+    $current_stream_name = $stream_validation['stream_name'];
+    // Ensure session consistency
+    $_SESSION['active_stream'] = $active_stream;
+    $_SESSION['current_stream_id'] = $active_stream;
+} else {
+    // Fallback to provided value or default
+    $active_stream = $active_stream ?? $_SESSION['active_stream'] ?? $_SESSION['stream_id'] ?? 1;
+    $current_stream_name = 'No Stream Selected';
+}
 
 // --- Fetch streams dynamically if not already provided by caller ---
 if (!isset($streams) || !is_array($streams) || empty($streams)) {
@@ -151,7 +166,7 @@ if (!isset($streams) || !is_array($streams) || empty($streams)) {
     }
 
     if (isset($conn) && $conn) {
-        $result = $conn->query("SELECT id, name FROM streams WHERE is_active = 1 ORDER BY id ASC");
+        $result = $conn->query("SELECT id, name, is_active FROM streams ORDER BY id ASC");
         if ($result) {
             while ($row = $result->fetch_assoc()) {
                 $streams[] = $row;
@@ -165,38 +180,9 @@ if (!isset($streams) || !is_array($streams) || empty($streams)) {
     }
 }
 
-// --- Get current stream name if not provided by caller ---
+// Stream name is already set by validation above, but ensure it's available
 if (!isset($current_stream_name) || empty($current_stream_name)) {
-    $current_stream_name = '';
-    
-    // Check if we have active stream and streams
-    $has_active_stream = isset($active_stream) && $active_stream > 0;
-    $has_streams = !empty($streams) && is_array($streams);
-    
-    if ($has_active_stream && $has_streams) {
-        foreach ($streams as $s) {
-            if ($s['id'] == $active_stream) {
-                $current_stream_name = $s['name'];
-                break;
-            }
-        }
-    }
-    
-    // Fallback: If we still don't have a name, try to get it directly from database
-    if (empty($current_stream_name) && isset($conn) && $active_stream && $active_stream > 0) {
-        $stream_query = "SELECT name FROM streams WHERE id = ? AND is_active = 1 LIMIT 1";
-        $stmt = $conn->prepare($stream_query);
-        if ($stmt) {
-            $stmt->bind_param("i", $active_stream);
-            $stmt->execute();
-            $result = $stmt->get_result();
-            $row = $result->fetch_assoc();
-            if ($row) {
-                $current_stream_name = $row['name'];
-            }
-            $stmt->close();
-        }
-    }
+    $current_stream_name = 'No Stream Selected';
 }
 
 // Render any flash message (if included by pages), except on rooms.php per request
