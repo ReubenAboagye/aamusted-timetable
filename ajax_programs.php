@@ -1,10 +1,15 @@
 <?php
-// Include custom error handler for better error display
-include_once 'includes/custom_error_handler.php';
+// Disable custom error handler for AJAX requests to prevent HTML output
+if (isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest') {
+    // This is an AJAX request, don't use custom error handler
+} else {
+    // Include custom error handler for better error display
+    include_once 'includes/custom_error_handler.php';
+}
 
 // Enable error reporting for debugging
 error_reporting(E_ALL);
-ini_set('display_errors', 1);
+ini_set('display_errors', 0); // Don't display errors, log them instead
 
 if (session_status() == PHP_SESSION_NONE) {
     session_start();

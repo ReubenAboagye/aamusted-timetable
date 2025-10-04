@@ -520,8 +520,24 @@ async function deleteProgram(id) {
         
         const response = await fetch('ajax_programs.php', {
             method: 'POST',
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest'
+            },
             body: formData
         });
+        
+        // Check if response is ok
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        // Check if response is JSON
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+            const text = await response.text();
+            console.error('Non-JSON response:', text);
+            throw new Error('Server returned non-JSON response');
+        }
         
         const result = await response.json();
         
@@ -533,7 +549,7 @@ async function deleteProgram(id) {
         }
     } catch (error) {
         console.error('Error deleting program:', error);
-        showAlert('error', 'Error deleting program');
+        showAlert('error', 'Error deleting program: ' + error.message);
     }
 }
 
