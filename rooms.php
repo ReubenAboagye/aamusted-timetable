@@ -489,6 +489,10 @@ $pageTitle = 'Rooms Management';
 include 'includes/header.php';
 include 'includes/sidebar.php';
 
+// Include custom dialog system
+echo '<link rel="stylesheet" href="css/custom-dialogs.css">';
+echo '<script src="js/custom-dialogs.js"></script>';
+
 /**
  * HARDCODED ROOM TYPES (Application-level validation):
  * - classroom
@@ -681,7 +685,7 @@ if ($result && $result->num_rows > 0) {
                                     <button class="btn btn-sm btn-outline-primary me-1" onclick="editRoom(<?php echo (int)$row['id']; ?>, '<?php echo addslashes($row['name']); ?>', <?php echo (int)$row['building_id']; ?>, '<?php echo addslashes(ucwords(str_replace('_', ' ', $row['room_type']))); ?>', <?php echo (int)$row['capacity']; ?>)">
                                         <i class="fas fa-edit"></i>
                                     </button>
-                                    <form method="POST" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this room?')">
+                                    <form method="POST" style="display: inline;" onsubmit="return confirmRoomDeletion(event, <?php echo $row['id']; ?>, '<?php echo addslashes($row['name']); ?>')">
                                         <input type="hidden" name="action" value="delete">
                                         <input type="hidden" name="id" value="<?php echo $row['id']; ?>">
                                         <button type="submit" class="btn btn-sm btn-outline-danger">
@@ -1011,6 +1015,26 @@ include 'includes/footer.php';
 ?>
 
 <script>
+// Custom dialog function for room deletion
+async function confirmRoomDeletion(event, roomId, roomName) {
+    event.preventDefault(); // Prevent form submission
+    
+    const confirmed = await customDanger(
+        `Are you sure you want to delete the room "${roomName}"?<br><br><strong>This action cannot be undone!</strong><br><br>This will permanently remove the room from the system.`,
+        {
+            title: 'Delete Room',
+            confirmText: 'Delete Permanently',
+            cancelText: 'Cancel',
+            confirmButtonClass: 'danger'
+        }
+    );
+    
+    if (confirmed) {
+        // Submit the form
+        event.target.closest('form').submit();
+    }
+}
+
 // Debug: Check if Bootstrap is loading
 console.log('Rooms page loading...');
 console.log('Bootstrap available:', typeof bootstrap !== 'undefined');
@@ -1210,14 +1234,14 @@ document.addEventListener('DOMContentLoaded', function() {
     });
     
     // Toggle status functionality
-    toggleStatusBtn?.addEventListener('click', function() {
+    toggleStatusBtn?.addEventListener('click', async function() {
         const selectedRows = document.querySelectorAll('tbody tr:not([style*="display: none"]) input[type="checkbox"]:checked');
         if (selectedRows.length === 0) {
             alert('Please select at least one room to toggle status.');
             return;
         }
         
-        if (confirm(`Are you sure you want to toggle the status of ${selectedRows.length} selected room(s)?`)) {
+        if (await customWarning(`Are you sure you want to toggle the status of ${selectedRows.length} selected room(s)?<br><br>This will change the active/inactive status of the selected rooms.`)) {
             const roomIds = Array.from(selectedRows).map(cb => cb.value);
             toggleRoomStatus(roomIds);
         }
@@ -1225,7 +1249,7 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Save checkbox states functionality
     const saveCheckboxBtn = document.getElementById('saveCheckboxBtn');
-    saveCheckboxBtn?.addEventListener('click', function() {
+    saveCheckboxBtn?.addEventListener('click', async function() {
         const roomCheckboxes = document.querySelectorAll('.room-checkbox');
         const roomStates = {};
         
@@ -1233,7 +1257,7 @@ document.addEventListener('DOMContentLoaded', function() {
             roomStates[checkbox.value] = checkbox.checked ? 1 : 0;
         });
         
-        if (confirm('Are you sure you want to save the current room active states?')) {
+        if (await customConfirm('Are you sure you want to save the current room active states?<br><br>This will update the database with the current checkbox selections.')) {
             saveCheckboxStates(roomStates);
         }
     });

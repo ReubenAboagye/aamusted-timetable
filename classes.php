@@ -3,6 +3,10 @@ $pageTitle = 'Classes Management';
 include 'includes/header.php';
 include 'includes/sidebar.php';
 
+// Include custom dialog system
+echo '<link rel="stylesheet" href="css/custom-dialogs.css">';
+echo '<script src="js/custom-dialogs.js"></script>';
+
 // Database connection
 include_once 'connect.php';
 
@@ -830,7 +834,7 @@ $level_result = $conn->query($level_sql);
                                              data-stream="<?php echo (int)($row['stream_id'] ?? 0); ?>">
                                          <i class="fas fa-edit"></i>
                                      </button>
-                                     <form method="POST" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this class?')">
+                                     <form method="POST" style="display: inline;" onsubmit="return confirmClassDeletion(event, <?php echo $row['id']; ?>, '<?php echo addslashes($row['name']); ?>')">
                                          <input type="hidden" name="action" value="delete">
                                          <input type="hidden" name="id" value="<?php echo $row['id']; ?>">
                                          <button type="submit" class="btn btn-sm btn-outline-danger">
@@ -1062,6 +1066,26 @@ include 'includes/footer.php';
 ?>
 
 <script>
+// Custom dialog function for class deletion
+async function confirmClassDeletion(event, classId, className) {
+    event.preventDefault(); // Prevent form submission
+    
+    const confirmed = await customDanger(
+        `Are you sure you want to delete the class "${className}"?<br><br><strong>This action cannot be undone!</strong><br><br>This will permanently remove the class and all associated data from the system.`,
+        {
+            title: 'Delete Class',
+            confirmText: 'Delete Permanently',
+            cancelText: 'Cancel',
+            confirmButtonClass: 'danger'
+        }
+    );
+    
+    if (confirmed) {
+        // Submit the form
+        event.target.closest('form').submit();
+    }
+}
+
 // Stream filter functionality
 document.addEventListener('DOMContentLoaded', function() {
     const streamFilter = document.getElementById('streamFilter');

@@ -2,6 +2,11 @@
 $pageTitle = 'Manage Streams';
 include 'includes/header.php';
 include 'includes/sidebar.php';
+
+// Include custom dialog system
+echo '<link rel="stylesheet" href="css/custom-dialogs.css">';
+echo '<script src="js/custom-dialogs.js"></script>';
+
 // Time slots are global; streams select slots via mapping
 
 $success_message = "";
@@ -34,7 +39,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
         if ($stmt->execute()) {
             $stream_id = $conn->insert_id;
-            $success_message = "✅ Stream added successfully!";
+            $success_message = "Stream added successfully!";
 
             // If this stream is set as active, update session
             if ($is_active) {
@@ -57,7 +62,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 if (isset($ins) && $ins) $ins->close();
             }
         } else {
-            $error_message = "❌ Error adding stream: " . $conn->error;
+            $error_message = "Error adding stream: " . $conn->error;
         }
         $stmt->close();
     }
@@ -89,7 +94,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $stmt->bind_param("ssssii", $name, $code, $description, $active_days, $is_active, $id);
 
         if ($stmt->execute()) {
-            $success_message = "✅ Stream updated successfully!";
+            $success_message = "Stream updated successfully!";
 
             // If this stream is set as active, update session
             if ($is_active) {
@@ -119,7 +124,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 if (isset($ins) && $ins) $ins->close();
             }
         } else {
-            $error_message = "❌ Error updating stream: " . $conn->error;
+            $error_message = "Error updating stream: " . $conn->error;
         }
         $stmt->close();
     }
@@ -151,14 +156,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $_SESSION['stream_id'] = $id;
                 
                 $conn->commit();
-                $success_message = "✅ Stream activated successfully! All other streams have been deactivated.";
+                $success_message = "Stream activated successfully! All other streams have been deactivated.";
             } else {
                 throw new Exception("Error activating stream: " . $conn->error);
             }
             $stmt->close();
         } catch (Exception $e) {
             $conn->rollback();
-            $error_message = "❌ " . $e->getMessage();
+            $error_message = $e->getMessage();
         }
     }
 
@@ -171,9 +176,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $stmt->bind_param("i", $id);
 
         if ($stmt->execute()) {
-            $success_message = "✅ Stream deactivated successfully!";
+            $success_message = "Stream deactivated successfully!";
         } else {
-            $error_message = "❌ Error deactivating stream: " . $conn->error;
+            $error_message = "Error deactivating stream: " . $conn->error;
         }
         $stmt->close();
     }
@@ -239,7 +244,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             if ($stmt->execute()) {
                 if ($stmt->affected_rows > 0) {
                     $conn->commit();
-                    $success_message = "✅ Stream deleted successfully!";
+                    $success_message = "Stream deleted successfully!";
                 } else {
                     throw new Exception("Stream not found or already deleted.");
                 }
@@ -249,7 +254,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $stmt->close();
         } catch (Exception $e) {
             $conn->rollback();
-            $error_message = "❌ " . $e->getMessage();
+            $error_message = $e->getMessage();
         }
     }
 
@@ -416,7 +421,7 @@ $result = $conn->query("SELECT * FROM streams ORDER BY created_at DESC");
                         <input type="hidden" name="action" value="delete">
                         <input type="hidden" name="id" value="<?= $row['id']; ?>">
                         <button type="submit" class="btn btn-danger btn-sm w-100" 
-                                onclick="return confirm('Are you sure you want to permanently delete this stream? This action cannot be undone.')"
+                                onclick="confirmStreamDeletion(event, <?= $row['id']; ?>, '<?= addslashes($row['name']); ?>')"
                                 <?= $row['is_active'] ? 'disabled' : ''; ?>>
                             <i class="fas fa-trash"></i> Delete
                         </button>
@@ -433,14 +438,14 @@ $result = $conn->query("SELECT * FROM streams ORDER BY created_at DESC");
                             <form method="POST" class="mb-0">
                                 <input type="hidden" name="action" value="deactivate">
                                 <input type="hidden" name="id" value="<?= $row['id']; ?>">
-                                <button type="submit" class="btn btn-warning btn-sm w-100" onclick="return confirm('Are you sure you want to deactivate this stream?')">Deactivate</button>
+                                <button type="submit" class="btn btn-warning btn-sm w-100" onclick="confirmStreamDeactivation(event, <?= $row['id']; ?>, '<?= addslashes($row['name']); ?>')">Deactivate</button>
                             </form>
                         <?php else: ?>
                             <!-- Activate Form -->
                             <form method="POST" class="mb-0">
                                 <input type="hidden" name="action" value="activate">
                                 <input type="hidden" name="id" value="<?= $row['id']; ?>">
-                                <button type="submit" class="btn btn-success btn-sm w-100" onclick="return confirm('This will deactivate all other streams. Continue?')">Activate</button>
+                                <button type="submit" class="btn btn-success btn-sm w-100" onclick="confirmStreamActivation(event, <?= $row['id']; ?>, '<?= addslashes($row['name']); ?>')">Activate</button>
                             </form>
                         <?php endif; ?>
                     </div>
@@ -517,8 +522,66 @@ $result = $conn->query("SELECT * FROM streams ORDER BY created_at DESC");
 
 </div>
 
-<script>
-function editStream(streamId) {
+    <script>
+    // Custom dialog functions for stream management
+    async function confirmStreamDeletion(event, streamId, streamName) {
+        event.preventDefault(); // Prevent form submission
+        
+        const confirmed = await customDanger(
+            `Are you sure you want to permanently delete the stream "${streamName}"?<br><br><strong>This action cannot be undone!</strong><br><br>This will also delete all associated:<br>• Classes<br>• Courses<br>• Lecturer assignments<br>• Timetable entries`,
+            {
+                title: 'Delete Stream',
+                confirmText: 'Delete Permanently',
+                cancelText: 'Cancel',
+                confirmButtonClass: 'danger'
+            }
+        );
+        
+        if (confirmed) {
+            // Submit the form
+            event.target.closest('form').submit();
+        }
+    }
+
+    async function confirmStreamDeactivation(event, streamId, streamName) {
+        event.preventDefault(); // Prevent form submission
+        
+        const confirmed = await customWarning(
+            `Are you sure you want to deactivate the stream "${streamName}"?<br><br>This will:<br>• Make the stream inactive<br>• Prevent new timetable generation for this stream<br>• Keep existing data intact`,
+            {
+                title: 'Deactivate Stream',
+                confirmText: 'Deactivate',
+                cancelText: 'Cancel',
+                confirmButtonClass: 'warning'
+            }
+        );
+        
+        if (confirmed) {
+            // Submit the form
+            event.target.closest('form').submit();
+        }
+    }
+
+    async function confirmStreamActivation(event, streamId, streamName) {
+        event.preventDefault(); // Prevent form submission
+        
+        const confirmed = await customWarning(
+            `Are you sure you want to activate the stream "${streamName}"?<br><br>This will:<br>• Make this stream the active stream<br>• <strong>Deactivate all other streams</strong><br>• Set this as your current working stream`,
+            {
+                title: 'Activate Stream',
+                confirmText: 'Activate',
+                cancelText: 'Cancel',
+                confirmButtonClass: 'success'
+            }
+        );
+        
+        if (confirmed) {
+            // Submit the form
+            event.target.closest('form').submit();
+        }
+    }
+
+    function editStream(streamId) {
     // Fetch stream data via AJAX
     fetch('get_stream_data.php?id=' + streamId)
         .then(response => response.json())

@@ -4,6 +4,10 @@ $pageTitle = 'Programs Management';
 try {
     include 'includes/header.php';
     include 'includes/sidebar.php';
+
+    // Include custom dialog system
+    echo '<link rel="stylesheet" href="css/custom-dialogs.css">';
+    echo '<script src="js/custom-dialogs.js"></script>';
     include 'includes/flash.php';
 
     // Database connection (header may already include this)
@@ -495,7 +499,17 @@ async function deleteProgram(id) {
     const program = programs.find(p => p.id == id);
     if (!program) return;
     
-    if (!confirm(`Are you sure you want to delete "${program.name}"?`)) {
+    const confirmed = await customDanger(
+        `Are you sure you want to delete "${program.name}"?<br><br><strong>This action cannot be undone!</strong><br><br>This will permanently remove the program and all associated data from the system.`,
+        {
+            title: 'Delete Program',
+            confirmText: 'Delete Permanently',
+            cancelText: 'Cancel',
+            confirmButtonClass: 'danger'
+        }
+    );
+    
+    if (!confirmed) {
         return;
     }
     

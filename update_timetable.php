@@ -5,6 +5,10 @@ include 'connect.php';
 $pageTitle = 'Update Timetable Entry';
 include 'includes/header.php';
 
+// Include custom dialog system
+echo '<link rel="stylesheet" href="css/custom-dialogs.css">';
+echo '<script src="js/custom-dialogs.js"></script>';
+
 $success_message = '';
 $error_message = '';
 
@@ -592,9 +596,22 @@ $lecturer_courses_result = $conn->query("
         }
     });
 
-    function deleteEntry(id) {
-        if (confirm('Are you sure you want to delete this timetable entry? This action cannot be undone.')) {
-            const form = document.createElement('form');
+    async function deleteEntry(id) {
+        const confirmed = await customDanger(
+            'Are you sure you want to delete this timetable entry?<br><br><strong>This action cannot be undone!</strong><br><br>This will permanently remove the timetable entry from the system.',
+            {
+                title: 'Delete Timetable Entry',
+                confirmText: 'Delete Permanently',
+                cancelText: 'Cancel',
+                confirmButtonClass: 'danger'
+            }
+        );
+        
+        if (!confirmed) {
+            return;
+        }
+        
+        const form = document.createElement('form');
             form.method = 'POST';
             form.action = 'update_timetable.php';
             

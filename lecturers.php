@@ -15,6 +15,10 @@ $current_stream_name = $stream_info['stream_name'];
 include 'includes/header.php';
 include 'includes/sidebar.php';
 
+// Include custom dialog system
+echo '<link rel="stylesheet" href="css/custom-dialogs.css">';
+echo '<script src="js/custom-dialogs.js"></script>';
+
 // Initialize empty arrays for data - will be populated via AJAX
 $lecturers = [];
 $departments = [];
@@ -691,8 +695,18 @@ function openEditModal(id, name, departmentId, isActive) {
     modal.show();
 }
 
-function deleteLecturer(id) {
-    if (!confirm('Are you sure you want to delete this lecturer? This action cannot be undone.')) {
+async function deleteLecturer(id) {
+    const confirmed = await customDanger(
+        'Are you sure you want to delete this lecturer?<br><br><strong>This action cannot be undone!</strong><br><br>This will permanently remove the lecturer and all associated data from the system.',
+        {
+            title: 'Delete Lecturer',
+            confirmText: 'Delete Permanently',
+            cancelText: 'Cancel',
+            confirmButtonClass: 'danger'
+        }
+    );
+    
+    if (!confirmed) {
         return;
     }
     

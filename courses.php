@@ -24,6 +24,10 @@ if (!isset($_SESSION['csrf_token'])) {
 include 'includes/header.php';
 include 'includes/sidebar.php';
 
+// Include custom dialog system
+echo '<link rel="stylesheet" href="css/custom-dialogs.css">';
+echo '<script src="js/custom-dialogs.js"></script>';
+
 // Initialize empty arrays for data - will be populated via AJAX
 $courses = [];
 $departments = [];
@@ -734,8 +738,18 @@ function openEditModal(id, name, code, departmentId, hoursPerWeek, isActive) {
     modal.show();
 }
 
-function deleteCourse(id) {
-    if (!confirm('Are you sure you want to delete this course? This action cannot be undone.')) {
+async function deleteCourse(id) {
+    const confirmed = await customDanger(
+        'Are you sure you want to delete this course?<br><br><strong>This action cannot be undone!</strong><br><br>This will permanently remove the course and all associated data from the system.',
+        {
+            title: 'Delete Course',
+            confirmText: 'Delete Permanently',
+            cancelText: 'Cancel',
+            confirmButtonClass: 'danger'
+        }
+    );
+    
+    if (!confirmed) {
         return;
     }
     

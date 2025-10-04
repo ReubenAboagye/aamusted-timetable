@@ -25,6 +25,10 @@ if (!isset($_SESSION['csrf_token'])) {
 include 'includes/header.php';
 include 'includes/sidebar.php';
 
+// Include custom dialog system
+echo '<link rel="stylesheet" href="css/custom-dialogs.css">';
+echo '<script src="js/custom-dialogs.js"></script>';
+
 // Initialize empty arrays for data - will be populated via AJAX
 $departments = [];
 ?>
@@ -669,8 +673,18 @@ function openEditModal(id, name, code, isActive) {
     modal.show();
 }
 
-function deleteDepartment(id) {
-    if (!confirm('Are you sure you want to delete this department? This action cannot be undone.')) {
+async function deleteDepartment(id) {
+    const confirmed = await customDanger(
+        'Are you sure you want to delete this department?<br><br><strong>This action cannot be undone!</strong><br><br>This will permanently remove the department and all associated data from the system.',
+        {
+            title: 'Delete Department',
+            confirmText: 'Delete Permanently',
+            cancelText: 'Cancel',
+            confirmButtonClass: 'danger'
+        }
+    );
+    
+    if (!confirmed) {
         return;
     }
     

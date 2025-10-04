@@ -18,6 +18,10 @@ if (!isset($_SESSION['csrf_token'])) {
 include 'includes/header.php';
 include 'includes/sidebar.php';
 
+// Include custom dialog system
+echo '<link rel="stylesheet" href="css/custom-dialogs.css">';
+echo '<script src="js/custom-dialogs.js"></script>';
+
 // Initialize empty arrays for data - will be populated via AJAX
 $room_types = [];
 ?>
@@ -541,9 +545,22 @@ function editRoomType(id, name, description, isActive) {
 }
 
 // Delete room type function
-function deleteRoomType(id, name) {
-    if (confirm(`Are you sure you want to delete the room type "${name}"?`)) {
-        const formData = new FormData();
+async function deleteRoomType(id, name) {
+    const confirmed = await customDanger(
+        `Are you sure you want to delete the room type "${name}"?<br><br><strong>This action cannot be undone!</strong><br><br>This will permanently remove the room type from the system.`,
+        {
+            title: 'Delete Room Type',
+            confirmText: 'Delete Permanently',
+            cancelText: 'Cancel',
+            confirmButtonClass: 'danger'
+        }
+    );
+    
+    if (!confirmed) {
+        return;
+    }
+    
+    const formData = new FormData();
         formData.append('module', 'room_type');
         formData.append('action', 'delete');
         formData.append('id', id);

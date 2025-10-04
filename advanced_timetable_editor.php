@@ -126,6 +126,10 @@ include 'connect.php';
 include 'includes/header.php';
 include 'includes/sidebar.php';
 
+// Include custom dialog system
+echo '<link rel="stylesheet" href="css/custom-dialogs.css">';
+echo '<script src="js/custom-dialogs.js"></script>';
+
 // Get parameters (versions, stream, semester)
 $stream_id = isset($_GET['stream_id']) ? intval($_GET['stream_id']) : 0;
 $version = isset($_GET['version']) ? $_GET['version'] : '';
@@ -700,9 +704,22 @@ function editEntry(entryId) {
     }
 }
 
-function deleteEntry(entryId) {
-    if (confirm('Are you sure you want to delete this timetable entry?')) {
-        const formData = new FormData();
+async function deleteEntry(entryId) {
+    const confirmed = await customDanger(
+        'Are you sure you want to delete this timetable entry?<br><br><strong>This action cannot be undone!</strong><br><br>This will permanently remove the timetable entry from the system.',
+        {
+            title: 'Delete Timetable Entry',
+            confirmText: 'Delete Permanently',
+            cancelText: 'Cancel',
+            confirmButtonClass: 'danger'
+        }
+    );
+    
+    if (!confirmed) {
+        return;
+    }
+    
+    const formData = new FormData();
         formData.append('action', 'delete_entry');
         formData.append('entry_id', entryId);
         

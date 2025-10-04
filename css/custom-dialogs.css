@@ -1,0 +1,244 @@
+/* Custom Dialog System Styles */
+.custom-dialog-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+    z-index: 9999;
+    display: none;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.custom-dialog-overlay.show {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 1;
+}
+
+.custom-dialog {
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+    max-width: 500px;
+    width: 90%;
+    max-height: 80vh;
+    overflow-y: auto;
+    transform: scale(0.8);
+    transition: transform 0.3s ease;
+    position: relative;
+}
+
+.custom-dialog-overlay.show .custom-dialog {
+    transform: scale(1);
+}
+
+.custom-dialog-header {
+    padding: 20px 20px 10px 20px;
+    border-bottom: 1px solid #e9ecef;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.custom-dialog-icon {
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    font-size: 14px;
+    font-weight: bold;
+}
+
+.custom-dialog-icon.warning {
+    background-color: #fff3cd;
+    color: #856404;
+}
+
+.custom-dialog-icon.danger {
+    background-color: #f8d7da;
+    color: #721c24;
+}
+
+.custom-dialog-icon.info {
+    background-color: #d1ecf1;
+    color: #0c5460;
+}
+
+.custom-dialog-icon.success {
+    background-color: #d4edda;
+    color: #155724;
+}
+
+.custom-dialog-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: #333;
+    margin: 0;
+}
+
+.custom-dialog-body {
+    padding: 20px;
+    color: #666;
+    line-height: 1.5;
+}
+
+.custom-dialog-footer {
+    padding: 10px 20px 20px 20px;
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+    border-top: 1px solid #e9ecef;
+}
+
+.custom-dialog-btn {
+    padding: 8px 16px;
+    border: none;
+    border-radius: 4px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    min-width: 80px;
+}
+
+.custom-dialog-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.custom-dialog-btn:active {
+    transform: translateY(0);
+}
+
+.custom-dialog-btn-primary {
+    background-color: #007bff;
+    color: white;
+}
+
+.custom-dialog-btn-primary:hover {
+    background-color: #0056b3;
+}
+
+.custom-dialog-btn-secondary {
+    background-color: #6c757d;
+    color: white;
+}
+
+.custom-dialog-btn-secondary:hover {
+    background-color: #545b62;
+}
+
+.custom-dialog-btn-danger {
+    background-color: #dc3545;
+    color: white;
+}
+
+.custom-dialog-btn-danger:hover {
+    background-color: #c82333;
+}
+
+.custom-dialog-btn-warning {
+    background-color: #ffc107;
+    color: #212529;
+}
+
+.custom-dialog-btn-warning:hover {
+    background-color: #e0a800;
+}
+
+.custom-dialog-btn-success {
+    background-color: #28a745;
+    color: white;
+}
+
+.custom-dialog-btn-success:hover {
+    background-color: #218838;
+}
+
+/* Animation for dialog appearance */
+@keyframes dialogSlideIn {
+    from {
+        opacity: 0;
+        transform: scale(0.8) translateY(-20px);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+
+.custom-dialog-overlay.show .custom-dialog {
+    animation: dialogSlideIn 0.3s ease;
+}
+
+/* Responsive design */
+@media (max-width: 576px) {
+    .custom-dialog {
+        width: 95%;
+        margin: 20px;
+    }
+    
+    .custom-dialog-footer {
+        flex-direction: column;
+    }
+    
+    .custom-dialog-btn {
+        width: 100%;
+    }
+}
+
+/* Loading state for buttons */
+.custom-dialog-btn.loading {
+    position: relative;
+    color: transparent;
+}
+
+.custom-dialog-btn.loading::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 16px;
+    height: 16px;
+    margin: -8px 0 0 -8px;
+    border: 2px solid transparent;
+    border-top: 2px solid currentColor;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Close button */
+.custom-dialog-close {
+    position: absolute;
+    top: 15px;
+    right: 15px;
+    background: none;
+    border: none;
+    font-size: 20px;
+    color: #999;
+    cursor: pointer;
+    padding: 0;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    transition: all 0.2s ease;
+}
+
+.custom-dialog-close:hover {
+    background-color: #f8f9fa;
+    color: #333;
+}
