@@ -38,6 +38,20 @@ try {
 ?>
 
 <div class="main-content" id="mainContent">
+    <!-- Toast Container -->
+    <div class="toast-container position-fixed top-0 end-0 p-3" style="z-index: 1055;">
+        <div id="toastNotification" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
+            <div class="toast-header">
+                <i class="fas fa-info-circle me-2"></i>
+                <strong class="me-auto">Notification</strong>
+                <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Close"></button>
+            </div>
+            <div class="toast-body">
+                <!-- Toast message will be inserted here -->
+            </div>
+        </div>
+    </div>
+    
     <div class="table-container">
         <div class="table-header d-flex justify-content-between align-items-center">
             <h4><i class="fas fa-graduation-cap me-2"></i>Programs Management</h4>
@@ -362,8 +376,13 @@ function renderProgramsTable() {
                 <button class="btn btn-sm btn-outline-primary me-1" onclick="editProgram(${program.id})">
                     <i class="fas fa-edit"></i>
                 </button>
-                <button class="btn btn-sm btn-outline-danger" onclick="deleteProgram(${program.id})">
-                    <i class="fas fa-trash"></i>
+                <button class="btn btn-sm btn-outline-danger delete-btn" data-id="${program.id}" onclick="deleteProgram(${program.id})">
+                    <span class="btn-text">
+                        <i class="fas fa-trash"></i>
+                    </span>
+                    <span class="btn-spinner d-none">
+                        <i class="fas fa-spinner fa-spin"></i>
+                    </span>
                 </button>
             </td>
         </tr>
@@ -414,16 +433,16 @@ async function handleAddProgram(e) {
         const result = await response.json();
         
         if (result.success) {
-            showAlert('success', result.message);
+            showToast('success', result.message);
             bootstrap.Modal.getInstance(document.getElementById('addProgramModal')).hide();
             e.target.reset();
             loadPrograms(); // Reload the table
             } else {
-            showAlert('error', result.message, 'addFormAlert');
+            showToast('error', result.message);
         }
     } catch (error) {
         console.error('Error adding program:', error);
-        showAlert('error', 'Error adding program: ' + error.message, 'addFormAlert');
+        showToast('error', 'Error adding program: ' + error.message);
     } finally {
         setButtonLoading(btn, false);
     }
@@ -461,15 +480,15 @@ async function handleEditProgram(e) {
         const result = await response.json();
         
         if (result.success) {
-            showAlert('success', result.message);
+            showToast('success', result.message);
             bootstrap.Modal.getInstance(document.getElementById('editProgramModal')).hide();
             loadPrograms(); // Reload the table
         } else {
-            showAlert('error', result.message, 'editFormAlert');
+            showToast('error', result.message);
         }
     } catch (error) {
         console.error('Error updating program:', error);
-        showAlert('error', 'Error updating program: ' + error.message, 'editFormAlert');
+        showToast('error', 'Error updating program: ' + error.message);
     } finally {
         setButtonLoading(btn, false);
     }
@@ -499,6 +518,9 @@ async function deleteProgram(id) {
     const program = programs.find(p => p.id == id);
     if (!program) return;
     
+    // Find the delete button for this program
+    const deleteBtn = document.querySelector(`button[data-id="${id}"]`);
+    
     const confirmed = await customDanger(
         `Are you sure you want to delete "${program.name}"?<br><br><strong>This action cannot be undone!</strong><br><br>This will permanently remove the program and all associated data from the system.`,
         {
@@ -511,6 +533,11 @@ async function deleteProgram(id) {
     
     if (!confirmed) {
         return;
+    }
+    
+    // Show loading state
+    if (deleteBtn) {
+        setButtonLoading(deleteBtn, true);
     }
     
     try {
@@ -542,14 +569,19 @@ async function deleteProgram(id) {
         const result = await response.json();
         
         if (result.success) {
-            showAlert('success', result.message);
+            showToast('success', result.message);
             loadPrograms(); // Reload the table
         } else {
-            showAlert('error', result.message);
+            showToast('error', result.message);
         }
     } catch (error) {
         console.error('Error deleting program:', error);
-        showAlert('error', 'Error deleting program: ' + error.message);
+        showToast('error', 'Error deleting program: ' + error.message);
+    } finally {
+        // Hide loading state
+        if (deleteBtn) {
+            setButtonLoading(deleteBtn, false);
+        }
     }
 }
 
@@ -578,6 +610,34 @@ function setButtonLoading(btn, loading) {
         spinner.classList.add('d-none');
         btn.disabled = false;
     }
+}
+
+function showToast(type, message) {
+    const toast = document.getElementById('toastNotification');
+    const toastBody = toast.querySelector('.toast-body');
+    const toastHeader = toast.querySelector('.toast-header');
+    
+    // Set the message
+    toastBody.textContent = message;
+    
+    // Set the icon and color based on type
+    const icon = toastHeader.querySelector('i');
+    if (type === 'success') {
+        icon.className = 'fas fa-check-circle me-2 text-success';
+        toast.classList.remove('bg-danger');
+        toast.classList.add('bg-success');
+    } else {
+        icon.className = 'fas fa-exclamation-circle me-2 text-danger';
+        toast.classList.remove('bg-success');
+        toast.classList.add('bg-danger');
+    }
+    
+    // Show the toast
+    const bsToast = new bootstrap.Toast(toast, {
+        autohide: true,
+        delay: 5000
+    });
+    bsToast.show();
 }
 
 function showAlert(type, message, containerId = null) {
