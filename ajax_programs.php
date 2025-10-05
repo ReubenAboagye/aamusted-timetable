@@ -146,12 +146,21 @@ try {
         $id = (int)$_POST['id'];
         $name = trim($_POST['name']);
         $department_id = (int)$_POST['department_id'];
-        $code = trim($_POST['code']);
+        $code = trim($_POST['code'] ?? '');
         $duration = (int)$_POST['duration'];
         $is_active = isset($_POST['is_active']) ? 1 : 0;
 
         // Simple update without complex validation for now
-        $sql = "UPDATE programs SET name = ?, department_id = ?, code = ?, duration_years = ? WHERE id = ? AND stream_id = ?";
+        // Check if stream_id column exists in the database
+        $check_stream_column = $conn->query("SHOW COLUMNS FROM programs LIKE 'stream_id'");
+        $has_stream_column = $check_stream_column && $check_stream_column->num_rows > 0;
+        
+        if ($has_stream_column) {
+            $sql = "UPDATE programs SET name = ?, department_id = ?, code = ?, duration_years = ?, is_active = ? WHERE id = ? AND stream_id = ?";
+        } else {
+            $sql = "UPDATE programs SET name = ?, department_id = ?, code = ?, duration_years = ?, is_active = ? WHERE id = ?";
+        }
+        
         $stmt = $conn->prepare($sql);
         if (!$stmt) {
             throw new Exception("Database error: " . $conn->error);
@@ -159,7 +168,15 @@ try {
         
         // Get current stream_id from session or default to 1
         $current_stream_id = $_SESSION['current_stream_id'] ?? 1;
-        $stmt->bind_param("sisiii", $name, $department_id, $code, $duration, $id, $current_stream_id);
+        
+        // Debug logging
+        error_log("Edit Program Debug - ID: $id, Name: '$name', Dept: $department_id, Code: '$code', Duration: $duration, Active: $is_active, Stream: $current_stream_id, HasStreamColumn: " . ($has_stream_column ? 'Yes' : 'No'));
+        
+        if ($has_stream_column) {
+            $stmt->bind_param("sisiiii", $name, $department_id, $code, $duration, $is_active, $id, $current_stream_id);
+        } else {
+            $stmt->bind_param("sisiii", $name, $department_id, $code, $duration, $is_active, $id);
+        }
         
         if ($stmt->execute()) {
             $stmt->close();
@@ -180,6 +197,7 @@ try {
             $response['data'] = $program_data;
             error_log("Program updated successfully: ID=$id, Name=$name");
         } else {
+            error_log("Program update failed: " . $stmt->error);
             throw new Exception("Error updating program: " . $stmt->error);
         }
         $stmt->close();
@@ -194,13 +212,26 @@ try {
         // Get current stream_id from session or default to 1
         $current_stream_id = $_SESSION['current_stream_id'] ?? 1;
 
-        // Soft delete: set is_active = 0, but only for the current stream
-        $sql = "UPDATE programs SET is_active = 0 WHERE id = ? AND stream_id = ?";
-        $stmt = $conn->prepare($sql);
-        if (!$stmt) {
-            throw new Exception("Database error: " . $conn->error);
+        // Check if stream_id column exists in the database
+        $check_stream_column = $conn->query("SHOW COLUMNS FROM programs LIKE 'stream_id'");
+        $has_stream_column = $check_stream_column && $check_stream_column->num_rows > 0;
+
+        // Soft delete: set is_active = 0
+        if ($has_stream_column) {
+            $sql = "UPDATE programs SET is_active = 0 WHERE id = ? AND stream_id = ?";
+            $stmt = $conn->prepare($sql);
+            if (!$stmt) {
+                throw new Exception("Database error: " . $conn->error);
+            }
+            $stmt->bind_param("ii", $id, $current_stream_id);
+        } else {
+            $sql = "UPDATE programs SET is_active = 0 WHERE id = ?";
+            $stmt = $conn->prepare($sql);
+            if (!$stmt) {
+                throw new Exception("Database error: " . $conn->error);
+            }
+            $stmt->bind_param("i", $id);
         }
-        $stmt->bind_param("ii", $id, $current_stream_id);
         
         if ($stmt->execute()) {
             $stmt->close();
@@ -216,17 +247,33 @@ try {
         // Get current stream_id from session or default to 1
         $current_stream_id = $_SESSION['current_stream_id'] ?? 1;
         
-        // Get all active programs with department names for current stream
-        $sql = "SELECT p.*, d.name as department_name 
-                FROM programs p 
-                LEFT JOIN departments d ON p.department_id = d.id 
-                WHERE p.is_active = 1 AND p.stream_id = ?
-                ORDER BY p.name";
-        $stmt = $conn->prepare($sql);
-        if (!$stmt) {
-            throw new Exception("Database error: " . $conn->error);
+        // Check if stream_id column exists in the database
+        $check_stream_column = $conn->query("SHOW COLUMNS FROM programs LIKE 'stream_id'");
+        $has_stream_column = $check_stream_column && $check_stream_column->num_rows > 0;
+        
+        if ($has_stream_column) {
+            // Get all programs with department names for current stream (both active and inactive)
+            $sql = "SELECT p.*, d.name as department_name 
+                    FROM programs p 
+                    LEFT JOIN departments d ON p.department_id = d.id 
+                    WHERE p.stream_id = ?
+                    ORDER BY p.is_active DESC, p.name";
+            $stmt = $conn->prepare($sql);
+            if (!$stmt) {
+                throw new Exception("Database error: " . $conn->error);
+            }
+            $stmt->bind_param("i", $current_stream_id);
+        } else {
+            // Get all programs with department names (both active and inactive) - no stream filtering
+            $sql = "SELECT p.*, d.name as department_name 
+                    FROM programs p 
+                    LEFT JOIN departments d ON p.department_id = d.id 
+                    ORDER BY p.is_active DESC, p.name";
+            $stmt = $conn->prepare($sql);
+            if (!$stmt) {
+                throw new Exception("Database error: " . $conn->error);
+            }
         }
-        $stmt->bind_param("i", $current_stream_id);
         $stmt->execute();
         $result = $stmt->get_result();
         
@@ -258,6 +305,49 @@ try {
         
         $response['success'] = true;
         $response['data'] = $departments;
+
+    } elseif ($action === 'toggle_status') {
+        if (!isset($_POST['id']) || !isset($_POST['is_active'])) {
+            throw new Exception("Missing required fields: id and is_active");
+        }
+
+        $id = (int)$_POST['id'];
+        $is_active = (int)$_POST['is_active'];
+        
+        // Get current stream_id from session or default to 1
+        $current_stream_id = $_SESSION['current_stream_id'] ?? 1;
+
+        // Check if stream_id column exists in the database
+        $check_stream_column = $conn->query("SHOW COLUMNS FROM programs LIKE 'stream_id'");
+        $has_stream_column = $check_stream_column && $check_stream_column->num_rows > 0;
+
+        // Update the program status
+        if ($has_stream_column) {
+            $sql = "UPDATE programs SET is_active = ? WHERE id = ? AND stream_id = ?";
+            $stmt = $conn->prepare($sql);
+            if (!$stmt) {
+                throw new Exception("Database error: " . $conn->error);
+            }
+            $stmt->bind_param("iii", $is_active, $id, $current_stream_id);
+        } else {
+            $sql = "UPDATE programs SET is_active = ? WHERE id = ?";
+            $stmt = $conn->prepare($sql);
+            if (!$stmt) {
+                throw new Exception("Database error: " . $conn->error);
+            }
+            $stmt->bind_param("ii", $is_active, $id);
+        }
+        
+        if ($stmt->execute()) {
+            $stmt->close();
+            $action_text = $is_active ? 'activated' : 'deactivated';
+            $response['success'] = true;
+            $response['message'] = "Program {$action_text} successfully!";
+            error_log("Program status toggled successfully: ID=$id, Status=$is_active");
+        } else {
+            throw new Exception("Error updating program status: " . $stmt->error);
+        }
+        $stmt->close();
 
     } else {
         throw new Exception("Invalid action: $action");
