@@ -117,26 +117,7 @@ $conn->close();
                 </div>
 
                 <!-- Summary Section -->
-                <?php if ($total_inactive > 0): ?>
-                <div class="summary-section mb-4">
-                    <div class="summary-card">
-                        <div class="summary-content">
-                            <div class="summary-icon">
-                                <i class="fas fa-exclamation-triangle"></i>
-                            </div>
-                            <div class="summary-text">
-                                <h6 class="summary-title">Action Required</h6>
-                                <p class="summary-description">You have <strong><?= $total_inactive ?></strong> inactive records that need attention</p>
-                            </div>
-                        </div>
-                        <div class="summary-actions">
-                            <button class="btn btn-primary btn-sm" onclick="showAllInactive()">
-                                <i class="fas fa-list me-1"></i>View All
-                            </button>
-                        </div>
-                    </div>
-                </div>
-                <?php else: ?>
+                <?php if ($total_inactive == 0): ?>
                 <div class="summary-section mb-4">
                     <div class="summary-card success">
                         <div class="summary-content">
@@ -1087,26 +1068,7 @@ function updateSummarySection(totalInactive) {
         return;
     }
     
-    if (totalInactive > 0) {
-        summarySection.innerHTML = `
-            <div class="summary-card">
-                <div class="summary-content">
-                    <div class="summary-icon">
-                        <i class="fas fa-exclamation-triangle"></i>
-                    </div>
-                    <div class="summary-text">
-                        <h6 class="summary-title">Action Required</h6>
-                        <p class="summary-description">You have <strong>${totalInactive}</strong> inactive records that need attention</p>
-                    </div>
-                </div>
-                <div class="summary-actions">
-                    <button class="btn btn-primary btn-sm" onclick="showAllInactive()">
-                        <i class="fas fa-list me-1"></i>View All
-                    </button>
-                </div>
-            </div>
-        `;
-    } else {
+    if (totalInactive == 0) {
         summarySection.innerHTML = `
             <div class="summary-card success">
                 <div class="summary-content">
@@ -1120,6 +1082,9 @@ function updateSummarySection(totalInactive) {
                 </div>
             </div>
         `;
+        summarySection.style.display = 'block';
+    } else {
+        summarySection.style.display = 'none';
     }
 }
 
