@@ -106,6 +106,87 @@ $success_message = $_GET['success'] ?? '';
 $error_message = $_GET['error'] ?? '';
 ?>
 
+<style>
+/* Enhanced Saved Timetable Page Styling */
+.timetable-card {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    margin-bottom: var(--spacing-md);
+    transition: all 0.2s ease;
+}
+
+.timetable-card:hover {
+    box-shadow: var(--shadow-md);
+    transform: translateY(-1px);
+}
+
+.timetable-header {
+    background: linear-gradient(135deg, var(--primary-color), var(--hover-color));
+    color: white;
+    padding: var(--spacing-md) var(--spacing-lg);
+    border-radius: var(--radius-md) var(--radius-md) 0 0;
+}
+
+.timetable-body {
+    padding: var(--spacing-lg);
+}
+
+.timetable-actions {
+    display: flex;
+    gap: var(--spacing-sm);
+    flex-wrap: wrap;
+}
+
+.timetable-meta {
+    display: flex;
+    gap: var(--spacing-md);
+    margin-bottom: var(--spacing-md);
+    flex-wrap: wrap;
+}
+
+.timetable-meta .badge {
+    font-size: var(--font-size-xs);
+    padding: var(--spacing-xs) var(--spacing-sm);
+}
+
+/* Mobile optimizations */
+@media (max-width: 768px) {
+    .timetable-actions {
+        flex-direction: column;
+    }
+    
+    .timetable-actions .btn {
+        width: 100%;
+        margin-bottom: var(--spacing-xs);
+    }
+    
+    .timetable-meta {
+        flex-direction: column;
+        gap: var(--spacing-xs);
+    }
+    
+    .table-header .d-flex {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: var(--spacing-sm);
+    }
+}
+
+@media (max-width: 576px) {
+    .timetable-header {
+        padding: var(--spacing-sm) var(--spacing-md);
+    }
+    
+    .timetable-body {
+        padding: var(--spacing-md);
+    }
+    
+    .timetable-header h5 {
+        font-size: var(--font-size-base);
+    }
+}
+</style>
+
 <div class="main-content" id="mainContent">
     <div class="table-container">
         <div class="table-header d-flex justify-content-between align-items-center">

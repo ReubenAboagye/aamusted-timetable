@@ -24,34 +24,9 @@ $lecturers = [];
 $departments = [];
 ?>
 
-<!-- Additional CSS for enhanced styling -->
+<!-- Enhanced styling using design system -->
 <style>
-    .search-container {
-        margin-bottom: 20px;
-        flex-shrink: 0;
-        min-width: 200px;
-        display: flex;
-        align-items: center;
-    }
-    
-    .search-input {
-        border: 2px solid #e9ecef;
-        border-radius: 25px;
-        padding: 10px 20px;
-        width: 100%;
-        max-width: 400px;
-        height: 38px; /* Match button height */
-        transition: all 0.3s ease;
-        display: flex;
-        align-items: center;
-    }
-    
-    .search-input:focus {
-        border-color: var(--primary-color);
-        box-shadow: 0 0 0 0.2rem rgba(128, 0, 32, 0.25);
-        outline: none;
-    }
-    
+    /* Page-specific enhancements */
     .btn-loading {
         position: relative;
         pointer-events: none;
@@ -101,6 +76,36 @@ $departments = [];
     .table-header {
         min-height: 60px;
         flex-wrap: wrap;
+    }
+    
+    .table-header h4 {
+        margin-bottom: 0;
+        flex-shrink: 0;
+    }
+    
+    .table-header .d-flex {
+        flex-wrap: wrap;
+        gap: var(--spacing-sm);
+    }
+    
+    .search-container {
+        flex-shrink: 0;
+        min-width: 200px;
+        display: flex;
+        align-items: center;
+    }
+    
+    /* Mobile optimizations for lecturers page */
+    @media (max-width: 768px) {
+        .table-header .d-flex {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: var(--spacing-sm);
+        }
+        .search-container {
+            width: 100%;
+            min-width: auto;
+        }
     }
     
     .table-header h4 {
