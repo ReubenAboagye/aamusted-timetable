@@ -232,18 +232,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             ) as conflicts
                         ";
                         
-                        // Also check for cross-version conflicts (same lecturer, same time, different versions)
-                        $cross_version_conflict_query = "
-                            SELECT COUNT(*) as cross_version_conflict_count
-                            FROM (
-                                SELECT lc.lecturer_id, t.day_id, t.time_slot_id
-                                FROM timetable t
-                                JOIN lecturer_courses lc ON t.lecturer_course_id = lc.id
-                                WHERE t.semester = ? AND t.academic_year = ? AND t.version != ?
-                                GROUP BY lc.lecturer_id, t.day_id, t.time_slot_id
-                                HAVING COUNT(*) > 1
-                            ) as cross_conflicts
-                        ";
                         
                         $semester_param = normalizeSemester($semester_int);
                         $academic_year = '2025/2026';
@@ -257,24 +245,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         }
                         $stmt->close();
                         
-                        // Check cross-version conflicts
-                        $crossVersionConflictCount = 0;
-                        $stmt2 = $conn->prepare($cross_version_conflict_query);
-                        $stmt2->bind_param("sss", $semester_param, $academic_year, $version);
-                        $stmt2->execute();
-                        $result2 = $stmt2->get_result();
-                        if ($row2 = $result2->fetch_assoc()) {
-                            $crossVersionConflictCount = $row2['cross_version_conflict_count'];
-                        }
-                        $stmt2->close();
                         
                         if ($conflictCount > 0) {
                             $msg .= " <strong>Note:</strong> $conflictCount lecturer conflicts detected in this version. <a href='lecturer_conflicts.php?version=" . urlencode($version) . "' class='alert-link'>Review and resolve conflicts</a>";
                         }
                         
-                        if ($crossVersionConflictCount > 0) {
-                            $msg .= " <strong>Warning:</strong> $crossVersionConflictCount cross-version lecturer conflicts detected. <a href='lecturer_conflicts.php' class='alert-link'>Review all conflicts</a>";
-                        }
                         
                         if (function_exists('redirect_with_flash')) {
                             // Redirect with parameters so the page shows the correct data
