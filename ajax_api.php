@@ -221,7 +221,7 @@ function handleDepartmentActions($action, $conn) {
         case 'get_list':
             // Departments are global - they should not be filtered by stream
             // Only courses and programs are stream-specific
-            $sql = "SELECT d.*, COUNT(c.id) as course_count FROM departments d LEFT JOIN courses c ON d.id = c.department_id";
+            $sql = "SELECT d.id, d.name, d.code, d.is_active, COUNT(c.id) as course_count FROM departments d LEFT JOIN courses c ON d.id = c.department_id";
             
             // Check if courses table has stream_id column for course counting
             $col = $conn->query("SHOW COLUMNS FROM courses LIKE 'stream_id'");
@@ -234,13 +234,13 @@ function handleDepartmentActions($action, $conn) {
             
             if ($has_course_stream) {
                 // Count only courses in the current stream, but show all departments
-                $sql .= " AND (c.stream_id = ? OR c.id IS NULL)";
+                $sql .= " AND (c.stream_id = ? OR c.id IS NULL) GROUP BY d.id, d.name, d.code, d.is_active ORDER BY d.name";
                 $stmt = $conn->prepare($sql);
                 $stmt->bind_param("i", $current_stream_id);
                 $stmt->execute();
                 $result = $stmt->get_result();
             } else {
-                $sql .= " GROUP BY d.id ORDER BY d.name";
+                $sql .= " GROUP BY d.id, d.name, d.code, d.is_active ORDER BY d.name";
                 $result = $conn->query($sql);
             }
             
