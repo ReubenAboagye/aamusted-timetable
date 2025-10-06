@@ -1,0 +1,7 @@
+# Allow access to download backup files
+Options +Indexes
+<FilesMatch "\.(sql|txt)$">
+    Order allow,deny
+    Allow from all
+</FilesMatch>
+
