@@ -78,10 +78,6 @@ $conn->close();
                                 <span class="stat-number"><?= $total_inactive ?></span>
                                 <span class="stat-label">Inactive</span>
                             </div>
-                            <a href="reset_database.php" class="btn btn-outline-light btn-sm ms-3" title="Database Reset & Restore (Ctrl+Shift+Backspace)" id="resetDbBtn">
-                                <i class="fas fa-database me-1"></i>
-                                <i class="fas fa-trash-restore"></i>
-                            </a>
                             <button class="btn btn-outline-light btn-sm ms-2" onclick="refreshData()" title="Refresh Data">
                                 <i class="fas fa-sync-alt"></i>
                             </button>
@@ -658,30 +654,6 @@ $conn->close();
     }
 }
 
-@keyframes pulse {
-    0% {
-        transform: scale(1);
-        box-shadow: 0 0 0 rgba(255, 255, 255, 0.5);
-    }
-    50% {
-        transform: scale(1.05);
-        box-shadow: 0 0 15px rgba(255, 255, 255, 0.7);
-    }
-    100% {
-        transform: scale(1);
-        box-shadow: 0 0 0 rgba(255, 255, 255, 0.5);
-    }
-}
-
-#resetDbBtn {
-    transition: all 0.3s ease;
-}
-
-#resetDbBtn:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(255, 255, 255, 0.3);
-}
-
 /* Responsive Design */
 @media (max-width: 768px) {
     .modules-grid {
@@ -818,21 +790,6 @@ async function refreshData(event = null) {
     }
 }
 
-// Auto-refresh data when page loads and periodically
-document.addEventListener('DOMContentLoaded', function() {
-    // Initial data load
-    refreshData();
-    
-    // Auto-refresh every 30 seconds to catch changes from other modules
-    setInterval(() => {
-        refreshData();
-    }, 30000);
-    
-    // Listen for focus events to refresh when user returns to tab
-    window.addEventListener('focus', () => {
-        refreshData();
-    });
-});
 
 // Card click handler
 document.addEventListener('DOMContentLoaded', function() {
@@ -1171,49 +1128,12 @@ function debugDOM() {
 // Add debug function to window for console access
 window.debugDOM = debugDOM;
 
-// Keyboard shortcut: Ctrl + Shift + Backspace to open Database Reset page
+// Secret keyboard shortcut: Ctrl + Shift + Backspace to open Database Reset page
 document.addEventListener('keydown', function(e) {
     // Check for Ctrl + Shift + Backspace
     if (e.ctrlKey && e.shiftKey && e.key === 'Backspace') {
         e.preventDefault(); // Prevent default browser behavior
-        
-        // Add visual feedback
-        const resetBtn = document.getElementById('resetDbBtn');
-        if (resetBtn) {
-            resetBtn.style.transform = 'scale(1.2)';
-            resetBtn.style.transition = 'transform 0.2s ease';
-            
-            setTimeout(() => {
-                resetBtn.style.transform = 'scale(1)';
-            }, 200);
-            
-            // Navigate to reset page after animation
-            setTimeout(() => {
-                window.location.href = 'reset_database.php';
-            }, 300);
-        } else {
-            // If button not found, navigate directly
-            window.location.href = 'reset_database.php';
-        }
-    }
-});
-
-// Add tooltip hint on page load
-document.addEventListener('DOMContentLoaded', function() {
-    const resetBtn = document.getElementById('resetDbBtn');
-    if (resetBtn) {
-        // Add pulsing animation hint on first visit
-        const hasSeenHint = localStorage.getItem('dbResetHintSeen');
-        if (!hasSeenHint) {
-            resetBtn.style.animation = 'pulse 2s ease-in-out 3';
-            resetBtn.style.boxShadow = '0 0 15px rgba(255, 255, 255, 0.5)';
-            
-            setTimeout(() => {
-                resetBtn.style.animation = '';
-                resetBtn.style.boxShadow = '';
-                localStorage.setItem('dbResetHintSeen', 'true');
-            }, 6000);
-        }
+        window.location.href = 'reset_database.php';
     }
 });
 </script>
