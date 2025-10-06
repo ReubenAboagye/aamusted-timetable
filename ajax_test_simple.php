@@ -46,7 +46,7 @@ if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== $_SESSION['csrf_tok
 try {
     if ($module === 'department') {
         if ($action === 'get_list') {
-            $sql = "SELECT d.*, COUNT(c.id) as course_count FROM departments d LEFT JOIN courses c ON d.id = c.department_id GROUP BY d.id ORDER BY d.name";
+            $sql = "SELECT d.id, d.name, d.code, d.is_active, COUNT(c.id) as course_count FROM departments d LEFT JOIN courses c ON d.id = c.department_id GROUP BY d.id, d.name, d.code, d.is_active ORDER BY d.name";
             $result = $conn->query($sql);
             
             $departments = [];

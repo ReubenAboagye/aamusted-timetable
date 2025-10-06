@@ -773,10 +773,22 @@ if (!function_exists('getCount')) {
   <script src="js/ajax-utils.js"></script>
   
   <!-- CSRF Token Meta Tag -->
-  <meta name="csrf-token" content="<?php echo $_SESSION['csrf_token'] ?? ''; ?>">
+  <?php 
+  // Include CSRF helper if not already included
+  if (!function_exists('getCSRFToken')) {
+    include_once __DIR__ . '/csrf_helper.php';
+  }
+  echo csrfMetaTag(); 
+  ?>
 
   <!-- Stream Change JavaScript -->
   <script>
+  // CSRF Token Helper
+  function getCSRFToken() {
+    const meta = document.querySelector('meta[name="csrf-token"]');
+    return meta ? meta.getAttribute('content') : '';
+  }
+  
   function changeStream(streamId) {
     fetch('change_stream.php', {
       method: 'POST',

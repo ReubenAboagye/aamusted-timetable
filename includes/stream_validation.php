@@ -17,24 +17,26 @@ if (!function_exists('validateStreamSelection')) {
             session_start();
         }
         
-        // ALWAYS prioritize the active stream from database over session data
+        // First check if user has explicitly selected a stream in session
         $stream_id = null;
-        $active_stream_sql = "SELECT id FROM streams WHERE is_active = 1 LIMIT 1";
-        $active_result = $conn->query($active_stream_sql);
-        if ($active_result && $active_result->num_rows > 0) {
-            $active_row = $active_result->fetch_assoc();
-            $stream_id = intval($active_row['id']);
-            // Update session to match database
-            $_SESSION['current_stream_id'] = $stream_id;
-            $_SESSION['active_stream'] = $stream_id;
-        } else {
-            // If no active stream in database, check session as fallback
-            if (isset($_SESSION['current_stream_id'])) {
-                $stream_id = intval($_SESSION['current_stream_id']);
-            } elseif (isset($_SESSION['active_stream'])) {
-                $stream_id = intval($_SESSION['active_stream']);
-            } elseif (isset($_SESSION['stream_id'])) {
-                $stream_id = intval($_SESSION['stream_id']);
+        if (isset($_SESSION['current_stream_id'])) {
+            $stream_id = intval($_SESSION['current_stream_id']);
+        } elseif (isset($_SESSION['active_stream'])) {
+            $stream_id = intval($_SESSION['active_stream']);
+        } elseif (isset($_SESSION['stream_id'])) {
+            $stream_id = intval($_SESSION['stream_id']);
+        }
+        
+        // If no stream in session, check for active stream in database
+        if (!$stream_id || $stream_id <= 0) {
+            $active_stream_sql = "SELECT id FROM streams WHERE is_active = 1 LIMIT 1";
+            $active_result = $conn->query($active_stream_sql);
+            if ($active_result && $active_result->num_rows > 0) {
+                $active_row = $active_result->fetch_assoc();
+                $stream_id = intval($active_row['id']);
+                // Update session to match database
+                $_SESSION['current_stream_id'] = $stream_id;
+                $_SESSION['active_stream'] = $stream_id;
             }
         }
         

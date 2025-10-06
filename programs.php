@@ -91,12 +91,13 @@ try {
                         <th>Code</th>
                         <th>Duration (yrs)</th>
                         <th>Department</th>
+                        <th>Status</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
                 <tbody id="programsTableBody">
                     <tr>
-                        <td colspan="5" class="text-center">
+                        <td colspan="6" class="text-center">
                             <div class="spinner-border text-primary" role="status">
                                 <span class="visually-hidden">Loading...</span>
                             </div>
@@ -203,6 +204,16 @@ try {
                             <option value="4">4 Years</option>
                             <option value="5">5 Years</option>
                         </select>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Status</label>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="edit_is_active" name="is_active" value="1">
+                            <label class="form-check-label" for="edit_is_active">
+                                Active
+                            </label>
+                        </div>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -373,6 +384,11 @@ function renderProgramsTable() {
             <td>${program.duration_years || program.duration || ''}</td>
             <td>${escapeHtml(program.department_name || '')}</td>
             <td>
+                <span class="badge ${program.is_active ? 'bg-success' : 'bg-secondary'}">
+                    ${program.is_active ? 'Active' : 'Inactive'}
+                </span>
+            </td>
+            <td>
                 <button class="btn btn-sm btn-outline-primary me-1" onclick="editProgram(${program.id})">
                     <i class="fas fa-edit"></i>
                 </button>
@@ -459,7 +475,7 @@ async function handleEditProgram(e) {
     setButtonLoading(btn, true);
     
     try {
-        const response = await fetch('ajax_edit_only.php', {
+        const response = await fetch('ajax_programs.php', {
             method: 'POST',
             body: formData
         });
@@ -504,6 +520,7 @@ function editProgram(id) {
     document.getElementById('edit_code').value = program.code || '';
     document.getElementById('edit_department_id').value = program.department_id;
     document.getElementById('edit_duration').value = program.duration_years || program.duration || '';
+    document.getElementById('edit_is_active').checked = program.is_active == 1;
     
     // Clear any previous alerts
     document.getElementById('editFormAlert').innerHTML = '';

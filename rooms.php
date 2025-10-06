@@ -1,5 +1,4 @@
 <?php
-// Handle AJAX requests FIRST, before any output or includes
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'save_checkbox_states') {
     // Start session for AJAX request
     if (session_status() == PHP_SESSION_NONE) {
@@ -345,6 +344,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action) {
             header('Location: rooms.php'); exit;
         } else {
             $capacity = (int)$_POST['capacity'];
+            $is_active = isset($_POST['is_active']) ? 1 : 0;
 
             // Convert room type to database format (hardcoded mapping)
             $room_type_mappings = [
@@ -377,10 +377,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action) {
                 } else {
                     $check_stmt->close();
                     
-                    $sql = "UPDATE rooms SET name = ?, room_type = ?, capacity = ?, building_id = ? WHERE id = ?";
+                    $sql = "UPDATE rooms SET name = ?, room_type = ?, capacity = ?, building_id = ?, is_active = ? WHERE id = ?";
                     $stmt = $conn->prepare($sql);
                     if ($stmt) {
-                        $stmt->bind_param("ssiii", $name, $db_room_type, $capacity, $building_id, $id);
+                        $stmt->bind_param("ssiiii", $name, $db_room_type, $capacity, $building_id, $is_active, $id);
 
                         if ($stmt->execute()) {
                             $stmt->close();
@@ -559,7 +559,7 @@ if (isset($_GET['test_room_type'])) {
 $sql = "SELECT r.id, r.name, b.name as building_name, r.room_type, r.capacity, r.is_active, r.created_at, r.updated_at, r.building_id 
         FROM rooms r 
         LEFT JOIN buildings b ON r.building_id = b.id 
-        ORDER BY b.name, r.name";
+        ORDER BY r.is_active DESC, b.name, r.name";
 $result = $conn->query($sql);
 
 // Fetch buildings for dropdown
@@ -714,7 +714,7 @@ if ($result && $result->num_rows > 0) {
                                     <?php endif; ?>
                                 </td>
                                 <td>
-                                    <button class="btn btn-sm btn-outline-primary me-1" onclick="editRoom(<?php echo (int)$row['id']; ?>, '<?php echo addslashes($row['name']); ?>', <?php echo (int)$row['building_id']; ?>, '<?php echo addslashes(ucwords(str_replace('_', ' ', $row['room_type']))); ?>', <?php echo (int)$row['capacity']; ?>)">
+                                    <button class="btn btn-sm btn-outline-primary me-1" onclick="editRoom(<?php echo (int)$row['id']; ?>, '<?php echo addslashes($row['name']); ?>', <?php echo (int)$row['building_id']; ?>, '<?php echo addslashes(ucwords(str_replace('_', ' ', $row['room_type']))); ?>', <?php echo (int)$row['capacity']; ?>, <?php echo $row['is_active']; ?>)">
                                         <i class="fas fa-edit"></i>
                                     </button>
                                     <button class="btn btn-sm <?php echo $row['is_active'] ? 'btn-outline-warning' : 'btn-outline-success'; ?> me-1" onclick="toggleRoomStatus(<?php echo (int)$row['id']; ?>, '<?php echo addslashes($row['name']); ?>', <?php echo $row['is_active'] ? 'true' : 'false'; ?>)">
@@ -919,8 +919,15 @@ if ($result && $result->num_rows > 0) {
                         </div>
                     </div>
                     
-
-                    
+                    <div class="mb-3">
+                        <label class="form-label">Status</label>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="edit_is_active" name="is_active" value="1">
+                            <label class="form-check-label" for="edit_is_active">
+                                Active
+                            </label>
+                        </div>
+                    </div>
 
                 </div>
                 <div class="modal-footer">
@@ -1242,13 +1249,14 @@ function waitForBootstrap(callback, maxWait = 5000) {
     checkBootstrap();
 }
 
-function editRoom(id, name, buildingId, roomType, capacity) {
+function editRoom(id, name, buildingId, roomType, capacity, isActive) {
     if (!ensureBootstrapLoaded()) return;
 
     document.getElementById('edit_id').value = id;
     document.getElementById('edit_name').value = name;
     document.getElementById('edit_building_id').value = buildingId;
     document.getElementById('edit_capacity').value = capacity;
+    document.getElementById('edit_is_active').checked = isActive == 1;
 
     // Set room type (convert database room_type to form value)
     const editRoomType = document.getElementById('edit_room_type');
