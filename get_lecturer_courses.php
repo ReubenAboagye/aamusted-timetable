@@ -30,6 +30,9 @@ try {
     }
     
     // Get all lecturers assigned to this course
+    // Note: Stream filtering is implicit here - the course_id itself
+    // belongs to a specific stream, so lecturers returned are automatically
+    // stream-specific through the course relationship
     $query = "
         SELECT 
             lc.id as lecturer_course_id,

@@ -3,6 +3,19 @@ include 'connect.php';
 
 // Page title and layout includes
 $pageTitle = 'Course Room Type Management';
+
+// Include stream validation and manager
+include 'includes/stream_validation.php';
+include 'includes/stream_manager.php';
+
+// Validate stream selection before showing data
+$stream_validation = validateStreamSelection($conn);
+$current_stream_id = $stream_validation['stream_id'];
+$current_stream_name = $stream_validation['stream_name'];
+
+// Get stream manager
+$streamManager = getStreamManager();
+
 include 'includes/header.php';
 include 'includes/sidebar.php';
 
@@ -384,6 +397,13 @@ $(document).ready(function() {
     $('#singleAddForm').on('submit', handleSingleAdd);
     $('#bulkAddForm').on('submit', handleBulkAdd);
     $('#editForm').on('submit', handleEdit);
+    
+    // Listen for stream changes and reload data
+    window.addEventListener('streamChanged', function(event) {
+        console.log('Stream changed to:', event.detail.streamName);
+        // Reload data for the new stream
+        loadInitialData();
+    });
     
     // Clear validation on input change
     $('input, select').on('input change', function() {

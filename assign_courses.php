@@ -3,6 +3,19 @@ include 'connect.php';
 
 // Page title and layout includes
 $pageTitle = 'Assign Courses to Class';
+
+// Include stream validation and manager
+include 'includes/stream_validation.php';
+include 'includes/stream_manager.php';
+
+// Validate stream selection before showing data
+$stream_validation = validateStreamSelection($conn);
+$current_stream_id = $stream_validation['stream_id'];
+$current_stream_name = $stream_validation['stream_name'];
+
+// Get stream manager
+$streamManager = getStreamManager();
+
 include 'includes/header.php';
 
 $success_message = '';
@@ -29,13 +42,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// Get all classes
-$classes_sql = "SELECT id, name, level FROM classes WHERE is_active = 1 ORDER BY name";
-$classes_result = $conn->query($classes_sql);
+// Get all classes for the current stream
+$classes_sql = "SELECT id, name, level FROM classes WHERE is_active = 1 AND stream_id = ? ORDER BY name";
+$classes_stmt = $conn->prepare($classes_sql);
+$classes_stmt->bind_param("i", $current_stream_id);
+$classes_stmt->execute();
+$classes_result = $classes_stmt->get_result();
 
-// Get all courses
-$courses_sql = "SELECT id, course_code, course_name FROM courses WHERE is_active = 1 ORDER BY course_code";
-$courses_result = $conn->query($courses_sql);
+// Get all courses for the current stream
+$courses_sql = "SELECT id, course_code, course_name FROM courses WHERE is_active = 1 AND stream_id = ? ORDER BY course_code";
+$courses_stmt = $conn->prepare($courses_sql);
+$courses_stmt->bind_param("i", $current_stream_id);
+$courses_stmt->execute();
+$courses_result = $courses_stmt->get_result();
 
 // Get existing assignments for selected class
 $selected_class_id = isset($_GET['class_id']) ? (int)$_GET['class_id'] : 0;

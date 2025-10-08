@@ -177,10 +177,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // Validate data before generation
                 $loader = new DBLoader($conn);
                 $data = $loader->loadAll($gaOptions);
-                $validation = $loader->validateDataForGeneration($data);
+                $validation = $loader->validateDataForGeneration($data, $stream_id, $stream_name);
                 
                 if (!$validation['valid']) {
-                    $error_message = 'Cannot generate timetable: ' . implode(', ', $validation['errors']);
+                    $error_message = 'Cannot generate timetable:<br><br>' . implode('<br>', $validation['errors']);
+                    
+                    // Add warnings if any
+                    if (!empty($validation['warnings'])) {
+                        $error_message .= '<br><br><strong>Warnings:</strong><br>' . implode('<br>', $validation['warnings']);
+                    }
                 } else {
                     // Run genetic algorithm
                     $start_time = microtime(true);
@@ -1333,6 +1338,155 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
             <?php endif; ?>
         </div>
 
+        <?php
+        // Calculate readiness BEFORE displaying the form (needed for button state)
+        if (!$edit_mode) {
+            // Helper function to validate stream active days
+            function validateStreamDays($conn, $streamId) {
+                $streamSql = "SELECT active_days FROM streams WHERE id = ?";
+                $stmt = $conn->prepare($streamSql);
+                $stmt->bind_param("i", $streamId);
+                $stmt->execute();
+                $result = $stmt->get_result();
+                
+                if ($streamRow = $result->fetch_assoc()) {
+                    $activeDaysJson = $streamRow['active_days'];
+                    if (!empty($activeDaysJson)) {
+                        $activeDaysArray = json_decode($activeDaysJson, true);
+                        if (is_array($activeDaysArray) && count($activeDaysArray) > 0) {
+                            $validDays = [];
+                            foreach ($activeDaysArray as $dayName) {
+                                $checkSql = "SELECT id FROM days WHERE name = ? AND is_active = 1";
+                                $checkStmt = $conn->prepare($checkSql);
+                                $checkStmt->bind_param("s", $dayName);
+                                $checkStmt->execute();
+                                if ($checkStmt->get_result()->num_rows > 0) {
+                                    $validDays[] = $dayName;
+                                }
+                                $checkStmt->close();
+                            }
+                            $stmt->close();
+                            return $validDays;
+                        }
+                    }
+                }
+                $stmt->close();
+                return [];
+            }
+
+            // Get readiness conditions for pre-generation (STREAM-SPECIFIC)
+            $total_courses = 0;
+            $courses_stmt = $conn->prepare("SELECT COUNT(*) as count FROM courses WHERE is_active = 1 AND stream_id = ?");
+            $courses_stmt->bind_param("i", $current_stream_id);
+            $courses_stmt->execute();
+            $total_courses = $courses_stmt->get_result()->fetch_assoc()['count'];
+            $courses_stmt->close();
+            
+            $total_classes = 0;
+            $classes_stmt = $conn->prepare("SELECT COUNT(*) as count FROM classes WHERE is_active = 1 AND stream_id = ?");
+            $classes_stmt->bind_param("i", $current_stream_id);
+            $classes_stmt->execute();
+            $total_classes = $classes_stmt->get_result()->fetch_assoc()['count'];
+            $classes_stmt->close();
+            
+            $total_rooms = $conn->query("SELECT COUNT(*) as count FROM rooms WHERE is_active = 1")->fetch_assoc()['count'];
+            
+            $total_days = 0;
+            $stream_days_used = false;
+            if (!empty($current_stream_id)) {
+                $valid_stream_days = validateStreamDays($conn, $current_stream_id);
+                if (!empty($valid_stream_days)) {
+                    $placeholders = str_repeat('?,', count($valid_stream_days) - 1) . '?';
+                    $stream_days_sql = "SELECT COUNT(*) as count FROM days WHERE is_active = 1 AND name IN ($placeholders)";
+                    $stmt = $conn->prepare($stream_days_sql);
+                    $stmt->bind_param(str_repeat('s', count($valid_stream_days)), ...$valid_stream_days);
+                    $stmt->execute();
+                    $total_days = $stmt->get_result()->fetch_assoc()['count'];
+                    $stmt->close();
+                    $stream_days_used = true;
+                } else {
+                    error_log("Stream ID $current_stream_id has no valid active days, falling back to all days");
+                }
+            }
+            if ($total_days == 0) {
+                $total_days = $conn->query("SELECT COUNT(*) as count FROM days WHERE is_active = 1")->fetch_assoc()['count'];
+            }
+            
+            $stream_time_slots_count = 0;
+            $schema_error = null;
+            try {
+                if (!empty($current_stream_id)) {
+                    $check_table = $conn->query("SHOW TABLES LIKE 'stream_time_slots'");
+                    if ($check_table && $check_table->num_rows > 0) {
+                        $stream_slots_sql = "SELECT COUNT(*) as count FROM stream_time_slots WHERE stream_id = ? AND is_active = 1";
+                        $stream_slots_stmt = $conn->prepare($stream_slots_sql);
+                        $stream_slots_stmt->bind_param("i", $current_stream_id);
+                        $stream_slots_stmt->execute();
+                        $stream_time_slots_count = $stream_slots_stmt->get_result()->fetch_assoc()['count'];
+                        $stream_slots_stmt->close();
+                    }
+                    
+                    if ($stream_time_slots_count == 0) {
+                        $stream_time_slots_count = 13;
+                    }
+                }
+            } catch (Exception $e) {
+                $schema_error = "Database schema issue: " . $e->getMessage();
+                $stream_time_slots_count = 13;
+            }
+            
+            $total_lecturer_courses = $conn->query("SELECT COUNT(*) as count FROM lecturer_courses WHERE is_active = 1")->fetch_assoc()['count'];
+            
+            $current_stream_display_name = getStreamName($conn, $current_stream_id);
+            $stream_context = " for '{$current_stream_display_name}' stream";
+            
+            $readiness_issues = [];
+            $readiness_links = [];
+            
+            if ($schema_error) {
+                $readiness_issues[] = $schema_error;
+                $readiness_links[] = null;
+            }
+            
+            if ($total_courses == 0) {
+                $readiness_issues[] = "No courses{$stream_context}";
+                $readiness_links[] = "courses.php";
+            }
+            
+            if ($total_classes == 0) {
+                $readiness_issues[] = "No classes{$stream_context}";
+                $readiness_links[] = "classes.php";
+            }
+            
+            if ($total_assignments == 0) {
+                $readiness_issues[] = "No class-course assignments{$stream_context}";
+                $readiness_links[] = "class_courses.php";
+            }
+            
+            if ($stream_time_slots_count == 0) {
+                $readiness_issues[] = "No time slots available{$stream_context}";
+                $readiness_links[] = "time_slots.php";
+            }
+            
+            if ($total_rooms == 0) {
+                $readiness_issues[] = "No active rooms available";
+                $readiness_links[] = "rooms.php";
+            }
+            
+            if ($total_days == 0) {
+                $readiness_issues[] = "No active days configured{$stream_context}";
+                $readiness_links[] = "streams.php";
+            }
+            
+            $lecturer_warning = null;
+            if ($total_lecturer_courses == 0) {
+                $lecturer_warning = "No lecturer-course assignments{$stream_context} (Optional - courses will be scheduled without lecturers)";
+            }
+            
+            $is_ready = count($readiness_issues) == 0;
+        }
+        ?>
+        
         <?php if ($edit_mode): ?>
         <!-- Edit Mode Message -->
         <div class="row m-3">
@@ -1380,9 +1534,15 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                                 </div>
                                 
                                 <div class="d-flex gap-2 align-items-center">
-                                    <button type="submit" class="btn btn-primary btn-lg" id="generate-btn">
+                                    <button type="submit" class="btn btn-primary btn-lg" id="generate-btn" 
+                                            <?php echo !$is_ready ? 'disabled title="Please complete all required items in the Readiness Status section below"' : ''; ?>>
                                         <i class="fas fa-magic me-2"></i>Generate New Timetable
                                     </button>
+                                    <?php if (!$is_ready): ?>
+                                        <small class="text-danger ms-2">
+                                            <i class="fas fa-info-circle me-1"></i>Complete required items to enable generation
+                                        </small>
+                                    <?php endif; ?>
                                     <button type="button" class="btn btn-success btn-lg" onclick="saveToSavedTimetables()" id="save-timetable-btn" style="display: none;">
                                         <i class="fas fa-save me-2"></i>Save Timetable
                                     </button>
@@ -1531,188 +1691,24 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
         // Check if timetable has been generated
         $has_timetable = $total_timetable_entries > 0;
         
-        // Helper function to validate stream active days
-        function validateStreamDays($conn, $streamId) {
-            $streamSql = "SELECT active_days FROM streams WHERE id = ?";
-            $stmt = $conn->prepare($streamSql);
-            $stmt->bind_param("i", $streamId);
-            $stmt->execute();
-            $result = $stmt->get_result();
-            
-            if ($streamRow = $result->fetch_assoc()) {
-                $activeDaysJson = $streamRow['active_days'];
-                if (!empty($activeDaysJson)) {
-                    $activeDaysArray = json_decode($activeDaysJson, true);
-                    if (is_array($activeDaysArray) && count($activeDaysArray) > 0) {
-                        // Validate each day name exists in database
-                        $validDays = [];
-                        foreach ($activeDaysArray as $dayName) {
-                            $checkSql = "SELECT id FROM days WHERE name = ? AND is_active = 1";
-                            $checkStmt = $conn->prepare($checkSql);
-                            $checkStmt->bind_param("s", $dayName);
-                            $checkStmt->execute();
-                            if ($checkStmt->get_result()->num_rows > 0) {
-                                $validDays[] = $dayName;
-                            }
-                            $checkStmt->close();
-                        }
-                        $stmt->close();
-                        return $validDays;
-                    }
-                }
-            }
-            $stmt->close();
-            return [];
-        }
-
-        // Get readiness conditions for pre-generation
-        $total_rooms = $conn->query("SELECT COUNT(*) as count FROM rooms WHERE is_active = 1")->fetch_assoc()['count'];
-        
-        // Get days count - consider stream-specific days if available
-        $total_days = 0;
-        $stream_days_used = false;
-        if (!empty($current_stream_id)) {
-            // Validate and get stream-specific active days
-            $valid_stream_days = validateStreamDays($conn, $current_stream_id);
-            if (!empty($valid_stream_days)) {
-                // Count stream-specific active days using prepared statement
-                $placeholders = str_repeat('?,', count($valid_stream_days) - 1) . '?';
-                $stream_days_sql = "SELECT COUNT(*) as count FROM days WHERE is_active = 1 AND name IN ($placeholders)";
-                $stmt = $conn->prepare($stream_days_sql);
-                $stmt->bind_param(str_repeat('s', count($valid_stream_days)), ...$valid_stream_days);
-                $stmt->execute();
-                $total_days = $stmt->get_result()->fetch_assoc()['count'];
-                $stmt->close();
-                $stream_days_used = true;
-                error_log("Stream ID $current_stream_id using specific days: " . implode(', ', $valid_stream_days) . " (count: $total_days)");
-            } else {
-                error_log("Stream ID $current_stream_id has no valid active days, falling back to all days");
-            }
-        }
-        if ($total_days == 0) {
-            // Fallback to all active days
-            $total_days = $conn->query("SELECT COUNT(*) as count FROM days WHERE is_active = 1")->fetch_assoc()['count'];
-        }
-        
-        // Get stream-specific time slots count (with error handling for missing table)
-        $stream_time_slots_count = 0;
-        $schema_error = null;
+        // Note: Readiness calculation is done earlier before the form (lines 1342-1487)
+        // to allow the generate button state to be set correctly
         
         try {
-            if (!empty($current_stream_id)) {
-                // First try to get stream-specific time slots from stream_time_slots mapping
-                $stmt = $conn->prepare("SELECT COUNT(*) as count FROM stream_time_slots WHERE stream_id = ? AND is_active = 1");
-                $stmt->bind_param("i", $current_stream_id);
-                $stmt->execute();
-                $sts_result = $stmt->get_result();
-                $stream_time_slots_count = $sts_result ? $sts_result->fetch_assoc()['count'] : 0;
-            }
-            
-            // If no mapped time slots found, calculate from stream's period settings
-            if ($stream_time_slots_count == 0 && !empty($current_stream_id)) {
-                // Fetch stream's period settings from database
-                $stream_period_sql = "SELECT period_start, period_end, break_start, break_end FROM streams WHERE id = ? AND is_active = 1";
-                $stream_period_stmt = $conn->prepare($stream_period_sql);
-                $stream_period_stmt->bind_param('i', $current_stream_id);
-                $stream_period_stmt->execute();
-                $stream_period_result = $stream_period_stmt->get_result();
-                
-                if ($stream_period_row = $stream_period_result->fetch_assoc()) {
-                    $period_start = $stream_period_row['period_start'];
-                    $period_end = $stream_period_row['period_end'];
-                    $break_start = $stream_period_row['break_start'];
-                    $break_end = $stream_period_row['break_end'];
-                    
-                    // Calculate time slots based on stream's period settings
-                    if (!empty($period_start) && !empty($period_end)) {
-                        $start_time = new DateTime($period_start);
-                        $end_time = new DateTime($period_end);
-                        $current_time = clone $start_time;
-                        $slot_count = 0;
-                        
-                        while ($current_time < $end_time) {
-                            $slot_start = $current_time->format('H:i');
-                            
-                            // Try to get duration from existing time slots, default to 1 hour
-                            $slot_duration = 60; // Default 60 minutes
-                            
-                            // Check if there's a matching time slot in the database
-                            $existing_slot_sql = "SELECT duration, is_break FROM time_slots WHERE start_time = ? LIMIT 1";
-                            $existing_slot_stmt = $conn->prepare($existing_slot_sql);
-                            $existing_slot_stmt->bind_param('s', $slot_start);
-                            $existing_slot_stmt->execute();
-                            $existing_slot_result = $existing_slot_stmt->get_result();
-                            
-                            $is_break_from_db = false;
-                            if ($existing_slot_row = $existing_slot_result->fetch_assoc()) {
-                                $slot_duration = (int)$existing_slot_row['duration'];
-                                $is_break_from_db = (bool)$existing_slot_row['is_break'];
-                            }
-                            $existing_slot_stmt->close();
-                            
-                            $current_time->add(new DateInterval('PT' . $slot_duration . 'M')); // Add duration minutes
-                            $slot_end = $current_time->format('H:i');
-                            
-                            // Don't count a slot that goes beyond the period end
-                            if ($current_time > $end_time) {
-                                $slot_end = $end_time->format('H:i');
-                            }
-                            
-                            // Check if this slot overlaps with break time OR is marked as break in database
-                            $is_break = $is_break_from_db;
-                            
-                            if (!$is_break_from_db && !empty($break_start) && !empty($break_end)) {
-                                $break_start_time = new DateTime($break_start);
-                                $break_end_time = new DateTime($break_end);
-                                $slot_start_time = new DateTime($slot_start);
-                                $slot_end_time = new DateTime($slot_end);
-                                
-                                // Check if slot overlaps with break period
-                                if (($slot_start_time < $break_end_time) && ($slot_end_time > $break_start_time)) {
-                                    $is_break = true;
-                                }
-                            }
-                            
-                            // Only count non-break slots for scheduling
-                            if (!$is_break) {
-                                $slot_count++;
-                            }
-                            
-                            // Safety check to prevent infinite loops
-                            if ($slot_count > 24) {
-                                break;
-                            }
-                        }
-                        
-                        $stream_time_slots_count = $slot_count;
-                    }
+            if (!$edit_mode && !empty($current_stream_id)) {
+                // Note: Variables calculated earlier (line 1342+), just ensure they exist
+                if (!isset($stream_time_slots_count)) {
+                    $stream_time_slots_count = 13; // Default if not calculated
                 }
-                $stream_period_stmt->close();
-            }
-            
-            // Fallback to default period range (07:00 to 20:00) - 13 periods if no stream-specific data
-            if ($stream_time_slots_count == 0) {
-                $stream_time_slots_count = 13;
             }
         } catch (Exception $e) {
-            $schema_error = "Database schema issue: " . $e->getMessage();
-            // Fallback to default period count
-            $stream_time_slots_count = 13;
+            if (!isset($schema_error)) {
+                $schema_error = "Database schema issue: " . $e->getMessage();
+            }
+            if (!isset($stream_time_slots_count)) {
+                $stream_time_slots_count = 13;
+            }
         }
-        
-        // Check lecturer-course mappings
-        $total_lecturer_courses = $conn->query("SELECT COUNT(*) as count FROM lecturer_courses WHERE is_active = 1")->fetch_assoc()['count'];
-        
-        // Readiness checks
-        $readiness_issues = [];
-        if ($schema_error) $readiness_issues[] = $schema_error;
-        if ($total_assignments == 0) $readiness_issues[] = "No class-course assignments";
-        if ($stream_time_slots_count == 0) $readiness_issues[] = "No time slots available";
-        if ($total_rooms == 0) $readiness_issues[] = "No active rooms";
-        if ($total_days == 0) $readiness_issues[] = "No active days";
-        if ($total_lecturer_courses == 0) $readiness_issues[] = "No lecturer-course assignments";
-        
-        $is_ready = count($readiness_issues) == 0;
         ?>
 
         <!-- Version Viewing/Editing Section -->
@@ -1767,20 +1763,42 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                         </h6>
                     </div>
                     <div class="card-body">
-                        <div class="row">
-                            <div class="col-md-2 d-flex">
-                                <div class="card theme-card <?php echo $total_assignments > 0 ? 'bg-theme-green text-white' : 'bg-theme-secondary text-dark'; ?> text-center mb-2 w-100 h-100">
+                        <div class="row g-3">
+                            <div class="col-md-2 d-flex justify-content-center">
+                                <div class="card theme-card <?php echo $total_courses > 0 ? 'bg-theme-green text-white' : 'bg-theme-danger text-white'; ?> text-center w-100 h-100">
                                     <div class="card-body">
-                                        <div class="stat-number"><?php echo $total_assignments; ?></div>
+                                        <div class="stat-number"><?php echo $total_courses; ?></div>
                                         <div>
-                                            Assignments
-                                            <i class="fas fa-info-circle ms-1" data-bs-toggle="tooltip" title="Class-course pairings that need scheduling"></i>
+                                            Courses
+                                            <i class="fas fa-info-circle ms-1" data-bs-toggle="tooltip" title="Courses available for <?php echo htmlspecialchars($current_stream_display_name); ?> stream"></i>
                                         </div>
                                     </div>
                                 </div>
                             </div>
-                            <div class="col-md-2 d-flex">
-                                <div class="card theme-card <?php echo $stream_time_slots_count > 0 ? 'bg-theme-green text-white' : 'bg-theme-secondary text-dark'; ?> text-center mb-2 w-100 h-100">
+                            <div class="col-md-2 d-flex justify-content-center">
+                                <div class="card theme-card <?php echo $total_classes > 0 ? 'bg-theme-green text-white' : 'bg-theme-danger text-white'; ?> text-center w-100 h-100">
+                                    <div class="card-body">
+                                        <div class="stat-number"><?php echo $total_classes; ?></div>
+                                        <div>
+                                            Classes
+                                            <i class="fas fa-info-circle ms-1" data-bs-toggle="tooltip" title="Classes available for <?php echo htmlspecialchars($current_stream_display_name); ?> stream"></i>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-2 d-flex justify-content-center">
+                                <div class="card theme-card <?php echo $total_assignments > 0 ? 'bg-theme-green text-white' : 'bg-theme-danger text-white'; ?> text-center mb-2 w-100 h-100">
+                                    <div class="card-body">
+                                        <div class="stat-number"><?php echo $total_assignments; ?></div>
+                                        <div>
+                                            Assignments
+                                            <i class="fas fa-info-circle ms-1" data-bs-toggle="tooltip" title="Class-course pairings that need scheduling for <?php echo htmlspecialchars($current_stream_display_name); ?> stream"></i>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-2 d-flex justify-content-center">
+                                <div class="card theme-card <?php echo $stream_time_slots_count > 0 ? 'bg-theme-green text-white' : 'bg-theme-danger text-white'; ?> text-center mb-2 w-100 h-100">
                                     <div class="card-body">
                                         <div class="stat-number"><?php echo $stream_time_slots_count; ?></div>
                                         <div>
@@ -1790,8 +1808,8 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                                     </div>
                                 </div>
                             </div>
-                            <div class="col-md-2 d-flex">
-                                <div class="card theme-card <?php echo $total_rooms > 0 ? 'bg-theme-green text-white' : 'bg-theme-secondary text-dark'; ?> text-center mb-2 w-100 h-100">
+                            <div class="col-md-2 d-flex justify-content-center">
+                                <div class="card theme-card <?php echo $total_rooms > 0 ? 'bg-theme-green text-white' : 'bg-theme-danger text-white'; ?> text-center mb-2 w-100 h-100">
                                     <div class="card-body">
                                         <div class="stat-number"><?php echo $total_rooms; ?></div>
                                         <div>
@@ -1801,8 +1819,8 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                                     </div>
                                 </div>
                             </div>
-                            <div class="col-md-2 d-flex">
-                                <div class="card theme-card <?php echo $total_days > 0 ? 'bg-theme-green text-white' : 'bg-theme-secondary text-dark'; ?> text-center mb-2 w-100 h-100">
+                            <div class="col-md-2 d-flex justify-content-center">
+                                <div class="card theme-card <?php echo $total_days > 0 ? 'bg-theme-green text-white' : 'bg-theme-danger text-white'; ?> text-center mb-2 w-100 h-100">
                                     <div class="card-body">
                                         <div class="stat-number"><?php echo $total_days; ?></div>
                                         <div>
@@ -1812,8 +1830,8 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                                     </div>
                                 </div>
                             </div>
-                            <div class="col-md-2 d-flex">
-                                <div class="card theme-card <?php echo $total_lecturer_courses > 0 ? 'bg-theme-green text-white' : 'bg-theme-secondary text-dark'; ?> text-center mb-2 w-100 h-100">
+                            <div class="col-md-2 d-flex justify-content-center">
+                                <div class="card theme-card <?php echo $total_lecturer_courses > 0 ? 'bg-theme-green text-white' : 'bg-theme-warning text-dark'; ?> text-center mb-2 w-100 h-100">
                                     <div class="card-body">
                                         <div class="stat-number"><?php echo $total_lecturer_courses; ?></div>
                                         <div>
@@ -1823,7 +1841,7 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                                     </div>
                                 </div>
                             </div>
-                            <div class="col-md-2 d-flex">
+                            <div class="col-md-2 d-flex justify-content-center">
                                 <div class="card theme-card <?php echo $is_ready ? 'bg-theme-green text-white' : 'bg-theme-warning text-dark'; ?> text-center mb-2 w-100 h-100">
                                     <div class="card-body">
                                         <div class="stat-number">
@@ -1847,10 +1865,24 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
                             <div class="alert alert-warning">
                                 <h6 class="mb-2"><i class="fas fa-exclamation-triangle me-2"></i>Issues to Resolve:</h6>
                                 <ul class="mb-0">
-                                    <?php foreach ($readiness_issues as $issue): ?>
-                                        <li><?php echo htmlspecialchars($issue); ?></li>
+                                    <?php foreach ($readiness_issues as $index => $issue): ?>
+                                        <li>
+                                            <?php echo htmlspecialchars($issue); ?>
+                                            <?php if (isset($readiness_links[$index]) && $readiness_links[$index]): ?>
+                                                - <a href="<?php echo htmlspecialchars($readiness_links[$index]); ?>" class="text-decoration-none fw-bold">
+                                                    <i class="fas fa-external-link-alt me-1"></i>Add now
+                                                </a>
+                                            <?php endif; ?>
+                                        </li>
                                     <?php endforeach; ?>
                                 </ul>
+                                <?php if ($lecturer_warning): ?>
+                                <hr>
+                                <p class="mb-0 text-muted">
+                                    <i class="fas fa-info-circle me-1"></i>
+                                    <small><?php echo htmlspecialchars($lecturer_warning); ?></small>
+                                </p>
+                                <?php endif; ?>
                             </div>
                         </div>
                         <?php endif; ?>
@@ -3115,6 +3147,44 @@ $streams = $conn->query("SELECT id, name, code FROM streams WHERE is_active = 1 
 
 
 <style>
+/* Theme Card Styles for Pre-Generation Conditions */
+.theme-card {
+    min-height: 100px;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.bg-theme-green {
+    background-color: #198754 !important;
+    border-color: #198754 !important;
+}
+
+.bg-theme-danger {
+    background-color: #dc3545 !important;
+    border-color: #dc3545 !important;
+}
+
+.bg-theme-warning {
+    background-color: #ffc107 !important;
+    border-color: #ffc107 !important;
+    color: #000 !important;
+}
+
+.bg-theme-secondary {
+    background-color: #6c757d !important;
+    border-color: #6c757d !important;
+}
+
+.theme-card .stat-number {
+    font-size: 2rem;
+    font-weight: bold;
+    margin-bottom: 0.5rem;
+}
+
+.theme-card .card-body {
+    padding: 1rem;
+}
+
 /* Timetable Template Styles */
 .timetable-template {
     font-size: 0.875rem;

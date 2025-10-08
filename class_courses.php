@@ -3,6 +3,19 @@ include 'connect.php';
 
 // Page title and layout includes
 $pageTitle = 'Class Course Management';
+
+// Include stream validation and manager
+include 'includes/stream_validation.php';
+include 'includes/stream_manager.php';
+
+// Validate stream selection before showing data
+$stream_validation = validateStreamSelection($conn);
+$current_stream_id = $stream_validation['stream_id'];
+$current_stream_name = $stream_validation['stream_name'];
+
+// Get stream manager
+$streamManager = getStreamManager();
+
 include 'includes/header.php';
 include 'includes/sidebar.php';
 
@@ -72,25 +85,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $selected_program = isset($_GET['program_id']) ? (int)$_GET['program_id'] : 0;
 $search_name = isset($_GET['search_name']) ? trim($_GET['search_name']) : '';
 
-// Get all classes for selects (include human-readable level and program)
-$classes_sql = "SELECT c.id, c.name, l.name AS level, p.name AS program_name FROM classes c LEFT JOIN levels l ON c.level_id = l.id LEFT JOIN programs p ON c.program_id = p.id WHERE c.is_active = 1 ORDER BY c.name";
-$classes_result = $conn->query($classes_sql);
+// Get all classes for selects (include human-readable level and program) - filter by stream
+$classes_sql = "SELECT c.id, c.name, l.name AS level, p.name AS program_name FROM classes c LEFT JOIN levels l ON c.level_id = l.id LEFT JOIN programs p ON c.program_id = p.id WHERE c.is_active = 1 AND c.stream_id = ? ORDER BY c.name";
+$classes_stmt = $conn->prepare($classes_sql);
+$classes_stmt->bind_param("i", $current_stream_id);
+$classes_stmt->execute();
+$classes_result = $classes_stmt->get_result();
 
-// Get all courses (with basic defensive query)
-$courses_sql = "SELECT id, `code` AS course_code, `name` AS course_name FROM courses WHERE is_active = 1 ORDER BY `code`";
-$courses_result = $conn->query($courses_sql);
+// Get all courses for the current stream
+$courses_sql = "SELECT id, `code` AS course_code, `name` AS course_name FROM courses WHERE is_active = 1 AND stream_id = ? ORDER BY `code`";
+$courses_stmt = $conn->prepare($courses_sql);
+$courses_stmt->bind_param("i", $current_stream_id);
+$courses_stmt->execute();
+$courses_result = $courses_stmt->get_result();
 
 // Prepare mappings query similar to lecturer_courses.php: show class -> assigned courses concatenated
-$mappings_query = "SELECT c.id as class_id, c.name as class_name, l.name AS level, p.name AS program_name, GROUP_CONCAT(co.code ORDER BY co.code SEPARATOR ', ') AS course_codes
+// Filter to show only courses from the current stream
+$mappings_query = "SELECT 
+                       c.id as class_id, 
+                       c.name as class_name, 
+                       COALESCE(l.name, 'N/A') AS level, 
+                       COALESCE(p.name, 'N/A') AS program_name, 
+                       COALESCE(GROUP_CONCAT(co.code ORDER BY co.code SEPARATOR ', '), '') AS course_codes
                    FROM classes c
                    LEFT JOIN levels l ON c.level_id = l.id
                    LEFT JOIN programs p ON c.program_id = p.id
                    LEFT JOIN class_courses cc ON c.id = cc.class_id AND cc.is_active = 1
-                   LEFT JOIN courses co ON co.id = cc.course_id
-                   WHERE c.is_active = 1";
+                   LEFT JOIN courses co ON co.id = cc.course_id AND co.stream_id = ?
+                   WHERE c.is_active = 1 AND c.stream_id = ?";
 
-$params = [];
-$types = '';
+$params = [$current_stream_id, $current_stream_id]; // Start with stream_id for both courses and classes
+$types = 'ii';
 
 if ($selected_program > 0) {
     $mappings_query .= " AND c.program_id = ?";
@@ -256,8 +281,8 @@ if ($existing_assignments_result) {
                                     <?php if ($assignments_result && $assignments_result->num_rows > 0): ?>
                                         <?php while ($row = $assignments_result->fetch_assoc()): ?>
                                             <tr>
-                                                <td><?php echo htmlspecialchars($row['class_name']); ?></td>
-                                                <td><?php echo htmlspecialchars($row['level']); ?></td>
+                                                <td><?php echo htmlspecialchars($row['class_name'] ?? ''); ?></td>
+                                                <td><?php echo htmlspecialchars($row['level'] ?? 'N/A'); ?></td>
                                                 <td><?php echo htmlspecialchars($row['program_name'] ?? 'N/A'); ?></td>
                                                 <td><?php echo htmlspecialchars($row['course_codes'] ?? ''); ?></td>
                                                 <td>
@@ -268,9 +293,20 @@ if ($existing_assignments_result) {
                                             </tr>
                                         <?php endwhile; ?>
                                     <?php else: ?>
-                                        <tr>
-                                            <td colspan="5" class="text-center text-muted">
-                                                <i class="fas fa-info-circle me-2"></i>No assignments found
+                                        <tr class="empty-state-row">
+                                            <td colspan="5" class="text-center text-muted py-5">
+                                                <i class="fas fa-info-circle fa-2x mb-3 d-block"></i>
+                                                <h5>No Classes Found</h5>
+                                                <p class="mb-0">
+                                                    <?php if ($current_stream_name): ?>
+                                                        No classes found for the <strong><?php echo htmlspecialchars($current_stream_name); ?></strong> stream.
+                                                    <?php else: ?>
+                                                        No classes found for the current stream.
+                                                    <?php endif; ?>
+                                                </p>
+                                                <p class="text-muted small mt-2">
+                                                    Add classes for this stream in the Classes Management page, or switch to a different stream from the Dashboard.
+                                                </p>
                                             </td>
                                         </tr>
                                     <?php endif; ?>
@@ -382,16 +418,24 @@ if ($existing_assignments_result) {
                 allowClear: true
             });
             
-            // Initialize DataTable for better table experience
-            $('#assignmentsTable').DataTable({
-                pageLength: 25,
-                order: [[0, 'asc'], [2, 'asc']],
-                language: {
-                    search: "Search assignments:",
-                    lengthMenu: "Show _MENU_ assignments per page",
-                    info: "Showing _START_ to _END_ of _TOTAL_ assignments"
-                }
-            });
+            // Initialize DataTable only if there are data rows (not just the empty state message)
+            var tableBody = $('#assignmentsTable tbody tr');
+            var hasData = tableBody.length > 0 && !tableBody.first().find('td[colspan]').length;
+            
+            if (hasData) {
+                $('#assignmentsTable').DataTable({
+                    pageLength: 25,
+                    order: [[0, 'asc'], [2, 'asc']],
+                    language: {
+                        search: "Search assignments:",
+                        lengthMenu: "Show _MENU_ assignments per page",
+                        info: "Showing _START_ to _END_ of _TOTAL_ assignments"
+                    }
+                });
+            } else {
+                // Add a note for empty table
+                console.log('DataTables not initialized: No data available for current stream');
+            }
         });
     </script>
     <script>

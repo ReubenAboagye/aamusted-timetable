@@ -453,35 +453,91 @@ class DBLoader {
 
     /**
      * Validate that sufficient data exists for timetable generation
+     * Enhanced to provide stream-specific error messages
      */
-    public function validateDataForGeneration(array $data): array {
+    public function validateDataForGeneration(array $data, $streamId = null, $streamName = null): array {
         $errors = [];
         $warnings = [];
+        
+        // Get stream context for better error messages
+        $streamContext = '';
+        if ($streamName) {
+            $streamContext = " for the '{$streamName}' stream";
+        } elseif ($streamId) {
+            // Try to get stream name from data
+            if (!empty($data['streams'])) {
+                foreach ($data['streams'] as $stream) {
+                    if ($stream['id'] == $streamId) {
+                        $streamContext = " for the '{$stream['name']}' stream";
+                        break;
+                    }
+                }
+            }
+            if (!$streamContext) {
+                $streamContext = " for stream ID {$streamId}";
+            }
+        }
 
-        // Check minimum requirements
+        // Check minimum requirements with stream-aware messages
         if (empty($data['class_courses'])) {
-            $errors[] = 'No class-course assignments found';
+            $errors[] = "No class-course assignments found{$streamContext}. Please assign courses to classes before generating the timetable.";
+        }
+        
+        if (empty($data['courses'])) {
+            $errors[] = "No courses found{$streamContext}. Please add courses before generating the timetable.";
+        }
+        
+        if (empty($data['classes'])) {
+            $errors[] = "No classes found{$streamContext}. Please add classes before generating the timetable.";
         }
 
         if (empty($data['time_slots'])) {
-            $errors[] = 'No time slots available';
+            $errors[] = "No time slots available{$streamContext}. Please configure time slots for this stream.";
         }
 
         if (empty($data['days'])) {
-            $errors[] = 'No days available';
+            $errors[] = "No days available{$streamContext}. Please configure active days for this stream.";
         }
 
         if (empty($data['rooms'])) {
-            $errors[] = 'No rooms available';
+            $errors[] = "No rooms available{$streamContext}. Please add rooms before generating the timetable.";
         }
 
         // Check for potential issues
-        if (count($data['class_courses']) > count($data['time_slots']) * count($data['days']) * count($data['rooms'])) {
-            $warnings[] = 'More assignments than available time slots. Timetable may not be feasible.';
+        if (!empty($data['class_courses']) && !empty($data['time_slots']) && !empty($data['days']) && !empty($data['rooms'])) {
+            $totalSlots = count($data['time_slots']) * count($data['days']) * count($data['rooms']);
+            $totalAssignments = count($data['class_courses']);
+            
+            if ($totalAssignments > $totalSlots) {
+                $warnings[] = "More assignments ({$totalAssignments}) than available time slots ({$totalSlots}){$streamContext}. Timetable may not be feasible.";
+            }
         }
 
         if (empty($data['lecturer_courses'])) {
-            $warnings[] = 'No lecturer-course assignments found. Some courses may not have lecturers.';
+            $warnings[] = "No lecturer-course assignments found{$streamContext}. Some courses may not have lecturers assigned.";
+        } elseif (!empty($data['class_courses'])) {
+            // Check if all courses have lecturer assignments
+            $coursesWithoutLecturers = 0;
+            $courseIdsWithLecturers = [];
+            
+            foreach ($data['lecturer_courses'] as $lc) {
+                $courseIdsWithLecturers[$lc['course_id']] = true;
+            }
+            
+            $uniqueCourseIds = [];
+            foreach ($data['class_courses'] as $cc) {
+                $uniqueCourseIds[$cc['course_id']] = true;
+            }
+            
+            foreach ($uniqueCourseIds as $courseId => $val) {
+                if (!isset($courseIdsWithLecturers[$courseId])) {
+                    $coursesWithoutLecturers++;
+                }
+            }
+            
+            if ($coursesWithoutLecturers > 0) {
+                $warnings[] = "{$coursesWithoutLecturers} course(s){$streamContext} have no lecturer assigned. These courses will be scheduled without lecturers.";
+            }
         }
 
         return [

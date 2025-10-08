@@ -3,6 +3,18 @@ $pageTitle = 'Map Courses to Lecturers';
 include 'includes/header.php';
 include 'includes/sidebar.php';
 
+// Include stream validation and manager
+include 'includes/stream_validation.php';
+include 'includes/stream_manager.php';
+
+// Validate stream selection before showing data
+$stream_validation = validateStreamSelection($conn);
+$current_stream_id = $stream_validation['stream_id'];
+$current_stream_name = $stream_validation['stream_name'];
+
+// Get stream manager
+$streamManager = getStreamManager();
+
 $success_message = '';
 $error_message = '';
 
@@ -44,31 +56,32 @@ $search_name = isset($_GET['search_name']) ? trim($_GET['search_name']) : '';
 $departments = $conn->query("SELECT id, name FROM departments WHERE is_active = 1 ORDER BY name");
 $lecturers = $conn->query("SELECT id, name, department_id FROM lecturers WHERE is_active = 1 ORDER BY name");
 
-// Build courses query defensively: some DB schemas include department_id on courses, others don't
-$courses_query = "SELECT c.id, c.name, c.code FROM courses c WHERE c.is_active = 1 ORDER BY c.name";
-$courses = $conn->query($courses_query);
+// Build courses query with stream filtering
+// Only show courses for the current stream
+$courses_query = "SELECT c.id, c.name, c.code FROM courses c WHERE c.is_active = 1 AND c.stream_id = ? ORDER BY c.name";
+$courses_stmt = $conn->prepare($courses_query);
+$courses_stmt->bind_param("i", $current_stream_id);
+$courses_stmt->execute();
+$courses = $courses_stmt->get_result();
 if ($courses === false) {
     error_log('courses query failed: ' . $conn->error . ' -- Query: ' . $courses_query);
-}
-// If the above failed (schema mismatch), fall back to a simpler courses query
-if ($courses === false) {
-    // Log error for debugging (do not expose DB errors to users in production)
-    error_log('courses query failed: ' . $conn->error . ' -- Query: ' . $courses_query);
-    $courses = $conn->query("SELECT c.id, c.name, c.code, NULL AS department_name FROM courses c WHERE c.is_active = 1 ORDER BY c.name");
+    // Fallback without stream filter if column doesn't exist (backward compatibility)
+    $courses = $conn->query("SELECT c.id, c.name, c.code FROM courses c WHERE c.is_active = 1 ORDER BY c.name");
 }
 
 // Build mappings query with filters
+// Filter to show only courses from the current stream
 $mappings_query = "SELECT l.id as lecturer_id, l.name AS lecturer_name, 
                    d.name AS department_name,
                    GROUP_CONCAT(c.code ORDER BY c.code SEPARATOR ', ') AS course_codes
                    FROM lecturers l
                    LEFT JOIN departments d ON l.department_id = d.id
                    LEFT JOIN lecturer_courses lc ON l.id = lc.lecturer_id
-                   LEFT JOIN courses c ON c.id = lc.course_id
+                   LEFT JOIN courses c ON c.id = lc.course_id AND c.stream_id = ?
                    WHERE l.is_active = 1";
 
-$params = [];
-$types = '';
+$params = [$current_stream_id]; // Start with stream_id as first parameter
+$types = 'i';
 
 // Add department filter
 if ($selected_department > 0) {
@@ -86,20 +99,16 @@ if (!empty($search_name)) {
 
 $mappings_query .= " GROUP BY l.id, l.name, d.name ORDER BY l.name";
 
-// Execute the query with parameters if any
-if (!empty($params)) {
-    $stmt = $conn->prepare($mappings_query);
-    if ($stmt) {
-        $stmt->bind_param($types, ...$params);
-        $stmt->execute();
-        $mappings = $stmt->get_result();
-        $stmt->close();
-    } else {
-        $mappings = false;
-        error_log('mappings query prepare failed: ' . $conn->error);
-    }
+// Execute the query with parameters
+$stmt = $conn->prepare($mappings_query);
+if ($stmt) {
+    $stmt->bind_param($types, ...$params);
+    $stmt->execute();
+    $mappings = $stmt->get_result();
+    $stmt->close();
 } else {
-    $mappings = $conn->query($mappings_query);
+    $mappings = false;
+    error_log('mappings query prepare failed: ' . $conn->error);
 }
 ?>
 
@@ -444,4 +453,5 @@ document.getElementById('search_name').addEventListener('input', function(e) {
 </script>
 
 <?php include 'includes/footer.php'; ?>
+
 

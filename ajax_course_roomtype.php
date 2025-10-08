@@ -9,6 +9,19 @@ header('Cache-Control: no-cache, must-revalidate');
 // Include database connection
 include 'connect.php';
 
+// Include stream validation and manager
+include 'includes/stream_validation.php';
+include 'includes/stream_manager.php';
+
+// Start session if not already started
+if (session_status() == PHP_SESSION_NONE) {
+    session_start();
+}
+
+// Get current stream
+$streamManager = getStreamManager();
+$current_stream_id = $streamManager->getCurrentStreamId();
+
 // Helper function to resolve room type id from either numeric id or name
 function resolveRoomTypeId($conn, $roomType) {
     if (is_numeric($roomType)) return (int)$roomType;
@@ -235,9 +248,12 @@ try {
             break;
 
         case 'get_courses':
-            // Get all courses for dropdowns
-            $courses_sql = "SELECT id, `code` AS course_code, `name` AS course_name FROM courses WHERE is_active = 1 ORDER BY `code`";
-            $courses_result = $conn->query($courses_sql);
+            // Get all courses for dropdowns - filtered by current stream
+            $courses_sql = "SELECT id, `code` AS course_code, `name` AS course_name FROM courses WHERE is_active = 1 AND stream_id = ? ORDER BY `code`";
+            $courses_stmt = $conn->prepare($courses_sql);
+            $courses_stmt->bind_param("i", $current_stream_id);
+            $courses_stmt->execute();
+            $courses_result = $courses_stmt->get_result();
             
             $courses = [];
             if ($courses_result) {
@@ -245,6 +261,7 @@ try {
                     $courses[] = $course;
                 }
             }
+            $courses_stmt->close();
             
             sendResponse(true, 'Courses retrieved successfully', $courses);
             break;
@@ -273,14 +290,18 @@ try {
             break;
 
         case 'get_table_data':
-            // Get existing course room type preferences for table
+            // Get existing course room type preferences for table - filtered by current stream
             $sql = "SELECT crt.course_id, rt.id AS room_type_id, rt.name AS preferred_room_type,
                     co.`code` AS course_code, co.`name` AS course_name
                     FROM course_room_types crt
                     LEFT JOIN room_types rt ON crt.room_type_id = rt.id
                     LEFT JOIN courses co ON crt.course_id = co.id
+                    WHERE co.stream_id = ?
                     ORDER BY co.`code`";
-            $result = $conn->query($sql);
+            $stmt = $conn->prepare($sql);
+            $stmt->bind_param("i", $current_stream_id);
+            $stmt->execute();
+            $result = $stmt->get_result();
             
             $table_data = [];
             if ($result) {
@@ -288,6 +309,7 @@ try {
                     $table_data[] = $row;
                 }
             }
+            $stmt->close();
             
             sendResponse(true, 'Table data retrieved successfully', $table_data);
             break;
