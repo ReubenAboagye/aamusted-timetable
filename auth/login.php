@@ -9,7 +9,7 @@ if (session_status() == PHP_SESSION_NONE) {
 }
 
 if (auth_is_enabled() && auth_is_admin_logged_in()) {
-    $next = isset($_GET['next']) ? $_GET['next'] : 'index.php';
+    $next = isset($_GET['next']) ? $_GET['next'] : '/index.php';
     header('Location: ' . $next);
     exit;
 }
