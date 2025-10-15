@@ -44,12 +44,25 @@ function requireAdmin(): void {
     if (!auth_is_enabled()) {
         return; // auth disabled
     }
-    if (!auth_is_admin_logged_in()) {
-        // Redirect to login, preserving intended URL (project-relative)
+
+    $is_logged_in = auth_is_admin_logged_in();
+    $timeout = 300; // 5 minutes
+
+    if ($is_logged_in && isset($_SESSION['last_activity'])) {
+        if ((time() - $_SESSION['last_activity']) > $timeout) {
+            admin_logout(); // Session expired
+            $is_logged_in = false;
+        }
+    }
+
+    if ($is_logged_in) {
+        $_SESSION['last_activity'] = time(); // Update last activity time
+    } else {
+        // Redirect to login, preserving intended URL
 		$current = $_SERVER['REQUEST_URI'] ?? 'index.php';
         if ($current === '' || $current === '/') { $current = 'index.php'; }
         $target = urlencode($current);
-        $loginUrl = '/auth/login.php?next=' . $target;
+        $loginUrl = auth_base_path() . '/auth/login.php?next=' . $target;
 		header('Location: ' . $loginUrl);
         exit;
     }
@@ -81,6 +94,7 @@ function admin_login(mysqli $conn, string $username, string $password): array {
 	$_SESSION['admin_user_id'] = (int)$user['id'];
 	$_SESSION['admin_username'] = (string)$user['username'];
 	$_SESSION['is_admin'] = 1;
+    $_SESSION['last_activity'] = time(); // Set initial activity time
 	return ['success' => true, 'message' => 'Authenticated'];
 }
 
