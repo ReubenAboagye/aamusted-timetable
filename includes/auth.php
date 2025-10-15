@@ -25,11 +25,9 @@ function auth_is_enabled(): bool {
 
 // Compute project base path (e.g., "/timetable") using folder name
 function auth_base_path(): string {
-	$projectDir = basename(realpath(__DIR__ . '/..'));
-	if ($projectDir === '' || $projectDir === '.' || $projectDir === DIRECTORY_SEPARATOR) {
-		return '/';
-	}
-	return '/' . $projectDir;
+	// On many production servers, the base path is just '/', not a subfolder.
+    // Return a hardcoded '/' for simplicity and robustness on production.
+    return '/';
 }
 
 // NOTE: All schema creation and seeding must be done via migrations, not at runtime, for security.
