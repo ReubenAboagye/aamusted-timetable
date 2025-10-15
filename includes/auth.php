@@ -51,7 +51,7 @@ function requireAdmin(): void {
 		$current = $_SERVER['REQUEST_URI'] ?? 'index.php';
         if ($current === '' || $current === '/') { $current = 'index.php'; }
         $target = urlencode($current);
-		$loginUrl = rtrim(auth_base_path(), '/') . '/auth/login.php?next=' . $target;
+        $loginUrl = '/auth/login.php?next=' . $target;
 		header('Location: ' . $loginUrl);
         exit;
     }
