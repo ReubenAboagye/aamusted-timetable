@@ -253,7 +253,7 @@ if (!function_exists('getCount')) {
 }
 
 // Compute project base URL for asset links regardless of subdirectories (e.g., /timetable/)
-$__project_base = '/' . basename(realpath(__DIR__ . '/..')) . '/';
+$__project_base = '/';
 ?>
 <!DOCTYPE html>
 <html lang="en">
