@@ -1,5 +1,8 @@
 <?php
 require_once 'connect.php';
+// Stream helpers
+if (file_exists(__DIR__ . '/includes/stream_validation.php')) include_once __DIR__ . '/includes/stream_validation.php';
+if (file_exists(__DIR__ . '/includes/stream_manager.php')) include_once __DIR__ . '/includes/stream_manager.php';
 
 // Expect JSON body
 $raw = file_get_contents('php://input');
@@ -36,6 +39,23 @@ if ($class_id <= 0) {
     exit;
 }
 
+// Determine class stream for enforcement
+$cstream = null;
+$cs = $conn->prepare("SELECT stream_id FROM classes WHERE id = ? LIMIT 1");
+if ($cs) {
+    $cs->bind_param('i', $class_id);
+    $cs->execute();
+    $cres = $cs->get_result();
+    if ($cres && $row = $cres->fetch_assoc()) {
+        $cstream = (int)$row['stream_id'];
+    }
+    $cs->close();
+}
+if (empty($cstream)) {
+    echo json_encode(['success' => false, 'error' => 'Unable to determine class stream']);
+    exit;
+}
+
 // Begin transaction
 $conn->begin_transaction();
 try {
@@ -61,6 +81,21 @@ try {
 
     // Insert or reactivate provided assignments
     foreach ($assigned_ids as $course_id) {
+        // Enforce: course must belong to the class stream
+        $chk = $conn->prepare("SELECT COUNT(*) AS cnt FROM courses WHERE id = ? AND stream_id = ?");
+        if ($chk) {
+            $chk->bind_param('ii', $course_id, $cstream);
+            $chk->execute();
+            $chkres = $chk->get_result();
+            $row = $chkres ? $chkres->fetch_assoc() : ['cnt' => 0];
+            $chk->close();
+            if ((int)($row['cnt'] ?? 0) === 0) {
+                throw new Exception('Selected course does not belong to the class stream');
+            }
+        } else {
+            throw new Exception('Prepare failed (course stream check): ' . $conn->error);
+        }
+
         // Try to reactivate existing mapping
         $stmt = $conn->prepare("UPDATE class_courses SET is_active = 1 WHERE class_id = ? AND course_id = ?");
         if ($stmt) {

@@ -1,5 +1,8 @@
 <?php
 require_once 'connect.php';
+// Stream helpers
+if (file_exists(__DIR__ . '/includes/stream_validation.php')) include_once __DIR__ . '/includes/stream_validation.php';
+if (file_exists(__DIR__ . '/includes/stream_manager.php')) include_once __DIR__ . '/includes/stream_manager.php';
 
 header('Content-Type: application/json');
 
@@ -7,6 +10,19 @@ $class_id = isset($_GET['class_id']) ? (int)$_GET['class_id'] : 0;
 if ($class_id <= 0) {
     echo json_encode(['success' => false, 'error' => 'Invalid class id']);
     exit;
+}
+
+// Determine the class' stream to constrain available list correctly
+$class_stream_id = null;
+$cs = $conn->prepare("SELECT stream_id FROM classes WHERE id = ? LIMIT 1");
+if ($cs) {
+    $cs->bind_param('i', $class_id);
+    $cs->execute();
+    $cres = $cs->get_result();
+    if ($cres && $row = $cres->fetch_assoc()) {
+        $class_stream_id = (int)$row['stream_id'];
+    }
+    $cs->close();
 }
 
 // Fetch assigned courses for this class
@@ -29,6 +45,10 @@ $sql = "SELECT id, code AS course_code, name AS course_name, department_id FROM 
 if (count($assigned) > 0) {
     $ids = array_map(function($c){ return (int)$c['id']; }, $assigned);
     $sql .= " AND id NOT IN (" . implode(',', $ids) . ")";
+}
+// Constrain by class stream if known
+if (!empty($class_stream_id)) {
+    $sql .= " AND stream_id = " . (int)$class_stream_id;
 }
 $sql .= " ORDER BY code";
 $res = $conn->query($sql);

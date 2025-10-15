@@ -1,6 +1,12 @@
 <?php
 header('Content-Type: application/json');
 include 'connect.php';
+// Stream helpers to filter by current stream
+if (file_exists(__DIR__ . '/includes/stream_validation.php')) include_once __DIR__ . '/includes/stream_validation.php';
+if (file_exists(__DIR__ . '/includes/stream_manager.php')) include_once __DIR__ . '/includes/stream_manager.php';
+
+$sv = function_exists('validateStreamSelection') ? validateStreamSelection($conn, false) : ['stream_id' => 0];
+$current_stream_id = (int)($sv['stream_id'] ?? 0);
 
 $response = ['success' => false, 'message' => '', 'data' => ['available_courses' => [], 'assigned_courses' => []]];
 
@@ -11,9 +17,15 @@ try {
         throw new Exception('Invalid lecturer ID');
     }
     
-    // Get all courses
-    $courses_query = "SELECT id, name, code FROM courses WHERE is_active = 1 ORDER BY name";
-    $courses_result = $conn->query($courses_query);
+    // Get all courses for current stream
+    $courses_query = "SELECT id, name, code FROM courses WHERE is_active = 1 AND stream_id = ? ORDER BY name";
+    $courses_stmt = $conn->prepare($courses_query);
+    if (!$courses_stmt) {
+        throw new Exception('Failed to prepare courses query: ' . $conn->error);
+    }
+    $courses_stmt->bind_param('i', $current_stream_id);
+    $courses_stmt->execute();
+    $courses_result = $courses_stmt->get_result();
     
     if (!$courses_result) {
         throw new Exception('Failed to fetch courses: ' . $conn->error);
@@ -36,6 +48,7 @@ try {
         WHERE lc.lecturer_id = ? 
         AND c.is_active = 1 
         AND lc.is_active = 1
+        AND c.stream_id = ?
         ORDER BY c.name
     ";
     
@@ -44,7 +57,7 @@ try {
         throw new Exception('Failed to prepare assigned courses query: ' . $conn->error);
     }
     
-    $assigned_stmt->bind_param('i', $lecturer_id);
+    $assigned_stmt->bind_param('ii', $lecturer_id, $current_stream_id);
     $assigned_stmt->execute();
     $assigned_result = $assigned_stmt->get_result();
     

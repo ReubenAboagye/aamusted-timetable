@@ -5,16 +5,25 @@ $pageTitle = 'Saved Timetable';
 include 'connect.php';
 // Ensure flash helper available
 if (file_exists(__DIR__ . '/includes/flash.php')) include_once __DIR__ . '/includes/flash.php';
+// Stream selection helpers
+if (file_exists(__DIR__ . '/includes/stream_validation.php')) include_once __DIR__ . '/includes/stream_validation.php';
+if (file_exists(__DIR__ . '/includes/stream_manager.php')) include_once __DIR__ . '/includes/stream_manager.php';
+// Validate/get current stream
+$sv = function_exists('validateStreamSelection') ? validateStreamSelection($conn, false) : ['stream_id' => 0, 'stream_name' => ''];
+$current_stream_id = (int)($sv['stream_id'] ?? 0);
+$current_stream_name = $sv['stream_name'] ?? '';
+
 include 'includes/header.php';
 include 'includes/sidebar.php';
 
-// No filter parameters on this page
+// No external filter parameters; page is scoped to current stream only
 
 // Build the main query to fetch saved timetables
 // timetable no longer stores session_id; classes reference streams via c.stream_id
-$where_conditions = ["c.stream_id IS NOT NULL"];
-$params = [];
-$param_types = "";
+// Restrict strictly to the currently selected stream
+$where_conditions = ["c.stream_id = ?"];
+$params = [$current_stream_id];
+$param_types = "i";
 
 // No active filters: keep join_programs empty
 $join_programs = '';
@@ -138,7 +147,7 @@ $error_message = $_GET['error'] ?? '';
             <div class="card-header">
                 <h6 class="mb-0">
                     <i class="fas fa-list me-2"></i>
-                    Saved Timetables 
+                    Saved Timetables <?php if ($current_stream_name) { echo 'for ' . htmlspecialchars($current_stream_name); } ?>
                     <?php if ($timetables_result && $timetables_result->num_rows > 0): ?>
                         <span class="badge bg-primary ms-2"><?php echo $timetables_result->num_rows; ?></span>
                     <?php endif; ?>
