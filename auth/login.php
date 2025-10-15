@@ -108,7 +108,7 @@ $csrf = getCSRFToken();
 						<?php endif; ?>
 						<form method="post" novalidate>
 							<input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf); ?>" />
-							<input type="hidden" name="next" value="<?php echo htmlspecialchars($_GET['next'] ?? 'index.php'); ?>" />
+							<input type="hidden" name="next" value="<?php echo htmlspecialchars($_GET['next'] ?? '/index.php'); ?>" />
 							<div class="mb-3">
 								<label class="form-label">Username</label>
 								<input class="form-control" name="username" autocomplete="username" required />
