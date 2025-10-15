@@ -24,9 +24,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 		$password = $_POST['password'] ?? '';
 		$result = admin_login($conn, (string)$username, (string)$password);
 		if ($result['success']) {
-            $base_path = auth_base_path();
-			$next = isset($_GET['next']) ? $_GET['next'] : ($_POST['next'] ?? $base_path . '/index.php');
-			header('Location: ' . $next);
+			$next_url = $_POST['next'] ?? '/index.php';
+			// Ensure the redirect URL is absolute
+			if (strpos($next_url, '/') !== 0) {
+				$next_url = auth_base_path() . '/' . $next_url;
+			}
+			header('Location: ' . $next_url);
 			exit;
 		} else {
 			$error = $result['message'] ?? 'Login failed';
