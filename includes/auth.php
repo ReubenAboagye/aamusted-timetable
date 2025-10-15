@@ -25,9 +25,47 @@ function auth_is_enabled(): bool {
 
 // Compute project base path (e.g., "/timetable") using folder name
 function auth_base_path(): string {
-	// On many production servers, the base path is just '/', not a subfolder.
-    // Return a hardcoded '/' for simplicity and robustness on production.
-    return '/';
+    // Allow explicit override for environments where auto-detection is unreliable
+    $env = getenv('APP_BASE_PATH');
+    if ($env !== false && $env !== '') {
+        $env = str_replace('\\', '/', trim($env));
+        if ($env === '/') return '/';
+        return '/' . trim($env, '/');
+    }
+
+    // Derive base path dynamically so localhost subfolders like "/timetable" work.
+    $scriptName = $_SERVER['SCRIPT_NAME'] ?? '/';
+    $dir = str_replace('\\', '/', dirname($scriptName));
+    $dir = $dir === '.' ? '/' : $dir;
+    $trimmed = trim($dir, '/');
+    if ($trimmed === '') {
+        return '';
+    }
+    // Use the first path segment as the app base (e.g., "/timetable")
+    $first = explode('/', $trimmed, 2)[0];
+    return '/' . $first;
+}
+
+function auth_normalize_path(string $path): string {
+    // Collapse duplicate slashes and ensure leading slash if non-empty
+    $normalized = preg_replace('#/+#', '/', str_replace('\\', '/', $path));
+    if ($normalized === null) {
+        return $path;
+    }
+    // Keep query string and fragment intact
+    $parts = parse_url($normalized);
+    $p = isset($parts['path']) ? $parts['path'] : '';
+    if ($p !== '' && $p[0] !== '/') {
+        $p = '/' . $p;
+    }
+    $q = isset($parts['query']) ? '?' . $parts['query'] : '';
+    $f = isset($parts['fragment']) ? '#' . $parts['fragment'] : '';
+    return ($p === '' ? '/' : $p) . $q . $f;
+}
+
+function auth_is_safe_next(string $next): bool {
+    // Reject absolute URLs with scheme to avoid open redirects
+    return !preg_match('#^([a-z][a-z0-9+.-]*:)?//#i', $next);
 }
 
 // NOTE: All schema creation and seeding must be done via migrations, not at runtime, for security.
@@ -62,7 +100,7 @@ function requireAdmin(): void {
 		$current = $_SERVER['REQUEST_URI'] ?? 'index.php';
         if ($current === '' || $current === '/') { $current = 'index.php'; }
         $target = urlencode($current);
-        $loginUrl = auth_base_path() . '/auth/login.php?next=' . $target;
+        $loginUrl = rtrim(auth_base_path(), '/') . '/auth/login.php?next=' . $target;
 		header('Location: ' . $loginUrl);
         exit;
     }
