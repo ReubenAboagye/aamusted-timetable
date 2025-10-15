@@ -24,12 +24,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 		$password = $_POST['password'] ?? '';
 		$result = admin_login($conn, (string)$username, (string)$password);
 		if ($result['success']) {
-			$next_url = $_POST['next'] ?? '/index.php';
-			// Ensure the redirect URL is absolute
-			if (strpos($next_url, '/') !== 0) {
-				$next_url = auth_base_path() . '/' . $next_url;
+			// Build a full URL for the redirect
+			$scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+			$host = $_SERVER['HTTP_HOST'];
+			$base_path = auth_base_path();
+			
+			// Determine the target page, defaulting to the application root
+			$target_page = $_POST['next'] ?? '/index.php';
+			if (strpos($target_page, '/') !== 0) {
+				$target_page = $base_path . '/' . $target_page;
 			}
-			header('Location: ' . $next_url);
+			
+			// On production, the base path might be '/' or empty, so avoid double slashes
+			if ($base_path === '/' || $base_path === '') {
+				$final_path = $target_page;
+			} else {
+				// For local, combine base path and target
+				$final_path = $base_path . $target_page;
+			}
+
+			// Clean up any double slashes that might have been created
+			$final_path = preg_replace('#/+#', '/', $final_path);
+
+			$redirect_url = $scheme . '://' . $host . $final_path;
+			
+			header('Location: ' . $redirect_url);
 			exit;
 		} else {
 			$error = $result['message'] ?? 'Login failed';
