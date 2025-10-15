@@ -253,7 +253,17 @@ if (!function_exists('getCount')) {
 }
 
 // Compute project base URL for asset links regardless of subdirectories (e.g., /timetable/)
+// Prefer auth_base_path() if available so links work on localhost subfolders
+if (!function_exists('auth_base_path')) {
+  $authPath = __DIR__ . '/auth.php';
+  if (file_exists($authPath)) {
+    include_once $authPath; // defines auth_base_path
+  }
+}
 $__project_base = '/';
+if (function_exists('auth_base_path')) {
+  $__project_base = rtrim(auth_base_path(), '/') . '/';
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
