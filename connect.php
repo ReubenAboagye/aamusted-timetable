@@ -73,6 +73,9 @@ $dbSslEnable = $dbSslEnableFlag || $dbSslCaPath !== '' || $inlineCa !== '';
 // Create connection
 $conn = mysqli_init();
 
+// Temporarily disable mysqli strict exceptions during connect attempts
+$__prevReport = @mysqli_report(MYSQLI_REPORT_OFF);
+
 if ($dbSslEnable) {
     // If CA path is provided, set it; otherwise rely on system CAs
     if (!empty($dbSslCaPath)) {
@@ -101,7 +104,29 @@ $connected = @mysqli_real_connect(
     $clientFlags
 );
 
+// If SSL was enabled and connection failed, retry without SSL for local/dev environments
+if (!$connected && $dbSslEnable) {
+    // Re-init connection without SSL
+    $conn = mysqli_init();
+    $clientFlags = 0;
+    $connected = @mysqli_real_connect(
+        $conn,
+        $dbHost,
+        $dbUser,
+        $dbPass,
+        $dbName,
+        (int)$dbPort,
+        null,
+        $clientFlags
+    );
+}
+
 if (!$connected) {
+    // Restore default reporting (strict) before exiting
+    @mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
     die('Connection failed: ' . mysqli_connect_error());
 }
+
+// Restore strict error reporting after successful connection
+@mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
 ?>

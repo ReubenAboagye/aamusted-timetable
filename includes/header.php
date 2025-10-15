@@ -29,6 +29,30 @@ ini_set('display_errors', '0');
 ini_set('display_startup_errors', '0');
 error_reporting(E_ALL);
 
+// --- Admin-only access guard ---
+// Allow unauthenticated access only for login/logout endpoints and index landing (optional)
+try {
+    $script = basename($_SERVER['PHP_SELF'] ?? '');
+    $allowed = ['login.php', 'logout.php'];
+    $path = $_SERVER['PHP_SELF'] ?? '';
+    $isAuthPath = (strpos($path, '/auth/') !== false) || (substr($path, -14) === '/auth/login.php' || substr($path, -15) === '/auth/logout.php');
+    if (!$isAuthPath && !in_array($script, $allowed, true)) {
+        // Enforce admin for all standard pages
+        $authFile = __DIR__ . '/auth.php';
+        if (file_exists($authFile)) {
+            include_once $authFile;
+            if (function_exists('requireAdmin')) {
+                requireAdmin();
+            }
+        }
+    }
+} catch (Throwable $e) {
+    // Fail closed: redirect to login if anything goes wrong
+    $base = '/' . basename(realpath(__DIR__ . '/..'));
+    header('Location: ' . rtrim($base, '/') . '/auth/login.php');
+    exit;
+}
+
 // --- Prepare embedded logo data URI for error UI (preferred filename aamusted-logo.png)
 $logoDataUri = '';
 $preferredLogo = __DIR__ . '/..//images/aamusted-logo.png';
@@ -228,6 +252,9 @@ if (!function_exists('getCount')) {
         return $row ? intval(array_values($row)[0]) : 0;
     }
 }
+
+// Compute project base URL for asset links regardless of subdirectories (e.g., /timetable/)
+$__project_base = '/' . basename(realpath(__DIR__ . '/..')) . '/';
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -236,9 +263,9 @@ if (!function_exists('getCount')) {
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title><?php echo htmlspecialchars($pageTitle); ?></title>
   <!-- Favicon -->
-  <link rel="icon" type="image/x-icon" href="images/aamustedLog.ico">
-  <link rel="shortcut icon" type="image/x-icon" href="images/aamustedLog.ico">
-  <link rel="apple-touch-icon" href="images/aamustedLog.ico">
+  <link rel="icon" type="image/x-icon" href="<?php echo htmlspecialchars($__project_base); ?>images/aamustedLog.ico">
+  <link rel="shortcut icon" type="image/x-icon" href="<?php echo htmlspecialchars($__project_base); ?>images/aamustedLog.ico">
+  <link rel="apple-touch-icon" href="<?php echo htmlspecialchars($__project_base); ?>images/aamustedLog.ico">
   <!-- Bootstrap CSS -->
   <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.2/css/bootstrap.min.css" rel="stylesheet" />
   <!-- Font Awesome -->
@@ -578,8 +605,8 @@ if (!function_exists('getCount')) {
   <nav class="navbar navbar-dark">
     <div class="container-fluid">
       <button id="sidebarToggle"><i class="fas fa-bars"></i></button>
-      <a class="navbar-brand text-white" href="index.php">
-        <img src="images/aamustedLog.png" alt="AAMUSTED Logo">AAMUSTED Timetable Generator
+      <a class="navbar-brand text-white" href="<?php echo htmlspecialchars($__project_base); ?>index.php">
+        <img src="<?php echo htmlspecialchars($__project_base); ?>images/aamustedLog.png" alt="AAMUSTED Logo">AAMUSTED Timetable Generator
       </a>
       <div class="mx-auto text-white" id="currentStream">
         <i class="fas fa-clock me-2"></i>Current Stream: 
