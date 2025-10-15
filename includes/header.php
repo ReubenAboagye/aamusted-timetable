@@ -794,7 +794,7 @@ $__project_base = '/';
   
   <!-- jQuery -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
-  
+  <script src="js/ajax-utils.js"></script>
   <!-- AJAX Utilities -->
   <!-- CSRF Token Meta Tag -->
   <?php 
