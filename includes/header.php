@@ -48,8 +48,7 @@ try {
     }
 } catch (Throwable $e) {
     // Fail closed: redirect to login if anything goes wrong
-    $base = '/' . basename(realpath(__DIR__ . '/..'));
-    header('Location: ' . rtrim($base, '/') . '/auth/login.php');
+    header('Location: /auth/login.php');
     exit;
 }
 
