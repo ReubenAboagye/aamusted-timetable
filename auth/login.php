@@ -16,7 +16,7 @@ if (auth_is_enabled() && auth_is_admin_logged_in()) {
         $next = '/index.php';
     }
     if ($next === '' || $next === '/' || $next === '/index.php') {
-        $redirect = rtrim($base, '/') . '/';
+        $redirect = '/index.php';
     } elseif ($next[0] === '/') {
         $redirect = $next;
     } else {
@@ -43,7 +43,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $next = '/index.php';
             }
             if ($next === '' || $next === '/' || $next === '/index.php') {
-                $redirect = rtrim($base, '/') . '/';
+                $redirect = '/index.php';
             } elseif ($next[0] === '/') {
                 $redirect = $next;
             } else {
