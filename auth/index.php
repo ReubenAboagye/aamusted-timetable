@@ -2,13 +2,10 @@
 
 //redirect to /timetable/index.php
 <?php
-define('REDIRECT_TARGET', '/timetable/index.php');
-// Set HTTP status code for redirect (302 Found)
-header('Location: /timetable/index.php', true, 302);
+include_once __DIR__ . '/../includes/auth.php';
 
-// Optional: Log the redirect for debugging
-// error_log('Redirecting to /timetable/index.php after authentication');
-
+$base = auth_base_path();
+$target = rtrim($base, '/') . '/';
+header('Location: ' . auth_normalize_path($target), true, 302);
 exit;
-?>
 ?>
