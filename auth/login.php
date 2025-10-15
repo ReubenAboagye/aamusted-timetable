@@ -24,7 +24,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 		$password = $_POST['password'] ?? '';
 		$result = admin_login($conn, (string)$username, (string)$password);
 		if ($result['success']) {
-			$next = isset($_GET['next']) ? $_GET['next'] : ($_POST['next'] ?? '/index.php');
+            $base_path = auth_base_path();
+			$next = isset($_GET['next']) ? $_GET['next'] : ($_POST['next'] ?? $base_path . '/index.php');
 			header('Location: ' . $next);
 			exit;
 		} else {
