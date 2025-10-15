@@ -9,8 +9,20 @@ if (session_status() == PHP_SESSION_NONE) {
 }
 
 if (auth_is_enabled() && auth_is_admin_logged_in()) {
-    $next = isset($_GET['next']) ? $_GET['next'] : '/index.php';
-    header('Location: ' . $next);
+    $next = isset($_GET['next']) ? (string)$_GET['next'] : '/index.php';
+    $base = auth_base_path();
+    $next = urldecode($next);
+    if (!auth_is_safe_next($next)) {
+        $next = '/index.php';
+    }
+    if ($next === '' || $next === '/' || $next === '/index.php') {
+        $redirect = rtrim($base, '/') . '/';
+    } elseif ($next[0] === '/') {
+        $redirect = $next;
+    } else {
+        $redirect = rtrim($base, '/') . '/' . ltrim($next, '/');
+    }
+    header('Location: ' . auth_normalize_path($redirect));
     exit;
 }
 
@@ -22,35 +34,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 	} else {
 		$username = $_POST['username'] ?? '';
 		$password = $_POST['password'] ?? '';
-		$result = admin_login($conn, (string)$username, (string)$password);
-		if ($result['success']) {
-			// Build a full URL for the redirect
-			$scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
-			$host = $_SERVER['HTTP_HOST'];
-			$base_path = auth_base_path();
-			
-			// Determine the target page, defaulting to the application root
-			$target_page = $_POST['next'] ?? '/index.php';
-			if (strpos($target_page, '/') !== 0) {
-				$target_page = $base_path . '/' . $target_page;
-			}
-			
-			// On production, the base path might be '/' or empty, so avoid double slashes
-			if ($base_path === '/' || $base_path === '') {
-				$final_path = $target_page;
-			} else {
-				// For local, combine base path and target
-				$final_path = $base_path . $target_page;
-			}
-
-			// Clean up any double slashes that might have been created
-			$final_path = preg_replace('#/+#', '/', $final_path);
-
-			$redirect_url = $scheme . '://' . $host . $final_path;
-			
-			header('Location: ' . $redirect_url);
-			exit;
-		} else {
+        $result = admin_login($conn, (string)$username, (string)$password);
+        if ($result['success']) {
+            $base = auth_base_path();
+            $next = isset($_POST['next']) ? (string)$_POST['next'] : '/index.php';
+            $next = urldecode($next);
+            if (!auth_is_safe_next($next)) {
+                $next = '/index.php';
+            }
+            if ($next === '' || $next === '/' || $next === '/index.php') {
+                $redirect = rtrim($base, '/') . '/';
+            } elseif ($next[0] === '/') {
+                $redirect = $next;
+            } else {
+                $redirect = rtrim($base, '/') . '/' . ltrim($next, '/');
+            }
+            header('Location: ' . auth_normalize_path($redirect));
+            exit;
+        } else {
 			$error = $result['message'] ?? 'Login failed';
 		}
 	}
